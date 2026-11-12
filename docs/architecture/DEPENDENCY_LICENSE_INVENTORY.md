@@ -1,0 +1,236 @@
+# NEXUS Dependency and License Inventory
+
+| Field | Value |
+|---|---|
+| Document ID | NEXUS-ARCH-DEPS-001 |
+| Version | 1.1.0 |
+| Status | Stage 03 baseline locked; later-stage direct dependencies remain planned |
+| Date | 2026-11-13 |
+| Policy source | [ADR-0009](../decisions/ADR-0009-build-packaging-dependency-policy.md) |
+| Architecture | [ARCHITECTURE.md](../ARCHITECTURE.md) |
+
+## 1. Purpose and scope
+
+This inventory records the direct runtime, test, and build dependencies planned for NEXUS v1, their pinned compatibility versions, licenses, platform use, purpose, and fallback. Stage 03 establishes the build baseline and realizes only the dependencies needed by the empty shells and shared foundation. Product dependencies marked as planned in this document are activated in the stage that implements the owning feature. `Cargo.lock` is committed for the realized Rust graph; Gradle dependency locking and verification metadata are required before the first signed release.
+
+The inventory covers:
+
+- Rust core runtime and test crates.
+- Kotlin, Compose, AndroidX, and JVM runtime libraries.
+- Android and Windows toolchains.
+- Build, packaging, test, and audit tools.
+- Known transitive and platform-specific risks.
+
+It does not list every transitive crate. `cargo-deny`, Gradle license reporting, and the CycloneDX SBOM are authoritative for the full graph at release time.
+
+## 2. License policy summary
+
+Allowed for distributed code: Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, MPL-2.0 (unmodified, with notice), Unicode-3.0, OFL-1.1, and public domain.
+
+Not allowed for linked or distributed code: GPL, AGPL, SSPL, and any license requiring NEXUS source disclosure or network-service obligations. LGPL is not allowed for linked code unless a future ADR approves dynamic linking and relinking rights. JNA is used under its Apache-2.0 option, not LGPL.
+
+Build-only tools may use other licenses because they are not distributed with the application: Git, Inno Setup, MSVC/Windows SDK, Android SDK, and Python. The JDK runtime bundled by `jpackage` is distributed under GPLv2 with the Classpath Exception and requires notices and source availability.
+
+## 3. Toolchain pins
+
+| Tool | Pin | License | Use | Notes |
+|---|---|---|---|---|
+| JDK | Eclipse Temurin 21.0.13+9 | GPL-2.0-with-Classpath-Exception | Compile and bundle Windows runtime | Portable extraction; exact patch verified in Stage 03. |
+| Gradle | 9.9.1 | Apache-2.0 | Build orchestration | Wrapper committed; no system Gradle required. |
+| Kotlin | 2.4.21 | Apache-2.0 | Shared Kotlin and Compose code | Compose compiler aligned; AGP built-in Kotlin. |
+| Compose Multiplatform | 1.12.2 | Apache-2.0 | Shared UI and desktop runtime | Runtime and foundation 1.12.2. |
+| Compose Material3 | 1.9.0 | Apache-2.0 | Material components and theming | Current compatible Material3 line. |
+| Android Gradle Plugin | 9.5.1 | Apache-2.0 | Android build | Paired with Gradle 9.9.1 and compile SDK 37. |
+| Android compile SDK | 37 | Android SDK License | Compile Android app | Platform `android-37.0`; build-tools 36.0.0. |
+| Android target SDK | 37 | Android SDK License | Runtime behavior target | Re-check Google Play requirement at each release. |
+| Android minimum SDK | 28 | Android SDK License | Android 9 baseline | arm64-v8a required; x86_64 for emulator. |
+| Android NDK | 29.0.14206865 | Android SDK License | Cross-compile Rust core | Installed and verified in Stage 03. |
+| Rust | 1.99.1, edition 2024 | MIT OR Apache-2.0 | Core and headless node | `rust-toolchain.toml` pinned. |
+| MSVC | 19.4x (VS 2022 17.14+ or VS 2026 18.x) | Proprietary | Windows Rust and packaging | CI and release only; not present on the Stage 03 local machine. |
+| Windows SDK | 10.0.26100 | Proprietary | Windows native build and signing | CI and release only. |
+| MinGW-w64 GCC | 16.2.0 | GPL-3.0-with-GCC-exception, runtime libs permissive | Local Windows Rust linker fallback | Build-only; not distributed. Used only when MSVC C++ tools are absent. |
+| Inno Setup | 6.4.3 | Inno Setup License (freeware) | Per-user Windows installer | Build-time only; not linked or distributed. |
+| Git | 2.56.0 | GPL-2.0-only | Version control | Build-only; not distributed. |
+| Python | 3.11 | PSF-2.0 | Documentation validators and hygiene scripts | Build-only; not distributed. |
+| Spotless | 8.11.0 | Apache-2.0 | Kotlin formatting | Build-only. |
+| ktlint | 1.8.0 | Apache-2.0 | Kotlin lint rules | Build-only. |
+| detekt | 1.23.8 | Apache-2.0 | Kotlin static analysis | Build-only. |
+| cargo-ndk | 4.1.2 | Apache-2.0 OR MIT | Android Rust build | Planned for the native packaging stage; not active in Stage 03. |
+| cargo-deny | 0.20.2 | MIT OR Apache-2.0 | License, advisory, and source gates | CI and release. |
+| cargo-audit | 0.23.0 | Apache-2.0 OR MIT | Advisory scan | CI and release. |
+| cargo-nextest | 0.9.151 | Apache-2.0 OR MIT | Rust test runner | CI. |
+| CycloneDX tooling | Version pinned before release | Apache-2.0 | SBOM generation | CI and release. |
+
+## 4. Rust direct dependencies
+
+Stage 03 realizes only `tracing` and `tracing-subscriber`. Every other row in
+this table is planned for the stage that implements the owning feature and is
+not resolved by the current workspace. `Cargo.lock` contains 34 packages,
+including the twelve workspace crates and the transitive graph of the two
+realized dependencies.
+
+| Dependency | Pin | License | Platform | Purpose | Fallback |
+|---|---|---|---|---|---|
+| libp2p | 0.57.1 | MIT | Both | Transports, peer identity, DHT, request/response. | Hold 0.56 line; TCP-only configuration. |
+| tokio | 1.54.1 | MIT | Both | Async runtime, timers, synchronization. | Bounded std threads with async bridge. |
+| rusqlite | 0.42.0 | MIT | Both | SQLite access and migrations. | sqlx 0.9 with bundled SQLite. |
+| libsqlite3-sys | 0.40.0 | MIT | Both | Bundled SQLite and FTS5. | System SQLite with verified FTS5. |
+| serde | 1.0.229 | MIT OR Apache-2.0 | Both | Serialization traits and derives. | Manual codec at the boundary. |
+| serde_bytes | 0.11.19 | MIT OR Apache-2.0 | Both | CBOR byte strings for IDs and hashes. | Manual byte-array wrapper. |
+| ciborium | 0.2.2 | Apache-2.0 | Both | CBOR decoding and encoding. | minicbor after license review. |
+| ed25519-dalek | 3.0.0 | BSD-3-Clause | Both | Ed25519 key generation, signing, verification. | 2.x line; wire-compatible signatures. |
+| sha2 | 0.11.1 | MIT OR Apache-2.0 | Both | SHA-256 content, chunk, and manifest hashes. | ring SHA-256. |
+| chacha20poly1305 | 0.11.0 | Apache-2.0 OR MIT | Both | Identity-at-rest and backup encryption. | AES-256-GCM with a new format version. |
+| argon2 | 0.6.0 | MIT OR Apache-2.0 | Both | Backup passphrase KDF. | scrypt with a new format version. |
+| hkdf | 0.13.0 | MIT OR Apache-2.0 | Both | Local-secret key derivation. | HMAC-SHA256 construction. |
+| zeroize | 1.9.1 | Apache-2.0 OR MIT | Both | Secret wiping. | Manual volatile wiping after review. |
+| rand | 0.10.3 | MIT OR Apache-2.0 | Both | OS-backed key and nonce generation. | getrandom directly. |
+| bech32 | 0.12.0 | MIT | Both | `nx1...` identity ID encoding and checksum. | Hex identity ID with a format version. |
+| unicode-normalization | 0.1.26 | (MIT OR Apache-2.0) AND Unicode-3.0 | Both | NFC normalization of user text and passphrases. | No normalization with a format version change. |
+| tracing | 0.1.44 | MIT | Both | Structured, redacted logging. | log crate facade. |
+| tracing-subscriber | 0.3.23 | MIT | Both | Log formatting and filtering. | Minimal custom logger. |
+| tracing-appender | 0.2.5 | MIT | Both | Rotating log files. | Size-based rotation in observability. |
+| thiserror | 2.0.21 | MIT OR Apache-2.0 | Both | Typed internal errors. | Manual error enums. |
+| parking_lot | 0.13.0 | MIT OR Apache-2.0 | Both | Bounded locks and runtime state. | std synchronization. |
+| futures | 0.3.34 | MIT OR Apache-2.0 | Both | Stream and future combinators. | futures-util subset. |
+| bytes | 1.12.1 | MIT | Both | Bounded network and transfer buffers. | Vec with explicit caps. |
+| hex | 0.4.3 | MIT OR Apache-2.0 | Both | ID display, parsing, and test vectors. | Manual hex codec. |
+| fs2 | 0.4.3 | MIT OR Apache-2.0 | Both | Store lock and free-space queries. | Platform-specific file lock and statvfs APIs. |
+| jni | 0.22.4 | MIT OR Apache-2.0 | Android | JNI shim for the C ABI. | JNA on Android. |
+
+### 4.1 Stage 03 locked Rust graph
+
+| Direct crate | Version | License | Purpose |
+|---|---|---|---|
+| `tracing` | 0.1.44 | MIT | Structured event emission. |
+| `tracing-subscriber` | 0.3.23 | MIT | Environment filter and stderr formatter. |
+
+Transitive crates in the committed `Cargo.lock` are limited to the graph of
+those two crates, including `tracing-core`, `tracing-attributes`, `matchers`,
+`regex-automata`, `sharded-slab`, `thread_local`, `nu-ansi-term`, and their small
+supporting dependencies such as `windows-sys`. All are MIT, Apache-2.0, or
+Unicode-3.0 licensed and are checked by `cargo-deny`. No SQLite, networking,
+cryptography, or JNA crate is linked in Stage 03. Run
+`cargo tree -p nexus-observability` for the exact realized graph.
+
+## 5. Kotlin, Compose, and JVM dependencies
+
+Stage 03 resolves Kotlin, Compose runtime/foundation/Material3, coroutines,
+AndroidX activity/core/lifecycle, Kotlin test, JUnit Jupiter, and
+coroutines-test. kotlinx-serialization-cbor, JNA, Turbine, and Compose UI test
+are planned for later stages and are not current build dependencies.
+
+| Dependency | Pin | License | Platform | Purpose | Fallback |
+|---|---|---|---|---|---|
+| Kotlin standard library | 2.4.21 | Apache-2.0 | Both | Kotlin runtime. | Same Kotlin line only. |
+| Compose Multiplatform | 1.12.2 | Apache-2.0 | Both | Shared UI and desktop runtime. | Previous stable Compose line. |
+| Compose Material3 | 1.9.0 | Apache-2.0 | Both | Material components and theming. | Compose Material2 subset. |
+| kotlinx-coroutines-core | 1.11.0 | Apache-2.0 | Both | Structured concurrency, flows, dispatchers. | Java executors and callbacks. |
+| kotlinx-serialization-cbor | 1.13.0 | Apache-2.0 | Both | FFI envelope codec. | Hand-written CBOR codec. |
+| JNA | 5.19.1 | LGPL-2.1-or-later OR Apache-2.0 | Windows | C ABI binding. | JNI on Windows. |
+| androidx.activity:activity-compose | 1.13.0 | Apache-2.0 | Android | Compose activity host and result contracts. | Platform Activity integration without the Compose helper. |
+| androidx.core:core-ktx | 1.19.1 | Apache-2.0 | Android | Android compatibility helpers. | Android framework APIs with API checks. |
+| androidx.lifecycle:lifecycle-runtime-ktx | 2.11.0 | Apache-2.0 | Android | Lifecycle-aware coroutine scopes. | Explicit activity lifecycle observers. |
+| kotlin-test | 2.4.21 | Apache-2.0 | Both | Common assertions. | JUnit assertions directly. |
+| JUnit Jupiter | 6.1.3 | EPL-2.0 | Both | JVM test engine. | JUnit 5.13 line. |
+| kotlinx-coroutines-test | 1.11.0 | Apache-2.0 | Both | Deterministic coroutine tests. | Manual test dispatchers. |
+| Turbine | 1.2.1 | Apache-2.0 | Both | Flow testing. | Manual flow collection. |
+| Compose UI test | Compose-managed | Apache-2.0 | Both | Compose interaction and semantics tests. | Platform instrumentation tests. |
+
+JNA is used under the Apache-2.0 option. The LGPL option is not selected. Test-only EPL code is not distributed in release artifacts.
+
+## 6. Build and packaging components
+
+| Component | License | Distributed? | Obligation |
+|---|---|---|---|
+| Temurin JDK 21 runtime | GPL-2.0-with-Classpath-Exception | Yes, bundled by jpackage | Include license, notices, and source availability information. |
+| Compose Desktop and Skiko | Apache-2.0 | Yes | Include license and notices. |
+| Skia native library | BSD-3-Clause | Yes, via Skiko | Include copyright and license notice. |
+| SQLite | Public domain | Yes, compiled into the core | Attribution in notices; no copyleft obligation. |
+| AndroidX and Jetpack libraries | Apache-2.0 | Yes, in the Android app | Include license and notices. |
+| Kotlin and Compose compilers | Apache-2.0 | No, build-time | No runtime obligation. |
+| Inno Setup | Inno Setup License | No, build-time only | Do not redistribute the installer compiler. |
+| MSVC and Windows SDK | Proprietary | No, build-time only | Build machine license only. |
+| Android SDK and NDK | Android SDK License | No, build-time only | Do not redistribute SDK tools. |
+| Git | GPL-2.0-only | No, build-time only | No distribution obligation. |
+| Python | PSF-2.0 | No, build-time only | No distribution obligation. |
+| JUnit Jupiter | EPL-2.0 | No, test-only | Excluded from release artifacts. |
+
+## 7. Transitive and platform risks
+
+| Risk | Why it matters | Control |
+|---|---|---|
+| QUIC crypto provider | libp2p QUIC may pull `ring` or `aws-lc-rs`; `aws-lc-rs` adds CMake/NASM cross-compilation complexity. | Prefer the `ring` provider; if a platform cannot build it, fall back to TCP + Noise + Yamux. |
+| rustls and quinn | Large transitive surface for TLS and QUIC. | Pin through libp2p, audit with `cargo-deny`, and keep TCP fallback. |
+| Skiko and Skia natives | Platform-specific native binaries and notices. | Validate Windows and Android packaging; include BSD notice. |
+| SQLite/FTS5 build flags | A system SQLite may lack FTS5 or have a different version. | Prefer bundled SQLite; fall back to normalized `LIKE` search if FTS5 is unavailable. |
+| JNA dual license | LGPL option could impose relinking obligations if selected accidentally. | Declare Apache-2.0 in the build and notices; legal review before any change. |
+| JDK redistribution | jpackage bundles a runtime under GPLv2+CE. | Include the JDK license, notices, and source availability; verify at Stage 19. |
+| Unicode data | `unicode-normalization` includes Unicode-3.0 data. | Include Unicode license notice. |
+| Fonts and icons | Material icons, Roboto, or Noto may carry Apache-2.0 or OFL-1.1 terms. | Inventory bundled fonts at Stage 03 and include notices. |
+| AndroidX/Kotlin version skew | Compose and lifecycle artifacts must align with Kotlin 2.4.21. | Use the Compose-managed versions and Gradle dependency locking; build in Stage 03. |
+| Test libraries in release | JUnit, Turbine, and test dispatchers must not ship. | Separate test configurations; inspect release artifacts at Stage 19. |
+| No analytics or crash SDK | A convenience SDK could become a hidden central dependency. | Prohibited by ADR-0009; dependency review rejects it. |
+
+## 8. License obligations and notices
+
+- Apache-2.0: include the license, preserve NOTICE files, and state modifications if any.
+- MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib: include copyright and license text in third-party notices.
+- MPL-2.0: allowed only for unmodified dependencies; include the license and source location. Modifications require review and source publication for the modified files.
+- Unicode-3.0: include the Unicode license and data notice.
+- OFL-1.1: include the font license; do not sell fonts separately; preserve reserved names.
+- Public domain SQLite: attribute in the inventory and notices.
+- GPLv2+CE JDK: include the license, notices, and source availability information for the bundled runtime.
+- EPL-2.0 JUnit: test-only; keep out of release artifacts.
+
+The release pipeline generates a third-party notices file from the SBOM and license reports. The file is packaged with the Windows application and linked from the Android About screen and the project release notes.
+
+## 9. Verification and update process
+
+| Gate | Command or evidence | Stage |
+|---|---|---|
+| Rust license, ban, source, advisory check | `cargo deny check` | 03 and every release |
+| Rust advisory scan | `cargo audit` | 03 and every release |
+| Gradle dependency locking and verification | Enable and commit lockfiles plus verification metadata; clean build with locks | Before first signed release |
+| Gradle license report | Dependency license report reviewed against section 2 | Before first signed release and every dependency change |
+| SBOM | CycloneDX for Android, Windows, and Rust | 19 |
+| Release artifact inspection | No test, debug, or build-only package in the app | 19 |
+| New dependency review | Reason, license, platform support, owner, fallback recorded here | Before merge |
+
+Update cadence:
+
+- Security advisories are triaged immediately; a high-severity vulnerability blocks release unless a documented exception is approved.
+- Patch updates are reviewed monthly.
+- Minor updates are reviewed quarterly with the full test suite.
+- Major updates require an ADR or an amendment to this inventory and a cross-platform build.
+- Lockfiles are committed. Release builds use `--locked` and fail on an unlocked dependency.
+
+## 10. Stage 03 verification status
+
+Stage 03 verifies the build baseline. Feature-specific verification is deferred
+to the stage that activates the dependency, so the project does not claim
+runtime evidence it does not have.
+
+| Task | Stage | Status and evidence |
+|---|---|---|
+| Install and record the exact JDK, Gradle, Rust, NDK, and local linker versions. | 03 | Complete. `docs/progress/STAGE_03.md` records the exact versions. MSVC and the Windows SDK are absent locally; CI and release remain MSVC. |
+| Generate `Cargo.lock`; confirm the realized Rust graph resolves. | 03 | Complete. 34 packages, `cargo tree` and `cargo test --workspace` pass. |
+| Run `cargo deny check` and `cargo audit`; record the transitive license and advisory reports. | 03 | Complete for the realized tracing graph; evidence in `docs/progress/STAGE_03.md`. |
+| Confirm FTS5, WAL, and bundled SQLite compile for Android arm64 and x86_64 and Windows x64. | 05 | Deferred; SQLite is not a Stage 03 dependency. |
+| Confirm QUIC builds with the chosen crypto provider on both platforms, or activate the TCP fallback. | 09 | Deferred; libp2p is not a Stage 03 dependency. |
+| Confirm JNA 5.19.1 loads the Windows DLL and JNI loads the Android `.so`. | 08 | Deferred; the FFI bridge is not wired in Stage 03. |
+| Confirm Android Rust cross-compilation and native library packaging. | 08 | Deferred. The NDK and Android Rust targets are installed, but no `.so` is packaged yet. |
+| Confirm Inno Setup 6.4.3 produces a per-user installer and prompts on uninstall. | 19 | Deferred; Stage 03 produces an app image only. |
+| Confirm the bundled JDK notices and source availability text are packaged. | 19 | Deferred to release packaging. |
+
+## 11. Dependency ownership
+
+| Area | Owner | Responsibility |
+|---|---|---|
+| Rust core | Core maintainers | Runtime crates, licenses, advisories, MSRV, cross-platform builds. |
+| Kotlin and Compose | Application maintainers | UI, coroutines, serialization, JNA, AndroidX alignment. |
+| Android build | Android maintainers | SDK, NDK, AGP, Gradle, signing. |
+| Windows build | Desktop maintainers | JDK, jpackage, Inno Setup, signing, Windows SDK. |
+| Release and SBOM | Release maintainers | Lockfiles, notices, SBOM, artifact inspection. |
+
+A dependency without an owner is not approved for release.

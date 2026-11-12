@@ -1,0 +1,13 @@
+[package]
+name = "nexus-crypto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Cryptographic primitives and canonical encoding"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-types.workspace = true

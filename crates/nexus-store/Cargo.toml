@@ -1,0 +1,13 @@
+[package]
+name = "nexus-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "SQLite metadata and managed blob storage"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-types.workspace = true

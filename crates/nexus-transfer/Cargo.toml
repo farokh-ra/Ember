@@ -1,0 +1,13 @@
+[package]
+name = "nexus-transfer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Streaming import, download, and verification"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-types.workspace = true
