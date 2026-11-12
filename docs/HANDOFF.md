@@ -97,7 +97,8 @@ Result: exit 0.
 - Repository hygiene passed.
 
 The Windows desktop build was also verified with `local.properties` removed and
-`ANDROID_HOME` unset, so the Windows CI job does not require the Android SDK.
+`ANDROID_HOME` / `ANDROID_SDK_ROOT` pointed at an empty directory, so the Windows
+CI job does not require the Android SDK.
 
 ### Validators
 
@@ -120,15 +121,20 @@ removal it passed with exit code 0.
 
 ### Dependency and advisory gates
 
-`cargo deny check` and `cargo audit` were run with the pinned versions. The exact
-exit codes, allowed-license configuration, and any advisory status are recorded
-in `docs/progress/STAGE_03.md` section 8.
+`cargo deny check` exited 0 with `advisories ok, bans ok, licenses ok, sources
+ok`. The policy ignores unpublished workspace crates for licensing and allows
+wildcard requirements only for private path dependencies. `cargo audit` exited 0
+after scanning 34 crate dependencies against 1,490 advisories; it reported no
+vulnerabilities.
 
 ### Clean checkout
 
-After the initial commit, `scripts/verify-clean-checkout.ps1` cloned `HEAD` into
-a temporary directory and ran the full build gate from the clone. The result and
-commit are recorded in `docs/progress/STAGE_03.md` section 8.
+`scripts/verify-clean-checkout.ps1` cloned commit
+`526f83c810157d405233f51661aa70c44c342595` into a temporary directory and ran
+the full build gate there. It returned exit 0: Gradle built the Android debug APK
+and Windows app image, all Kotlin and Rust tests passed, and hygiene passed. The
+clone was removed afterwards. The later documentation-only commit does not change
+build inputs.
 
 ### CI validation
 

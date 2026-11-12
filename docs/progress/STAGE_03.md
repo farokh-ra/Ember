@@ -353,7 +353,22 @@ complete local gate, including Android assembly and Windows packaging:
 .\scripts\verify-clean-checkout.ps1
 ```
 
-Result: PENDING.
+Result: PASS.
+
+The script cloned commit `526f83c810157d405233f51661aa70c44c342595`
+to `C:\Users\Elsa\AppData\Local\Temp\nexus-clean-7393af63`, ran the full gate,
+and returned exit 0. Gradle reported `BUILD SUCCESSFUL in 42s`, with
+`:apps:androidApp:assembleDebug` and `:apps:desktopApp:createDistributable`
+executed. All Kotlin and Rust tests, documentation tests, and the repository
+hygiene scan passed. The clone was removed after the run.
+
+`local.properties` is not committed. The clone's `scripts\dev-env.ps1` recreates
+it from the documented local SDK location, so the build depends only on
+committed source and the pinned toolchain. This proves that a clean checkout can
+be built using the documented steps.
+
+A later documentation-only commit records this result; it does not change build
+inputs.
 
 ## 9. Known limitations
 
