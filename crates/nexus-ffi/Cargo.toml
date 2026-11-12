@@ -1,0 +1,16 @@
+[package]
+name = "nexus-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "C ABI surface for the NEXUS core"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-core.workspace = true

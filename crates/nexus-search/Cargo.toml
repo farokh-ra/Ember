@@ -1,0 +1,13 @@
+[package]
+name = "nexus-search"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Local full-text search and coverage metadata"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-types.workspace = true

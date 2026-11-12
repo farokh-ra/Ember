@@ -1,0 +1,14 @@
+[package]
+name = "nexus-identity"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Identity lifecycle and encrypted key storage"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-crypto.workspace = true
+nexus-types.workspace = true

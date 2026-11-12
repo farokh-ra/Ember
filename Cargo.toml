@@ -1,0 +1,47 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/nexus-types",
+    "crates/nexus-crypto",
+    "crates/nexus-protocol",
+    "crates/nexus-identity",
+    "crates/nexus-store",
+    "crates/nexus-transfer",
+    "crates/nexus-net",
+    "crates/nexus-search",
+    "crates/nexus-core",
+    "crates/nexus-ffi",
+    "crates/nexus-observability",
+    "crates/nexus-testkit",
+]
+default-members = ["crates/nexus-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+
+[workspace.dependencies]
+nexus-core = { path = "crates/nexus-core" }
+nexus-crypto = { path = "crates/nexus-crypto" }
+nexus-identity = { path = "crates/nexus-identity" }
+nexus-net = { path = "crates/nexus-net" }
+nexus-observability = { path = "crates/nexus-observability" }
+nexus-protocol = { path = "crates/nexus-protocol" }
+nexus-search = { path = "crates/nexus-search" }
+nexus-store = { path = "crates/nexus-store" }
+nexus-testkit = { path = "crates/nexus-testkit" }
+nexus-transfer = { path = "crates/nexus-transfer" }
+nexus-types = { path = "crates/nexus-types" }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = [
+    "ansi",
+    "env-filter",
+    "fmt",
+] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = "deny"

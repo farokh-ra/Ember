@@ -1,0 +1,13 @@
+[package]
+name = "nexus-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Signed record schemas and wire validation"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-types.workspace = true

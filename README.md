@@ -1,2 +1,175 @@
-# Ember
-A modern peer-to-peer file-sharing application designed for fast, secure, and decentralized file transfers. Connect directly with other devices and share files without relying on centralized file-hosting services.
+# NEXUS
+
+NEXUS is a local-first file sharing application for Android and Windows. It uses
+a shared Kotlin Multiplatform and Compose Multiplatform interface, a shared Rust
+core, and peer-to-peer networking without a mandatory central account or content
+service.
+
+This repository is at the end of **Stage 03: repository, build system, and
+developer workflow**. The Android and Windows shells, the shared Kotlin modules,
+and all twelve Rust architecture crates build, but the product features start in
+Stage 04 and later. The current screens are intentionally empty foundations.
+
+## Current status
+
+| Area | State |
+|---|---|
+| Repository and module structure | Complete |
+| Gradle Kotlin Multiplatform and Compose build | Complete |
+| Android debug application | Builds |
+| Windows desktop application image | Builds |
+| Rust workspace and library | Builds and tests |
+| Formatting, linting, and static analysis | Enforced locally and in CI |
+| CI workflow and dependency review | Defined |
+| Developer setup and contribution guides | Complete |
+| Product features | Not started; Stage 04 is next |
+
+See [docs/progress/STAGE_03.md](docs/progress/STAGE_03.md) for the exact
+evidence and commands used to verify this stage.
+
+## Repository layout
+
+| Path | Purpose |
+|---|---|
+| `apps/androidApp` | Android shell and platform integration. |
+| `apps/desktopApp` | Windows desktop shell and packaging. |
+| `shared/model` | Serializable DTOs, IDs, events, and redaction helpers. |
+| `shared/core-api` | Platform-independent `NexusCore` contract and fake core. |
+| `shared/core-client` | FFI bridge boundary; native implementation arrives later. |
+| `shared/presentation` | View models, state reduction, and screen models. |
+| `shared/ui` | Shared Compose screens, components, and theme. |
+| `crates/nexus-*` | Twelve Rust crates for types, crypto, protocol, identity, store, transfer, networking, search, core, FFI, observability, and testkit. |
+| `docs` | Architecture, decisions, setup, workflow, logging, and stage records. |
+| `scripts` | Portable setup, build, hygiene, and clean-checkout verification. |
+| `.github` | CI, dependency review, Dependabot, and contribution templates. |
+
+The module and crate responsibilities are defined in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Do not move responsibilities across
+those boundaries without an architecture decision record.
+
+## Quick start on Windows
+
+Prerequisites:
+
+- Windows 10 or 11 x64.
+- PowerShell 5.1 or later.
+- Git 2.56 or later.
+- Android SDK command-line tools with accepted licenses at
+  `%LOCALAPPDATA%\Android\Sdk`.
+
+From a fresh clone:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\scripts\setup-windows.ps1
+. .\scripts\dev-env.ps1
+.\scripts\build.ps1
+```
+
+The execution-policy command allows local scripts for the current PowerShell
+process only; it does not change the machine policy.
+
+`setup-windows.ps1` installs the pinned portable toolchain under
+`%LOCALAPPDATA%\NEXUS\toolchain`. It does not require administrator rights and
+does not modify machine-wide environment variables. `dev-env.ps1` configures the
+current PowerShell process only.
+
+The full guide, including the manual path and troubleshooting, is
+[docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md).
+
+## Direct commands
+
+After `. .\scripts\dev-env.ps1`:
+
+```powershell
+# Formatting, static analysis, Android, desktop, and shared tests
+.\scripts\build.ps1
+
+# Individual Gradle checks
+.\gradlew.bat spotlessCheck detekt
+.\gradlew.bat :apps:androidApp:assembleDebug
+.\gradlew.bat :apps:desktopApp:createDistributable
+.\gradlew.bat :shared:model:jvmTest :shared:core-api:jvmTest `
+    :shared:core-client:jvmTest :shared:presentation:jvmTest
+
+# Rust checks
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo deny check
+cargo audit
+```
+
+Artifacts:
+
+- Android debug APK: `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk`
+- Windows application image: `apps/desktopApp/build/compose/binaries/main/app/NEXUS`
+
+The Windows image is not yet an installer. The Inno Setup per-user installer is
+scheduled for Stage 19, as defined by ADR-0009.
+
+## Pinned toolchain
+
+| Tool | Pin |
+|---|---|
+| JDK | Eclipse Temurin 21.0.13+9 |
+| Gradle | 9.9.1 (wrapper committed) |
+| Kotlin | 2.4.21 |
+| Compose Multiplatform | 1.12.2 |
+| Compose Material3 | 1.9.0 |
+| Android Gradle Plugin | 9.5.1 |
+| Android compile and target SDK | 37 |
+| Android minimum SDK | 28 |
+| Android build tools | 36.0.0 |
+| Android NDK | 29.0.14206865 |
+| Rust | 1.99.1, edition 2024 |
+| Windows Rust host | `x86_64-pc-windows-msvc` in CI and release; `x86_64-pc-windows-gnu` fallback for local non-admin machines without MSVC C++ tools |
+| Inno Setup | 6.4.3 (later packaging stage) |
+
+Version pins live in `gradle/libs.versions.toml`, `rust-toolchain.toml`, and
+`Cargo.toml`. Do not change a pin without updating
+[docs/architecture/DEPENDENCY_LICENSE_INVENTORY.md](docs/architecture/DEPENDENCY_LICENSE_INVENTORY.md).
+
+## Quality gates
+
+Every change must pass:
+
+1. Repository hygiene: no secrets, keystores, signing material, or local paths.
+2. Kotlin formatting with Spotless and ktlint 1.8.0.
+3. Kotlin static analysis with detekt 1.23.8.
+4. Android debug assembly.
+5. Windows desktop application image assembly.
+6. Shared JVM tests.
+7. Rust formatting, Clippy with warnings denied, and workspace tests.
+8. Rust dependency, license, and advisory policy checks.
+9. Conventional Commit pull request titles.
+
+The same commands are used by `.github/workflows/ci.yml`. See
+[docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) for the daily
+workflow and release conventions.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md) | Product scope and v1 requirements. |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System, module, crate, storage, security, and lifecycle design. |
+| [docs/decisions](docs/decisions/README.md) | Accepted architecture decision records. |
+| [docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md) | Repeatable Windows setup and troubleshooting. |
+| [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) | Branches, commits, pull requests, releases, and CI. |
+| [docs/LOGGING_POLICY.md](docs/LOGGING_POLICY.md) | Secret-safe debug logging and redaction rules. |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution rules and definition of done. |
+| [CHANGELOG.md](CHANGELOG.md) | User-visible changes. |
+
+## Security
+
+Do not commit API keys, private keys, keystores, signing certificates,
+recovery phrases, or personal data. Report vulnerabilities privately as
+described in [SECURITY.md](SECURITY.md); do not open a public issue with exploit
+details. Debug logs must be redacted according to
+[docs/LOGGING_POLICY.md](docs/LOGGING_POLICY.md).
+
+## Next stage
+
+Stage 04 establishes the UI foundation and design system. It must not begin
+until Stage 03 is reviewed and approved by the project owner.
