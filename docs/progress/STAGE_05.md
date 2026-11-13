@@ -401,6 +401,35 @@ realized graph contains `syn` 2.0.119 and 3.0.10. Both versions are expected
 from the pinned serde and zerocopy derive graphs and are covered by the license
 check.
 
+### Clean checkout
+
+The Stage 05 test-pass commit
+`3535eee13dc755683f3abfd15db052fca03b379c` was cloned into
+`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-400c95a5`, and the full gate ran
+there:
+
+```text
+.\scripts\verify-clean-checkout.ps1
+```
+
+Result: PASS, exit 0, `All requested local checks passed.`
+
+- Gradle reported `BUILD SUCCESSFUL in 47s`; Android debug assembly and the
+  Windows app image passed.
+- All 65 JVM tests passed. Some Kotlin compile and test tasks were served from
+  the local Gradle build cache with matching source inputs; Android packaging,
+  desktop runtime-image creation, and the Rust workspace compiled freshly.
+- Rust format, Clippy with warnings denied, and all 34 workspace tests passed.
+  `nexus-store` ran its 16 unit and 12 integration tests.
+- `cargo deny` reported all four policies passing, and `cargo audit` scanned the
+  committed 71-package graph with no vulnerability reported.
+- Repository hygiene scanned 186 files.
+
+The temporary clone was removed after the run. This proves that the committed
+Stage 05 tree builds and tests from a clean checkout without untracked local
+files. The follow-up evidence commit changes only documentation and does not
+alter build inputs.
+
 ### Kotlin boundary check
 
 The Kotlin/JVM tests remain at 65 passing. No Kotlin source contains a SQLite,

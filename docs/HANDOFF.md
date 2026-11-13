@@ -145,9 +145,18 @@ Both pass.
 
 ### Clean checkout
 
-`scripts/verify-clean-checkout.ps1` will clone the Stage 05 test-pass commit and
-run the full gate. The exact clone path, commit hash, and result are recorded in
-a follow-up documentation commit, following the Stage 04 pattern.
+`scripts/verify-clean-checkout.ps1` cloned the Stage 05 test-pass commit
+`3535eee13dc755683f3abfd15db052fca03b379c` into
+`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-400c95a5` and ran the full gate.
+It returned exit 0: Gradle reported `BUILD SUCCESSFUL in 47s`, the Android debug
+APK and Windows app image were assembled, all 65 JVM tests passed, Rust format,
+Clippy, and all 34 workspace tests passed, and repository hygiene scanned 186
+files. Some Kotlin tasks were served from the local Gradle build cache with
+matching inputs; Android packaging, desktop runtime-image creation, and the Rust
+workspace compiled freshly. The clone was removed afterwards.
+
+The follow-up evidence commit changes only documentation, so it does not alter
+build inputs.
 
 ## Errors and failed attempts
 
