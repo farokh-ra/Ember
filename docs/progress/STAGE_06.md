@@ -281,11 +281,11 @@ Result: PASS, exit 0, `All requested local checks passed.`
 
 ### Clean checkout
 
-After commit `fa40fcf` (`feat(crypto): add identity and signed records`), the
-clean-checkout gate cloned `HEAD` into:
+After commit `ecbd659` (`fix(identity): harden vault paths and restore
+handling`), the clean-checkout gate cloned `HEAD` into:
 
 ```text
-C:\Users\Elsa\AppData\Local\Temp\nexus-clean-96faa4d6
+C:\Users\Elsa\AppData\Local\Temp\nexus-clean-32257651
 ```
 
 and ran:
@@ -297,7 +297,7 @@ and ran:
 Result: PASS, exit 0, `All requested local checks passed.`
 
 The clone built the Android debug APK and Windows app image, passed all 65 JVM
-tests, passed Rust formatting and Clippy, and passed all 96 Rust tests. Repository
+tests, passed Rust formatting and Clippy, and passed all 98 Rust tests. Repository
 hygiene passed, and the script removed the clone afterwards.
 
 `verify-clean-checkout.ps1` runs `build.ps1` without `-WithDependencyScan`, so
