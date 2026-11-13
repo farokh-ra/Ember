@@ -363,12 +363,12 @@ The 12 integration tests are:
 |---|---|
 | `data_001_schema_and_restart_persistence` | Schema creation, default settings, restart persistence. |
 | `data_003_file_bytes_stay_outside_sqlite_and_import_copies` | Bytes in the managed store, database stays bounded, source untouched. |
-| `data_004_safe_export_names_and_no_silent_overwrite` | Traversal, reserved names, collision-free export. |
+| `data_004_safe_export_names_and_no_silent_overwrite` | Traversal, reserved names, collision-free export, and refusal to export inside the managed store. |
 | `data_005_quota_blocks_new_work_without_damaging_existing_data` | Quota refusal and intact existing content. |
 | `data_005_partial_downloads_count_from_the_first_allocated_byte` | Verified-prefix accounting and completed download. |
 | `duplicate_bytes_are_counted_and_charged_once` | Deduplication and reference counting. |
-| `data_006_reference_counting_and_confirmation_rules` | Last-reference confirmation and bytes retained while shared. |
-| `data_007_metadata_export_and_restore_round_trip` | Archive header, manifest, hash, restore, and data survival. |
+| `data_006_reference_counting_and_confirmation_rules` | Last-reference confirmation, shared-byte retention, partial-cleanup age policy, and cleanup confirmation. |
+| `data_007_metadata_export_and_restore_round_trip` | Archive header, manifest, hash, restore, data survival, and corrupt/incompatible archive rejection. |
 | `reconciliation_removes_orphans_quarantines_unexpected_files_and_truncates_partials` | Crash cleanup, orphan deletion, quarantine, partial truncation. |
 | `reconciliation_adopts_a_download_promoted_before_the_database_commit` | Crash window between promotion and commit. |
 | `missing_blob_is_preserved_as_missing_metadata` | Missing bytes keep metadata and references. |
