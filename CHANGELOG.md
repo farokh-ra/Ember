@@ -53,6 +53,27 @@ All notable changes to NEXUS are recorded here. The format follows
   contrast, navigation, state restoration, identity validation, demo search, and
   status-label mapping.
 - Stage 04 evidence record.
+- Embedded SQLite schema with two transactional migrations, checksummed history,
+  `PRAGMA user_version`, and rollback on failure.
+- Dedicated SQLite writer thread, serialized read pool, WAL, foreign keys, busy
+  timeout, and bounded page cache.
+- Metadata tables for identities, profiles, publications, tombstones, replicas,
+  downloads, peers, settings, content references, and rebuildable FTS5 search.
+- Locked content-addressed managed file store with generated paths, read-only
+  import staging, SHA-256 verification, and atomic promotion.
+- Quota accounting, a 1 GiB free-space reserve, a 4 GiB file limit, and a
+  1-500 GiB product quota range.
+- Reference-counted deletion with explicit confirmation for published originals
+  and active replicas.
+- Resumable download records with verified-prefix checkpoints and partial
+  cleanup.
+- Startup reconciliation for crash-window downloads, orphan blobs, corrupt
+  bytes, missing blobs, and stale partials.
+- Metadata export and restore using a versioned CBOR manifest and a consistent
+  SQLite snapshot.
+- Safe filename and export-path handling for traversal, Windows reserved names,
+  control characters, and collisions.
+- 16 `nexus-store` unit tests and 12 integration tests, plus Stage 05 evidence.
 
 ### Changed
 
@@ -65,6 +86,10 @@ All notable changes to NEXUS are recorded here. The format follows
 - Toolchain pins are recorded for JDK 21.0.13+9, Gradle 9.9.1, Kotlin 2.4.21,
   Compose Multiplatform 1.12.2, Material3 1.9.0, AGP 9.5.1, Rust 1.99.1, and
   Android NDK 29.0.14206865.
+- Rust now owns durable local storage; Kotlin remains a demo UI until the FFI
+  bridge is added in Stage 08.
+- The committed `Cargo.lock` now resolves 71 packages, and the dependency and
+  license inventory is at version 1.2.0.
 
 ### Fixed
 
@@ -72,24 +97,49 @@ All notable changes to NEXUS are recorded here. The format follows
   mouse-only navigation.
 - Compact screen headers no longer duplicate the shell top-bar Back button;
   expanded layouts keep the header Back action.
+- Corrupt blobs stay quarantined instead of being downgraded to missing on the
+  next startup.
+- Orphan partial files are quarantined instead of left in the partials
+  directory.
+- Failed partial downloads remain counted toward quota while their bytes occupy
+  disk.
+- Re-importing identical bytes under a full quota no longer fails before the
+  content can be deduplicated.
+- Managed-store scans no longer follow symlinks or reparse points.
 
 ### Security
 
 - No API keys, private keys, keystores, or signing material are committed.
 - Debug logging is redacted by policy and test coverage.
 - CI scans for forbidden files and common credential patterns.
+- Imported files are opened read-only and the external original is never
+  modified or deleted.
+- Database paths are generated relative paths; user input cannot choose a blob
+  location.
+- Metadata archives contain metadata only, never file bytes or private keys.
+- Corrupt or incompatible metadata archives are rejected before the live
+  database is replaced.
 
 ### Known limitations
 
 - Identity, publication, download, hosting, search, and network data in the UI
-  are visibly labelled mock content. Real features begin in Stage 05 and later.
-- Only the theme choice persists. No real identity or product data is stored.
+  are visibly labelled mock content. The storage foundation is real, but the UI
+  is not connected to it until the FFI bridge.
+- No Ed25519 identity, signing, publishing, transfer, or networking behavior is
+  implemented yet.
+- Android SQLite cross-compilation and runtime storage behavior are not locally
+  exercised because no emulator or device is available and the Kotlin shells do
+  not link `nexus-store` yet.
+- The storage-management screen remains a prototype; the settings and quota
+  model exist in the data layer.
+- FTS5 search is schema-only and is populated in Stage 16.
+- Metadata restore replaces the database but does not restore file bytes; the
+  managed store is reconciled separately.
 - Shared UI copy is English-only; locale-aware formatting and translated
   resources are later-stage work.
 - 200% text scaling, TalkBack, and Narrator journeys have structural support but
   were not exercised on a device or emulator in this environment.
-- Desktop reduced motion is a no-op in Stage 04; Android reads the system
-  animator scale.
+- Desktop reduced motion is a no-op; Android reads the system animator scale.
 - Desktop GUI automation was intermittent during the Stage 04 test pass; keyboard
   navigation and screenshot review were used to complete the journeys.
 - In the identity bio field, Tab inserts a tab character instead of moving

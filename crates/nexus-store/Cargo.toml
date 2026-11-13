@@ -10,4 +10,13 @@ publish = false
 workspace = true
 
 [dependencies]
+ciborium.workspace = true
+fs2.workspace = true
 nexus-types.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true
