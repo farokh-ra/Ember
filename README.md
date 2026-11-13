@@ -5,10 +5,11 @@ a shared Kotlin Multiplatform and Compose Multiplatform interface, a shared Rust
 core, and peer-to-peer networking without a mandatory central account or content
 service.
 
-This repository is at the end of **Stage 03: repository, build system, and
-developer workflow**. The Android and Windows shells, the shared Kotlin modules,
-and all twelve Rust architecture crates build, but the product features start in
-Stage 04 and later. The current screens are intentionally empty foundations.
+This repository is at the end of **Stage 04: UI foundation and design system**.
+The Android and Windows shells now run a shared, clickable UI prototype with
+light and dark themes and eleven screens. All content is visibly labelled mock
+data; real identity, storage, publishing, downloads, hosting, and networking
+begin in Stage 05 and later.
 
 ## Current status
 
@@ -16,15 +17,21 @@ Stage 04 and later. The current screens are intentionally empty foundations.
 |---|---|
 | Repository and module structure | Complete |
 | Gradle Kotlin Multiplatform and Compose build | Complete |
-| Android debug application | Builds |
-| Windows desktop application image | Builds |
+| Android debug application | Builds and runs the shared UI |
+| Windows desktop application image | Builds and runs the shared UI |
 | Rust workspace and library | Builds and tests |
+| Design system and component library | Complete |
+| Responsive navigation shell | Complete; side rail and bottom bar |
+| Clickable screen prototypes | Complete; eleven screens with demo data |
+| Dark, light, and system themes | Complete; selection persists |
+| Loading, empty, offline, error, and retry states | Complete on data-driven screens |
+| Accessibility and keyboard support | Implemented and tested where automatable |
 | Formatting, linting, and static analysis | Enforced locally and in CI |
 | CI workflow and dependency review | Defined |
 | Developer setup and contribution guides | Complete |
-| Product features | Not started; Stage 04 is next |
+| Product features | Mock prototypes only; backend work starts in Stage 05 |
 
-See [docs/progress/STAGE_03.md](docs/progress/STAGE_03.md) for the exact
+See [docs/progress/STAGE_04.md](docs/progress/STAGE_04.md) for the exact
 evidence and commands used to verify this stage.
 
 ## Repository layout
@@ -90,7 +97,7 @@ After `. .\scripts\dev-env.ps1`:
 .\gradlew.bat :apps:androidApp:assembleDebug
 .\gradlew.bat :apps:desktopApp:createDistributable
 .\gradlew.bat :shared:model:jvmTest :shared:core-api:jvmTest `
-    :shared:core-client:jvmTest :shared:presentation:jvmTest
+    :shared:core-client:jvmTest :shared:presentation:jvmTest :shared:ui:jvmTest
 
 # Rust checks
 cargo fmt --all -- --check
@@ -139,7 +146,7 @@ Every change must pass:
 3. Kotlin static analysis with detekt 1.23.8.
 4. Android debug assembly.
 5. Windows desktop application image assembly.
-6. Shared JVM tests.
+6. Shared presentation and UI JVM tests.
 7. Rust formatting, Clippy with warnings denied, and workspace tests.
 8. Rust dependency, license, and advisory policy checks.
 9. Conventional Commit pull request titles.
@@ -171,5 +178,6 @@ details. Debug logs must be redacted according to
 
 ## Next stage
 
-Stage 04 establishes the UI foundation and design system. It must not begin
-until Stage 03 is reviewed and approved by the project owner.
+Stage 05 establishes the SQLite schema, migration strategy, local file store,
+and persistence contracts. It must not begin until Stage 04 is reviewed and
+approved by the project owner.

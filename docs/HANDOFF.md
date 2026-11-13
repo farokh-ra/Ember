@@ -1,189 +1,221 @@
 # NEXUS Project Handoff
 
-**Current stage:** 03 — Repository, build system and developer workflow
+**Current stage:** 04 — UI foundation and design system
 **Stage status:** Complete
 **Last updated:** 2026-11-13
-**Next stage:** 04 — UI foundation and design system (waiting for user permission)
+**Next stage:** 05 — Local database and file-store foundation (waiting for user permission)
 
 ## What was implemented
 
-Stage 03 is complete. The repository now builds and checks every platform shell:
+Stage 04 is complete. The shared UI now provides a tested, clickable prototype
+for every planned screen without pretending that later-stage features work:
 
-- Git repository on `main` with LF line endings, repository hygiene rules, a
-  Conventional Commits template, and issue/pull-request templates.
-- Gradle 9.9.1 Kotlin Multiplatform build with Compose Multiplatform and five
-  shared modules: `model`, `core-api`, `core-client`, `presentation`, and `ui`.
-- A buildable Android application shell (`io.nexus.android`, version `0.1.0`,
-  min SDK 28, target/compile SDK 37) that produces a debug APK.
-- A buildable Windows desktop application shell that produces a Compose
-  distributable app image with a bundled runtime.
-- A Cargo workspace with all twelve architecture crates, a tested native ABI
-  version export, redacted logging, and pinned Rust 1.99.1.
-- Spotless 8.11.0 with ktlint 1.8.0, detekt 1.23.8, Rustfmt, and Clippy with
-  warnings denied.
-- Shared JVM tests and Rust tests, plus proven non-zero failure detection for
-  both test systems.
-- CI workflow for hygiene, commit titles, Rust checks, Android build/tests, and
-  Windows desktop packaging; dependency review; Dependabot.
-- Portable non-admin Windows toolchain setup and a single local build gate.
-- Developer setup, workflow, logging policy, security policy, contributing
-  guide, changelog, and Stage 03 evidence record.
-- Repository hygiene and commit-message validators.
-- `cargo deny` and `cargo audit` dependency and advisory checks.
+- NEXUS light and dark themes, semantic status colors, typography, spacing,
+  shape, and size tokens, plus a custom Compose icon set.
+- A reusable component library for cards, status labels, action rows, buttons,
+  selections, dialogs, state panels, navigation chrome, brand art, avatars, and
+  preview controls.
+- Externalized English copy behind `NexusStrings` / `LocalNexusStrings`, ready
+  for a resource-backed localization provider.
+- Immutable `NexusAppState` with per-section navigation stacks, demo
+  onboarding, preview scenario and network state, and versioned persistence
+  tokens.
+- `NexusAppController` shared by both shells, with theme persistence and
+  snapshot/restore support.
+- A responsive shell: side rail at 840 dp and above, compact top bar plus bottom
+  navigation below it.
+- Eleven clickable screens: welcome, identity setup, Explore, Search, profile,
+  file details, Publish, Downloads, hosted files, Settings, and network status.
+- All five required content states on every data-driven screen, with a visible
+  demo note and an action out of each state.
+- A persistent, non-dismissible preview banner and visibly simulated content and
+  network controls.
+- Accessibility support: WCAG AA contrast tests, 48 dp touch targets, visible
+  focus rings, roles and selection semantics, live-region state panels,
+  text-plus-icon status, Android back, Escape back, and reduced-motion handling
+  on Android.
+- Android integration with saved state, `BackHandler`, edge-to-edge layout, and
+  status-bar icon appearance.
+- Desktop integration with a persisted theme, a 1280x720 initial window, and a
+  720x560 minimum.
+- 65 JVM tests: 44 presentation tests and 21 shared UI tests.
+- Stage 04 evidence in `docs/progress/STAGE_04.md`.
 
-No product features are implemented. The Android and Windows screens are empty
-shells; Stage 04 establishes the UI foundation and design system.
+All identity, publication, download, hosting, search, and network data is mock
+content. No real service, key, or network operation is implemented.
 
 ## Files changed
 
-Build and repository foundation:
+Presentation:
 
-- `.editorconfig`, `.gitattributes`, `.gitignore`, `.gitmessage`
-- `settings.gradle.kts`, `build.gradle.kts`, `gradle.properties`
-- `gradle/libs.versions.toml`, `gradle/wrapper/*`, `gradlew`, `gradlew.bat`
-- `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `rustfmt.toml`, `deny.toml`
+- `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/NexusAppState.kt`
+- `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/PreviewStates.kt`
+- `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/ThemeMode.kt`
+- `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/content/ContentState.kt`
+- `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/demo/DemoCatalog.kt`
+- `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/demo/DemoModels.kt`
+- `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/identity/IdentityDraft.kt`
+- `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/navigation/AppDestination.kt`
+- `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/navigation/NavigationState.kt`
+- `shared/presentation/src/jvmTest/**`
 
-Kotlin modules:
+Shared UI:
 
-- `apps/androidApp/**`
-- `apps/desktopApp/**`
-- `shared/model/**`
-- `shared/core-api/**`
-- `shared/core-client/**`
-- `shared/presentation/**`
-- `shared/ui/**`
+- `shared/ui/src/commonMain/kotlin/io/nexus/ui/NexusApp.kt`
+- `shared/ui/src/commonMain/kotlin/io/nexus/ui/NexusAppController.kt`
+- `shared/ui/src/commonMain/kotlin/io/nexus/ui/components/**`
+- `shared/ui/src/commonMain/kotlin/io/nexus/ui/icons/NexusIcons.kt`
+- `shared/ui/src/commonMain/kotlin/io/nexus/ui/resources/NexusStrings.kt`
+- `shared/ui/src/commonMain/kotlin/io/nexus/ui/screens/**`
+- `shared/ui/src/commonMain/kotlin/io/nexus/ui/theme/**`
+- `shared/ui/src/androidMain/kotlin/io/nexus/ui/theme/**`
+- `shared/ui/src/jvmMain/kotlin/io/nexus/ui/theme/**`
+- `shared/ui/src/jvmTest/**`
 
-Rust crates:
+Shells and build:
 
-- `crates/nexus-types`, `nexus-crypto`, `nexus-protocol`, `nexus-identity`,
-  `nexus-store`, `nexus-transfer`, `nexus-net`, `nexus-search`, `nexus-core`,
-  `nexus-ffi`, `nexus-observability`, `nexus-testkit`
+- `apps/androidApp/build.gradle.kts`
+- `apps/androidApp/src/main/kotlin/io/nexus/android/MainActivity.kt`
+- `apps/desktopApp/src/main/kotlin/io/nexus/desktop/Main.kt`
+- `shared/ui/build.gradle.kts`
+- `.editorconfig`, `config/detekt/detekt.yml`
+- `scripts/build.ps1`, `.github/workflows/ci.yml`
 
-Automation and documentation:
+Documentation:
 
-- `.github/workflows/ci.yml`, `.github/workflows/dependency-review.yml`
-- `.github/dependabot.yml`, `.github/release.yml`
-- `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/**`
-- `scripts/setup-windows.ps1`, `scripts/dev-env.ps1`, `scripts/build.ps1`
-- `scripts/verify-clean-checkout.ps1`
-- `scripts/check_repo_hygiene.py`, `scripts/check_commit_message.py`
-- `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`
-- `docs/DEVELOPER_SETUP.md`, `docs/DEVELOPMENT_WORKFLOW.md`,
-  `docs/LOGGING_POLICY.md`
-- `docs/progress/STAGE_03.md`, `docs/HANDOFF.md`
-- `docs/decisions/ADR-0009-build-packaging-dependency-policy.md` (amended)
-- `docs/architecture/DEPENDENCY_LICENSE_INVENTORY.md` (updated to 1.1.0)
+- `docs/progress/STAGE_04.md`
+- `docs/HANDOFF.md`
+- `README.md`, `CHANGELOG.md`
 
 ## Commands and results
 
 ### Full local gate
 
 ```text
-.\scripts\build.ps1
+.\scripts\build.ps1 -WithDependencyScan
 ```
 
-Result: exit 0.
+Result: exit 0, `All requested local checks passed.`
 
 - Gradle `BUILD SUCCESSFUL`; Spotless and detekt passed.
-- Android debug APK:
-  `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk`,
-  29,635,374 bytes.
-- Windows app image:
-  `apps/desktopApp/build/compose/binaries/main/app/NEXUS`, 130,042,911 bytes;
-  launcher 540,672 bytes.
-- Shared JVM tests: 6 tests, 0 failures.
-- `cargo fmt --all -- --check`, Clippy with `-D warnings`, and
-  `cargo test --workspace` passed (6 unit tests, 0 failures, plus doc tests).
+- Android debug APK and Windows desktop app image built.
+- Presentation and UI JVM tests passed: 65 tests, 0 failures.
+- Rust format, Clippy with warnings denied, and workspace tests passed.
+- `cargo deny check` passed all four policies.
+- `cargo audit` scanned 34 crate dependencies against 1,490 advisories with no
+  vulnerabilities.
 - Repository hygiene passed.
 
-The Windows desktop build was also verified with `local.properties` removed and
-`ANDROID_HOME` / `ANDROID_SDK_ROOT` pointed at an empty directory, so the Windows
-CI job does not require the Android SDK.
+### Test breakdown
+
+| Suite | Tests | Failures |
+|---|---:|---:|
+| `NexusAppStateTest` | 10 | 0 |
+| `NavigationStateTest` | 11 | 0 |
+| `ContentStateTest` | 4 | 0 |
+| `DemoCatalogTest` | 11 | 0 |
+| `IdentityDraftTest` | 7 | 0 |
+| `StartupPresenterTest` | 1 | 0 |
+| `NexusAppControllerTest` | 9 | 0 |
+| `StateLabelsTest` | 5 | 0 |
+| `ThemeContrastTest` | 7 | 0 |
+
+Presentation subtotal: 44. Shared UI subtotal: 21.
+
+### Artifacts
+
+- Android debug APK:
+  `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk`,
+  30,661,291 bytes.
+- Windows app image:
+  `apps/desktopApp/build/compose/binaries/main/app/NEXUS`, 130,621,045 bytes
+  across 200 files.
+- Windows launcher: `.../app/NEXUS/NEXUS.exe`, 540,672 bytes.
+
+### Runtime smoke test
+
+The Windows app image launched and rendered the welcome screen in dark theme
+with the NEXUS wordmark, preview label, persistent network-inactive banner, demo
+badges, and both onboarding actions. It stayed running and closed normally
+through the window close request.
+
+No Android emulator or physical device is installed, so the APK was not launched
+at runtime.
 
 ### Validators
 
 ```text
 python scripts/check_repo_hygiene.py
-python scripts/check_commit_message.py "feat(build): scaffold nexus repository"
-python scripts/validate_stage01_docs.py
-python scripts/validate_stage02_docs.py
+python scripts/check_commit_message.py "feat(ui): build design system and screen prototypes"
 ```
 
-Result: all pass. Stage 01 and Stage 02 validators were re-run after the Stage 03
-documentation additions and still report `PASS`.
-
-### Failure detection
-
-A temporary Kotlin test asserted `false`: `:shared:model:jvmTest` failed with
-exit code 1. After removal it passed with exit code 0. A temporary Rust test
-asserted `false`: `cargo test -p nexus-types` failed with exit code 101. After
-removal it passed with exit code 0.
-
-### Dependency and advisory gates
-
-`cargo deny check` exited 0 with `advisories ok, bans ok, licenses ok, sources
-ok`. The policy ignores unpublished workspace crates for licensing and allows
-wildcard requirements only for private path dependencies. `cargo audit` exited 0
-after scanning 34 crate dependencies against 1,490 advisories; it reported no
-vulnerabilities.
+Both pass.
 
 ### Clean checkout
 
-`scripts/verify-clean-checkout.ps1` cloned commit
-`526f83c810157d405233f51661aa70c44c342595` into a temporary directory and ran
-the full build gate there. It returned exit 0: Gradle built the Android debug APK
-and Windows app image, all Kotlin and Rust tests passed, and hygiene passed. The
-clone was removed afterwards. The later documentation-only commit does not change
-build inputs.
+After committing Stage 04, run:
 
-### CI validation
+```powershell
+.\scripts\verify-clean-checkout.ps1
+```
 
-All `.github/**/*.yml` files parse with PyYAML 6.0.3. GitHub Actions could not be
-executed remotely because this environment has no GitHub remote and no Docker
-runner. The workflow runs the same commands that pass locally. This limitation
-is recorded in the Stage 03 evidence file.
+The result is recorded in the follow-up evidence commit. The follow-up changes
+only documentation, so it does not alter build inputs.
 
 ## Errors and failed attempts
 
-1. The machine had no JDK 21, Gradle, Rust, NDK, MSVC C++ workload, or Windows
-   SDK. A portable, non-admin toolchain was installed under
-   `%LOCALAPPDATA%\NEXUS\toolchain`.
-2. Android CLI syntax changed: the working command is
-   `android.exe sdk install "ndk/29.0.14206865"`; the older
-   `sdkmanager "ndk;..."` path is kept only as a fallback.
-3. AGP 9 cannot combine the KMP plugin and `com.android.application` in one
-   subproject. Android application code lives in `apps/androidApp`; shared
-   modules use `com.android.kotlin.multiplatform.library`.
-4. Gradle configuration cache cannot serialize Spotless 8.11.0's line-ending
-   policy under Gradle 9.9.1, so it is disabled and documented.
-5. PowerShell 5.1 renders native stderr as `NativeCommandError`. The scripts now
-   set `$ErrorActionPreference = "Continue"`, merge native stderr into the
-   output stream, and fail on non-zero exit codes only.
-6. The Compose `NexusApp` name trips ktlint's generic function-naming rule. A
-   narrow suppression is used; detekt ignores composables for the same rule.
-7. ktlint reordered `import` statements; Spotless normalizes them, so commits
-   should run `spotlessApply` before pushing.
+1. The Android shell could not resolve `isSystemInDarkTheme` because
+   `apps/androidApp` did not declare Compose foundation directly. Added
+   `implementation(libs.compose.foundation)`.
+2. `StateLabelsTest` failed because offline and degraded shared the same warning
+   icon. Offline now uses `NexusIcons.Error`; all network states have distinct
+   icons and labels.
+3. ktlint rejected `@Composable` function names with uppercase first letters and
+   one long demo-fixture line. The `.editorconfig` now ignores function naming
+   for `@Composable`, and network snapshots use shared bootstrap-path builders.
+4. detekt initially reported Compose length and parameter counts, magic numbers
+   in palette/icon/brand art, a misplaced test package, and two early-return
+   functions. The detekt policy now excludes Compose functions from complexity
+   and naming rules, palette/icon/brand files carry a narrow file-level
+   `MagicNumber` suppression, the test package was corrected, and the
+   early-return functions have narrow `ReturnCount` suppressions.
+5. `RoundedCornerShape(50)` tripped the magic-number rule in chip/status
+   components. Both now use `CircleShape`.
+6. Desktop window dimensions and the `Dimension(720, 560)` minimum tripped the
+   magic-number rule. They are now named constants.
+7. The global preview bar and network selector are prototype controls, not
+   product settings. They remain visibly labelled as simulated to avoid implying
+   that networking works.
 
 ## Decisions and unresolved questions
 
-- All architecture decisions remain in `docs/decisions/`. ADR-0009 now records
-  exact Stage 03 pins and the MinGW fallback.
-- Local Rust builds use `x86_64-pc-windows-gnu` with MinGW-w64 GCC 16.2.0
-  because MSVC C++ tools and the Windows SDK are unavailable. CI and release
-  remain `x86_64-pc-windows-msvc`; the C ABI is unchanged.
-- Gradle dependency locking and verification metadata are deferred until before
-  the first signed release, as recorded in ADR-0009 and the dependency
-  inventory.
-- Common Kotlin tests are deferred; Stage 03 tests live in `src/jvmTest`.
+- Stage 04 was explicitly approved by the project owner.
+- `shared/ui` owns Compose screens, components, theme, and accessibility;
+  `shared/presentation` owns navigation, state, validation, fixtures, and tests.
+- Theme persistence uses a shared `ThemeStore` boundary implemented with
+  Android `SharedPreferences` and desktop `java.util.prefs.Preferences`.
+- Icons are custom Compose vectors in `NexusIcons`; no icon dependency is added.
+- Strings are centralized in `NexusStrings` and `EnglishNexusStrings` for a
+  future resource-backed provider. Locale-aware formatting remains later-stage
+  work.
+- The responsive breakpoint is 840 dp: side rail at or above, bottom bar below.
+- Navigation state is owned by `NexusAppController` so Android can restore it and
+  install `BackHandler`; desktop uses `remember`.
+- Persistence tokens are versioned; invalid tokens fall back to a safe
+  first-launch state.
+- Compose declarative functions are exempt from detekt complexity and naming
+  rules, and palette/icon/brand art files use a narrow magic-number suppression.
+- No real identity, publication, download, hosting, or network action is
+  implemented. Publish and later-stage actions remain disabled or simulated.
+- Desktop reduced motion is a no-op in Stage 04; Android reads the system
+  animator scale.
 - The Windows app image is not an installer. Inno Setup packaging is Stage 19.
-- Android Rust cross-compilation is not wired yet; the NDK and Rust targets are
-  installed and ready for the native packaging stage.
-- Remote GitHub Actions execution is verified when the repository is pushed to
-  its hosting remote.
+- Remote GitHub Actions execution and device-level TalkBack/Narrator/200%
+  scaling validation remain environment limitations.
 
 ## Exact next action
 
-1. Review the Stage 03 evidence in `docs/progress/STAGE_03.md`.
-2. Give explicit approval to start Stage 04.
-3. Stage 04 establishes the UI foundation and design system. Do not begin it
-   before that approval.
+1. Review the Stage 04 evidence in `docs/progress/STAGE_04.md`.
+2. Give explicit approval to start Stage 05.
+3. Stage 05 defines the SQLite schema, migrations, local file store, and
+   persistence contracts. Do not begin it before that approval.

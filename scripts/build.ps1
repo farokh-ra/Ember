@@ -54,7 +54,8 @@ try {
                 :shared:model:jvmTest `
                 :shared:core-api:jvmTest `
                 :shared:core-client:jvmTest `
-                :shared:presentation:jvmTest 2>&1
+                :shared:presentation:jvmTest `
+                :shared:ui:jvmTest 2>&1
         }
     }
 
