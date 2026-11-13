@@ -55,8 +55,9 @@ Stage 05 follows
 
 - Rust is the only reader and writer of the SQLite database and the managed
   store.
-- Kotlin supplies the app-private root and never opens, queries, copies, or
-  scans these files.
+- The app-private root is supplied by the platform shell; in Stage 05 the Rust
+  API takes it as an absolute path argument.
+- Kotlin never opens, queries, copies, or scans these files.
 - The public API lives in `nexus_store::Store`; the database and blob modules
   are private implementation details.
 - The database and managed store live under the same app-private root so a
@@ -64,11 +65,11 @@ Stage 05 follows
 - File bytes never become SQLite `BLOB` values. Only metadata, signed record
   bytes, hashes, paths, and counters are stored in the database.
 
-The Kotlin storage-access check is part of the final evidence:
+The Kotlin storage-access check is part of the final evidence. The scan
+searched all `*.kt`, `*.kts`, and `*.java` files for these patterns:
 
 ```text
-grep -E "(sqlite|SQLite|jdbc|JDBC|nexus\.sqlite3|blobs/|partials/|ManagedStore)" \
-  --include=*.kt --include=*.kts --include=*.java .
+sqlite, SQLite, jdbc, JDBC, nexus.sqlite3, blobs/, partials/, ManagedStore
 ```
 
 Result: no matches. The Kotlin shells contain no database or managed-store
@@ -139,10 +140,11 @@ confirms the prior schema remains usable.
 | `peers` | Redacted peer observation and last-seen data. |
 | `search_index` | FTS5 derived index; rebuildable and not authoritative. |
 
-All tables are `STRICT` and use `CHECK` constraints for lengths, states, and
-non-negative counters. Foreign keys are enabled on every connection. Tables
-that hold signed records preserve the exact received bytes; the parsed columns
-exist only for queries and display.
+All ordinary tables are `STRICT` and use `CHECK` constraints for lengths,
+states, and non-negative counters; the FTS5 `search_index` virtual table is the
+exception. Foreign keys are enabled on every connection. Tables that hold signed
+records preserve the exact received bytes; the parsed columns exist only for
+queries and display.
 
 The schema stores no private keys, passphrases, signing seeds, real user data,
 network observations, or file bytes.
@@ -180,8 +182,10 @@ An import follows this order:
 8. Commit the content row and reference in one database transaction.
 
 The source file is opened read-only. It is never renamed, modified, or
-deleted. If promotion or the database commit fails, the staged file is removed
-and the source remains untouched.
+deleted. If staging or the pre-promotion check fails, the staged file is
+removed and the source remains untouched. If promotion succeeds but the
+database commit fails, the promoted blob is left unreferenced and startup
+reconciliation deletes it; the source is still untouched.
 
 `safe_display_name` strips directory components and traversal, replaces
 forbidden characters, handles Windows reserved names (`CON`, `PRN`, `AUX`,
@@ -256,8 +260,8 @@ content row and its blob only when no reference remains.
 
 ### Reconciliation
 
-`Store::open` runs reconciliation before returning. A non-mutating `reconcile`
-can be called explicitly. The report records:
+`Store::open` runs reconciliation before returning. `Store::reconcile` can be
+called explicitly later. The report records:
 
 - verified blobs;
 - adopted completed downloads promoted before the database commit;
@@ -280,8 +284,8 @@ Rules:
   metadata.
 - A generated blob with no content row is deleted. If it matches a verified
   completed download, it is adopted instead of deleted.
-- An unexpected blob path, manifest, partial, symlink, or reparse point is moved
-  to `quarantine/` rather than followed or silently used.
+- An unexpected blob path, invalid manifest name, bad partial, symlink, or
+  reparse point is moved to `quarantine/` rather than followed or silently used.
 - Partial files are truncated to the verified prefix recorded in the database.
 - `tmp/` is cleared.
 - Scans never recurse through a symlink and never follow one during cleanup.
