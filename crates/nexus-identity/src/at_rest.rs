@@ -92,10 +92,7 @@ pub fn decrypt_identity(file: &[u8], lek: &LocalEncryptionKey) -> Result<Identit
     let plaintext =
         decrypt(&key, &nonce, header, &file[AT_REST_HEADER_LENGTH..]).map_err(|_| IdentityError::DecryptionFailed)?;
     let payload = decode_payload(&plaintext)?;
-    Ok(Identity::from_seed(
-        *payload.keypair.secret_seed(),
-        payload.created_at_ms,
-    ))
+    Ok(Identity::from_keypair(payload.keypair, payload.created_at_ms))
 }
 
 #[cfg(test)]

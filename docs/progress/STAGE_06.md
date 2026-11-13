@@ -43,11 +43,11 @@ stages.
 | Identity lifecycle and notices | `crates/nexus-identity/src/identity.rs` | Complete; redacted `Debug`, key-loss statements. |
 | Encrypted identity at rest | `crates/nexus-identity/src/at_rest.rs` | Complete; authenticated 68-byte header. |
 | Encrypted backup and restore | `crates/nexus-identity/src/backup.rs` | Complete; versioned Argon2id header and generic failures. |
-| Atomic vault storage | `crates/nexus-identity/src/vault.rs` | Complete; restrictive writes and symlink rejection. |
+| Atomic vault storage | `crates/nexus-identity/src/vault.rs` | Complete; restrictive writes and symlink/reparse-point rejection. |
 | Signed envelope | `crates/nexus-protocol/src/envelope.rs` | Complete; exact raw bytes preserved. |
 | Profile v1 | `crates/nexus-protocol/src/profile.rs` | Complete; bounds, NFC, unknown minor fields. |
 | Publication v1 | `crates/nexus-protocol/src/publication.rs` | Complete; category enum, publication ID. |
-| Identity acceptance tests | `crates/nexus-identity/tests/identity.rs` | Complete; 11 tests. |
+| Identity acceptance tests | `crates/nexus-identity/tests/identity.rs` | Complete; 12 tests. |
 | Signed-record acceptance tests | `crates/nexus-protocol/tests/records.rs` | Complete; 9 tests. |
 | Exact format specification | [SIGNED_RECORD_FORMATS.md](../architecture/SIGNED_RECORD_FORMATS.md) | Complete. |
 | Evidence record | This document | Complete. |
@@ -144,8 +144,10 @@ version, or unsupported KDF fails closed. A valid file is 168 bytes.
 Writes are atomic: a new file is created, flushed, and renamed into place, and
 temporary files are removed on failure. Unix uses `0600` for the file and `0700`
 for the secrets directory. On Windows the file inherits the app-private parent
-directory ACL. Symlinks are rejected. No plaintext seed is written to a
-temporary file, SQLite, a log, a crash report, or a metadata export.
+directory ACL. Symbolic links, junctions, and other reparse points on the root,
+the `secrets` directory, or the identity file are rejected before any read or
+write. No plaintext seed is written to a temporary file, SQLite, a log, a crash
+report, or a metadata export.
 
 ## 7. Backup and restore
 
@@ -164,8 +166,10 @@ payload used at rest.
 
 - New passphrases are NFC-normalized, limited to 1,024 UTF-8 bytes, and require at
   least 12 Unicode scalar values.
-- A wrong passphrase, changed header, changed ciphertext, truncation, or invalid
-  identity metadata returns one generic `BackupUnreadable` error.
+- A wrong passphrase, changed authenticated header, truncated ciphertext, or
+  changed ciphertext returns one generic `BackupUnreadable` error. Structural
+  damage and unsupported format version, KDF, or Argon2 parameters are rejected
+  before key derivation as `MalformedBackup` or `UnsupportedBackupVersion`.
 - Restore validates and decrypts the whole file before replacing the live
   identity. A failed restore leaves the current identity untouched.
 - The backup contains no device peer key, no SQLite database, and no managed
@@ -209,25 +213,26 @@ tests assert:
 
 ### Rust tests
 
-`cargo test --workspace` passed with 96 tests, 0 failures.
+`cargo test --workspace` passed with 98 tests, 0 failures.
 
 | Suite | Tests |
 |---|---:|
 | `nexus-crypto` unit tests | 24 |
-| `nexus-identity` unit tests | 8 |
-| `nexus-identity` integration tests | 11 |
+| `nexus-identity` unit tests | 9 |
+| `nexus-identity` integration tests | 12 |
 | `nexus-protocol` unit tests | 10 |
 | `nexus-protocol` integration tests | 9 |
 | `nexus-store` unit and integration tests | 28 |
 | Other workspace unit tests | 6 |
-| **Total** | **96** |
+| **Total** | **98** |
 
-The 11 identity integration tests are:
+The 12 identity integration tests are:
 
 | Test | Covers |
 |---|---|
 | `id_001_local_identity_has_a_stable_bech32m_id` | Fixed ID vector, embedded public key, no registry. |
 | `id_001_identity_survives_a_restart_and_never_needs_a_server` | Vault create/load, stable ID, no silent replacement. |
+| `symlinked_secrets_directory_is_rejected_before_read_or_write` | A linked `secrets` directory is rejected for exists, load, and save (where the host permits link creation). |
 | `id_003_plaintext_key_material_is_absent_from_storage_and_debug_output` | Encrypted file, no seed or public key in ciphertext, redacted `Debug`, no temp files. |
 | `id_004_encrypted_backup_restores_the_same_identity_and_signatures` | Backup round trip, restart signature, wrong-passphrase error. |
 | `id_004_vault_backup_round_trips_with_v1_defaults` | Vault backup and restore with the 64 MiB defaults. |
@@ -266,7 +271,7 @@ Result: PASS, exit 0, `All requested local checks passed.`
 - All 65 JVM tests passed.
 - `cargo fmt --all -- --check` passed.
 - `cargo clippy --workspace --all-targets -- -D warnings` passed.
-- `cargo test --workspace` passed with 96 Rust tests.
+- `cargo test --workspace` passed with 98 Rust tests.
 - `cargo deny check` reported `advisories ok, bans ok, licenses ok, sources ok`
   for the 109 locked packages.
 - `cargo audit` scanned 109 dependencies against 1,509 advisories and reported
@@ -326,8 +331,24 @@ demo data and do not claim that Stage 06 identity behavior is connected.
   builds a real map with key 2 before key 1 and is rejected by canonical parsing.
 - The backup and at-rest vector tests initially used wrong byte offsets. They now
   compare the exact 44-byte backup prefix and 68-byte at-rest header.
-- Unused direct dependencies (`getrandom`, `zeroize`, `hex`, and `nexus-types` in
-  the wrong crates) were removed so the inventory reflects the realized graph.
+- Unused direct dependencies were removed from crates that did not use them;
+  `getrandom` and `hex` remain direct dependencies of `nexus-crypto`, and
+  `zeroize` is retained where secret material is held.
+- A recheck found that `IdentityVault::load` and `exists` validated only the
+  final `identity.enc` component, so a symlinked `secrets` directory could
+  redirect reads. The root and `secrets` directory are now checked with symlink
+  metadata, Windows reparse attributes, and directory checks before reads or
+  writes. Regression tests cover a linked `secrets` directory and a
+  non-directory `secrets` path.
+- Restore paths copied the seed out of the decoded payload. They now move the
+  validated `KeyPair` into the identity, avoiding another secret copy.
+- `IdentityId::from_public_key` previously fell back to the invalid sentinel
+  `nx1invalid` if Bech32m encoding failed. Encoding is infallible for the fixed
+  HRP and 34-byte payload, and the code now asserts that invariant.
+- Documentation overstated that every changed backup header returned the generic
+  error. Version, KDF, Argon2-version, and parameter failures are now documented
+  as pre-derivation structural errors; authenticated-data failures remain
+  generic.
 
 ## 12. Limitations and deferred work
 

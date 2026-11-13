@@ -47,16 +47,21 @@ impl IdentityVault {
 
     /// Reports whether an encrypted identity file exists.
     pub fn exists(&self) -> Result<bool, IdentityError> {
-        match fs::symlink_metadata(self.identity_path()) {
-            Ok(metadata) => {
-                if metadata.file_type().is_symlink() {
-                    return Err(IdentityError::SymlinkRejected);
-                }
-                Ok(metadata.is_file())
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(error.into()),
+        let Some(secrets) = self.existing_secrets_directory()? else {
+            return Ok(false);
+        };
+        let metadata = match fs::symlink_metadata(secrets.join(IDENTITY_FILE_NAME)) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        if is_link_or_reparse(&metadata) {
+            return Err(IdentityError::SymlinkRejected);
         }
+        if !metadata.is_file() {
+            return Err(IdentityError::InvalidIdentityFile);
+        }
+        Ok(true)
     }
 
     /// Creates and saves a new identity.
@@ -74,7 +79,10 @@ impl IdentityVault {
 
     /// Loads and decrypts the identity file.
     pub fn load(&self, lek: &LocalEncryptionKey) -> Result<Identity, IdentityError> {
-        let path = self.identity_path();
+        let Some(secrets) = self.existing_secrets_directory()? else {
+            return Err(IdentityError::NotFound);
+        };
+        let path = secrets.join(IDENTITY_FILE_NAME);
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -82,7 +90,7 @@ impl IdentityVault {
             }
             Err(error) => return Err(error.into()),
         };
-        if metadata.file_type().is_symlink() {
+        if is_link_or_reparse(&metadata) {
             return Err(IdentityError::SymlinkRejected);
         }
         if !metadata.is_file() || metadata.len() > AT_REST_MAX_FILE_LENGTH as u64 {
@@ -97,7 +105,7 @@ impl IdentityVault {
         let secrets = self.prepare_secrets_directory()?;
         let path = secrets.join(IDENTITY_FILE_NAME);
         match fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+            Ok(metadata) if is_link_or_reparse(&metadata) => {
                 return Err(IdentityError::SymlinkRejected);
             }
             Ok(metadata) if !metadata.is_file() => {
@@ -132,39 +140,37 @@ impl IdentityVault {
         Ok(identity)
     }
 
+    fn existing_secrets_directory(&self) -> Result<Option<PathBuf>, IdentityError> {
+        if !self.root.is_absolute() {
+            return Err(IdentityError::UnsafePath);
+        }
+        if !checked_directory(&self.root)? {
+            return Ok(None);
+        }
+        let secrets = self.root.join(SECRETS_DIRECTORY);
+        if !checked_directory(&secrets)? {
+            return Ok(None);
+        }
+        Ok(Some(secrets))
+    }
+
     fn prepare_secrets_directory(&self) -> Result<PathBuf, IdentityError> {
         if !self.root.is_absolute() {
             return Err(IdentityError::UnsafePath);
         }
-        match fs::symlink_metadata(&self.root) {
-            Ok(metadata) => {
-                if metadata.file_type().is_symlink() {
-                    return Err(IdentityError::SymlinkRejected);
-                }
-                if !metadata.is_dir() {
-                    return Err(IdentityError::InvalidIdentityFile);
-                }
+        if !checked_directory(&self.root)? {
+            fs::create_dir_all(&self.root)?;
+            if !checked_directory(&self.root)? {
+                return Err(IdentityError::UnsafePath);
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                fs::create_dir_all(&self.root)?;
-            }
-            Err(error) => return Err(error.into()),
         }
 
         let secrets = self.root.join(SECRETS_DIRECTORY);
-        match fs::symlink_metadata(&secrets) {
-            Ok(metadata) => {
-                if metadata.file_type().is_symlink() {
-                    return Err(IdentityError::SymlinkRejected);
-                }
-                if !metadata.is_dir() {
-                    return Err(IdentityError::InvalidIdentityFile);
-                }
+        if !checked_directory(&secrets)? {
+            fs::create_dir_all(&secrets)?;
+            if !checked_directory(&secrets)? {
+                return Err(IdentityError::UnsafePath);
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                fs::create_dir_all(&secrets)?;
-            }
-            Err(error) => return Err(error.into()),
         }
 
         #[cfg(unix)]
@@ -174,6 +180,40 @@ impl IdentityVault {
         }
 
         Ok(secrets)
+    }
+}
+
+fn is_link_or_reparse(metadata: &fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Returns `true` for an existing directory and `false` when it is absent.
+///
+/// A link, reparse point, or non-directory is rejected instead of followed.
+fn checked_directory(path: &Path) -> Result<bool, IdentityError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if is_link_or_reparse(&metadata) {
+                return Err(IdentityError::SymlinkRejected);
+            }
+            if !metadata.is_dir() {
+                return Err(IdentityError::UnsafePath);
+            }
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -217,6 +257,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{IDENTITY_FILE_NAME, IdentityVault};
+    use crate::error::IdentityError;
     use crate::local_key::LocalEncryptionKey;
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -251,5 +292,15 @@ mod tests {
         assert_eq!(loaded.identity_id(), id);
         assert!(root.0.join("secrets").join(IDENTITY_FILE_NAME).is_file());
         assert!(restarted.create(&lek).is_err());
+    }
+
+    #[test]
+    fn non_directory_secrets_path_is_rejected() {
+        let root = TempRoot::new();
+        fs::write(root.0.join("secrets"), b"not a directory").expect("write placeholder");
+        let vault = IdentityVault::new(&root.0).expect("vault");
+        let lek = LocalEncryptionKey::new([22_u8; 32]);
+        assert!(matches!(vault.exists(), Err(IdentityError::UnsafePath)));
+        assert!(matches!(vault.load(&lek), Err(IdentityError::UnsafePath)));
     }
 }

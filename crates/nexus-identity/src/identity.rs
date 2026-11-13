@@ -49,6 +49,15 @@ impl Identity {
         }
     }
 
+    /// Recreates an identity from an already validated keypair.
+    ///
+    /// Decrypt paths use this to move the keypair out of a decoded payload
+    /// instead of copying its secret seed one more time.
+    #[must_use]
+    pub(crate) const fn from_keypair(keypair: KeyPair, created_at_ms: u64) -> Self {
+        Self { keypair, created_at_ms }
+    }
+
     /// Returns the public key.
     #[must_use]
     pub fn public_key(&self) -> PublicKey {
