@@ -5,13 +5,14 @@ a shared Kotlin Multiplatform and Compose Multiplatform interface, a shared Rust
 core, and peer-to-peer networking without a mandatory central account or content
 service.
 
-This repository is at the end of **Stage 05: Local database and file-store
-foundation**. The Android and Windows shells still run the shared, clickable UI
+This repository is at the end of **Stage 06: Identity and cryptographic
+foundations**. The Android and Windows shells still run the shared, clickable UI
 prototype with visibly labelled mock data. Underneath it, the Rust core now owns
 an embedded SQLite schema, migrations, a content-addressed managed file store,
-quota accounting, reference-counted cleanup, startup reconciliation, and
-metadata export/restore. Identity, publishing, downloads, hosting, and
-networking begin in Stage 06 and later.
+quota accounting, reference-counted cleanup, startup reconciliation, metadata
+export/restore, local Ed25519 identities, stable `nx1...` identity IDs, canonical
+signed records, encrypted identity storage, and passphrase-encrypted backups.
+Publishing, downloads, hosting, and networking begin in Stage 07 and later.
 
 ## Current status
 
@@ -35,13 +36,18 @@ networking begin in Stage 06 and later.
 | Reference-counted deletion and cleanup | Complete; published originals and replicas require confirmation |
 | Crash reconciliation and corrupt-file quarantine | Complete; verified by restart tests |
 | Metadata export and validated restore | Complete; CBOR manifest plus SQLite snapshot |
+| Local Ed25519 identity and stable identity ID | Complete; Bech32m `nx1...` IDs and committed vectors |
+| Canonical CBOR and signed records | Complete; exact-byte envelopes, profile and publication v1 |
+| Encrypted identity at rest and backup | Complete; LEK/HKDF at rest, Argon2id/XChaCha20-Poly1305 backup |
 | Formatting, linting, and static analysis | Enforced locally and in CI |
 | CI workflow and dependency review | Defined |
 | Developer setup and contribution guides | Complete |
-| Product features | Mock UI prototypes; storage foundation complete, feature backends start in Stage 06 |
+| Product features | Mock UI prototypes; storage and crypto foundations complete, feature backends start in Stage 07 |
 
-See [docs/progress/STAGE_05.md](docs/progress/STAGE_05.md) for the exact
-evidence and commands used to verify this stage.
+See [docs/progress/STAGE_06.md](docs/progress/STAGE_06.md) for the exact
+evidence and commands used to verify this stage. The byte-level record, identity,
+at-rest, and backup formats are specified in
+[docs/architecture/SIGNED_RECORD_FORMATS.md](docs/architecture/SIGNED_RECORD_FORMATS.md).
 
 ## Repository layout
 
@@ -170,6 +176,7 @@ workflow and release conventions.
 |---|---|
 | [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md) | Product scope and v1 requirements. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System, module, crate, storage, security, and lifecycle design. |
+| [docs/architecture/SIGNED_RECORD_FORMATS.md](docs/architecture/SIGNED_RECORD_FORMATS.md) | Exact v1 identity, CBOR, signed-record, at-rest, and backup formats. |
 | [docs/decisions](docs/decisions/README.md) | Accepted architecture decision records. |
 | [docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md) | Repeatable Windows setup and troubleshooting. |
 | [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) | Branches, commits, pull requests, releases, and CI. |
@@ -187,7 +194,7 @@ details. Debug logs must be redacted according to
 
 ## Next stage
 
-Stage 06 adds local Ed25519 identity generation, stable public identity IDs,
-signed-record verification, encrypted identity backup, and cross-platform
-cryptographic vectors on top of the Stage 05 storage layer. It must not begin
-until Stage 05 is reviewed and approved by the project owner.
+Stage 07 adds publishing, canonical chunk manifests, publication IDs, revisions,
+and tombstone verification on top of the Stage 06 identity and signed-record
+foundations. It must not begin until Stage 06 is reviewed and approved by the
+project owner.

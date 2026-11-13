@@ -74,6 +74,22 @@ All notable changes to NEXUS are recorded here. The format follows
 - Safe filename and export-path handling for traversal, Windows reserved names,
   control characters, and collisions.
 - 16 `nexus-store` unit tests and 12 integration tests, plus Stage 05 evidence.
+- Local Ed25519 identity generation with a stable Bech32m `nx1...` identity ID.
+- Canonical CBOR encoder and decoder with shortest integers, sorted map keys,
+  duplicate rejection, NFC user text, and bounded depth, items, and input.
+- Exact-byte `{1: body, 2: sig}` signed-record envelopes with domain-separated
+  signatures and byte-preserving verification.
+- Signed profile v1 and publication v1 schemas, unknown minor-field preservation,
+  unknown major-version rejection, and stable publication IDs.
+- Encrypted `secrets/identity.enc` storage using a host-supplied LEK, HKDF-SHA256,
+  XChaCha20-Poly1305, atomic restrictive writes, and redacted secret `Debug`.
+- User-controlled encrypted backup and restore with a versioned Argon2id header,
+  fixed v1 defaults, NFC passphrases, generic wrong-passphrase failure, and no
+  central recovery path.
+- 20 Stage 06 integration tests plus committed identity, signature, canonical
+  CBOR, signed-record, at-rest, and backup vectors.
+- Exact signed-record and identity format specification in
+  `docs/architecture/SIGNED_RECORD_FORMATS.md`.
 
 ### Changed
 
@@ -88,8 +104,10 @@ All notable changes to NEXUS are recorded here. The format follows
   Android NDK 29.0.14206865.
 - Rust now owns durable local storage; Kotlin remains a demo UI until the FFI
   bridge is added in Stage 08.
-- The committed `Cargo.lock` now resolves 71 packages, and the dependency and
-  license inventory is at version 1.2.0.
+- Rust now owns local identity keys, canonical signed records, encrypted
+  identity storage, and encrypted backups; no private key enters Kotlin.
+- The committed `Cargo.lock` now resolves 109 packages, and the dependency and
+  license inventory is at version 1.3.0.
 
 ### Fixed
 
@@ -119,14 +137,27 @@ All notable changes to NEXUS are recorded here. The format follows
 - Metadata archives contain metadata only, never file bytes or private keys.
 - Corrupt or incompatible metadata archives are rejected before the live
   database is replaced.
+- Identity keys are encrypted at rest in `secrets/identity.enc`, not in SQLite,
+  metadata exports, logs, diagnostics, or crash reports.
+- Canonical-record verification rejects changed fields, changed signatures,
+  non-canonical CBOR, duplicate keys, identity/key mismatch, and domain replay.
+- Backup restore validates and decrypts before touching the live identity file;
+  a wrong passphrase returns one generic failure.
+- The UI copy distinguishes a verified signature from real-world identity and
+  states that v1 has no automatic rotation or central revocation.
 
 ### Known limitations
 
 - Identity, publication, download, hosting, search, and network data in the UI
   are visibly labelled mock content. The storage foundation is real, but the UI
   is not connected to it until the FFI bridge.
-- No Ed25519 identity, signing, publishing, transfer, or networking behavior is
-  implemented yet.
+- Publishing, transfer, hosting, and networking behavior is not implemented yet.
+  Stage 06 provides identity, canonical signed records, and encrypted backup only.
+- Android and Windows runtime cross-verification of the committed crypto vectors
+  is deferred to Stage 08 because the Kotlin shells do not link the Rust core and
+  no Android device or emulator is available locally.
+- Key loss is permanent. v1 has no automatic rotation, central revocation, or
+  recovery service; compromise recovery requires a new identity and republish.
 - Android SQLite cross-compilation and runtime storage behavior are not locally
   exercised because no emulator or device is available and the Kotlin shells do
   not link `nexus-store` yet.
