@@ -92,6 +92,8 @@ All notable changes to NEXUS are recorded here. The format follows
   animator scale.
 - Desktop GUI automation was intermittent during the Stage 04 test pass; keyboard
   navigation and screenshot review were used to complete the journeys.
+- In the identity bio field, Tab inserts a tab character instead of moving
+  focus; Shift+Tab moves focus back to the display-name field.
 - The Windows application image is not yet an installer; Inno Setup packaging is
   Stage 19.
 - The local non-admin Windows toolchain uses a MinGW GNU Rust host when MSVC C++
