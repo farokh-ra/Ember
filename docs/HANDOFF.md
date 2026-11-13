@@ -110,12 +110,14 @@ runtime fixes below.
 ### Manual desktop test pass
 
 The rebuilt Windows app image was exercised at 1582x853 px expanded and
-982x753 px compact client sizes. Covered journeys: Welcome, demo onboarding,
-Explore categories and cards, Search, Downloads delete confirmation and
-snackbar, Hosted files and Stop hosting confirmation, Publish, Profile, Network
-status, and Settings. Also verified the five content states, four network
-states, Light/Dark/System themes, Light persistence across restart, Tab focus
-rings, Enter activation, Escape back, compact navigation, and banner wrapping.
+982x753 px compact client sizes. Covered journeys: Welcome, identity setup with
+empty-name validation and demo-profile continuation, demo onboarding, Explore
+categories and cards, Search, Downloads delete confirmation and snackbar, Hosted
+files and Stop hosting confirmation, Publish, Profile, Network status, and
+Settings. Also verified the five content states on Explore, four network states
+on Explore and Network status, honest demo/network labeling, Light/Dark/System
+themes, Light persistence across restart, Tab focus rings, Enter activation,
+Escape back, compact navigation, and banner wrapping.
 
 Two defects were found and fixed:
 
@@ -173,15 +175,15 @@ Both pass.
 
 ### Clean checkout
 
-`scripts/verify-clean-checkout.ps1` cloned commit
-`2dc053e405b7bb2f8860cec4b2b0dc396da968d3` into
-`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-cb0c27ef` and ran the full gate.
-It returned exit 0: Gradle reported `BUILD SUCCESSFUL in 42s`, the Android debug
-APK and Windows app image were assembled, all 65 JVM tests passed, Rust format,
-Clippy, tests, and hygiene passed. Some Kotlin tasks were served from the local
-Gradle build cache with matching inputs; Android packaging, desktop runtime
-image creation, and the Rust workspace compiled freshly. The clone was removed
-afterwards.
+`scripts/verify-clean-checkout.ps1` cloned the Stage 04 test-pass commit
+`588af14b79ce541ac6e1c022e18e56885ddc6dfa` into
+`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-a36de4be` and ran
+the full gate. It returned exit 0: Gradle reported `BUILD SUCCESSFUL in 42s`,
+the Android debug APK and Windows app image were assembled, all 65 JVM tests
+passed, Rust format, Clippy, tests, and hygiene passed. Some Kotlin tasks were
+served from the local Gradle build cache with matching inputs; Android
+packaging, desktop runtime image creation, and the Rust workspace compiled
+freshly. Repository hygiene scanned 172 files. The clone was removed afterwards.
 
 The follow-up evidence commit changes only documentation, so it does not alter
 build inputs.
@@ -249,6 +251,11 @@ build inputs.
 - Desktop GUI automation was intermittent: the harness occasionally missed click
   targets or lost foreground focus. Keyboard navigation and screenshot review
   were used to complete and confirm the Stage 04 test pass.
+- The Unpublish confirmation was not separately opened during the desktop pass;
+  the shared destructive-dialog component was exercised through Downloads
+  delete and Stop hosting.
+- In the identity bio field, Tab inserts a tab character instead of moving
+  focus; Shift+Tab moves focus back to the display-name field.
 
 ## Exact next action
 

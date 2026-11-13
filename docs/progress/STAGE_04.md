@@ -275,12 +275,16 @@ The rebuilt Windows app image was exercised through the documented journeys at
 an expanded client size of 1582x853 px and a compact client size of 982x753 px
 (about 786 dp wide). Checks performed:
 
-- Welcome, demo onboarding, Explore categories and cards, Search with a query and
-  results, Downloads delete confirmation and snackbar, Hosted files and Stop
-  hosting confirmation, Publish, Profile, Network status, and Settings.
+- Welcome, identity setup with empty-name validation and demo-profile
+  continuation, demo onboarding, Explore categories and cards, Search with a
+  query and results, Downloads delete confirmation and snackbar, Hosted files
+  and Stop hosting confirmation, Publish, Profile, Network status, and Settings.
 - Five content states on Explore: Ready, Loading, Empty, Offline, and Error.
 - Four global network states on Explore and Network status: Offline, Connecting,
   Online, and Degraded.
+- Honest labeling: the persistent preview/network banner, `DEMO DATA` badges,
+  simulated network panels, and preview-control copy stating that no request is
+  made.
 - Light, Dark, and System theme selection; Light persisted across a full restart.
 - Keyboard Tab focus rings and Enter activation on rail items and action rows.
 - Escape back with no focused Compose child, after the window-level fix.
@@ -342,8 +346,9 @@ APK was built and tested but not launched at runtime.
 
 ### Clean checkout
 
-The Stage 04 commit `2dc053e405b7bb2f8860cec4b2b0dc396da968d3` was cloned into
-`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-cb0c27ef`, and the full gate ran
+The Stage 04 test-pass commit
+`588af14b79ce541ac6e1c022e18e56885ddc6dfa` was cloned into
+`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-a36de4be`, and the full gate ran
 there:
 
 ```text
@@ -352,16 +357,18 @@ there:
 
 Result: PASS, exit 0.
 
-- Gradle reported `BUILD SUCCESSFUL in 42s`.
+- Gradle reported `BUILD SUCCESSFUL in 42s` (61 tasks executed, 55 from cache,
+  3 up-to-date).
 - Android `assembleDebug` and desktop `createDistributable` executed.
 - All 65 JVM tests passed. Some Kotlin compile and test tasks were served from
   the local Gradle build cache with matching source inputs; Android packaging,
   desktop runtime-image creation, and the Rust workspace compiled freshly.
 - Rust format, Clippy, workspace tests, and repository hygiene passed.
+- Repository hygiene scanned 172 files.
 - The temporary clone was removed after the run.
 
-This proves that the committed source builds through the documented setup
-without untracked local files. The follow-up evidence commit changes only
+This proves that the committed test-pass source builds through the documented
+setup without untracked local files. The follow-up evidence commit changes only
 documentation and does not alter build inputs.
 
 ### Failure evidence
@@ -389,6 +396,11 @@ documentation and does not alter build inputs.
 - All identity, publication, download, hosting, search, and network data is
   mock content. No real service is called.
 - No real identity is created or persisted. Only the theme preference persists.
+- The Unpublish confirmation was not separately opened during the desktop pass;
+  the shared destructive-dialog component was exercised through Downloads
+  delete and Stop hosting.
+- In the identity bio field, Tab inserts a tab character instead of moving
+  focus; Shift+Tab moves focus back to the display-name field.
 - Publish, backup/restore, diagnostics export, and other later-stage actions are
   disabled or simulated.
 - The shared UI copy is English-only. Locale-aware formatting and translated
