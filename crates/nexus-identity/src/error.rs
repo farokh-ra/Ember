@@ -29,8 +29,8 @@ pub enum IdentityError {
     /// The identity file could not be decrypted with the supplied LEK.
     #[error("identity decryption failed")]
     DecryptionFailed,
-    /// The supplied root is not an absolute path.
-    #[error("identity root must be an absolute path")]
+    /// A root, secrets path, or storage path is not a safe absolute directory.
+    #[error("identity path is not a safe absolute directory path")]
     UnsafePath,
     /// A symlink or reparse point was found on the identity path.
     #[error("symlinked identity path is not allowed")]

@@ -86,7 +86,7 @@ All notable changes to NEXUS are recorded here. The format follows
 - User-controlled encrypted backup and restore with a versioned Argon2id header,
   fixed v1 defaults, NFC passphrases, generic wrong-passphrase failure, and no
   central recovery path.
-- 20 Stage 06 integration tests plus committed identity, signature, canonical
+- 21 Stage 06 integration tests plus committed identity, signature, canonical
   CBOR, signed-record, at-rest, and backup vectors.
 - Exact signed-record and identity format specification in
   `docs/architecture/SIGNED_RECORD_FORMATS.md`.

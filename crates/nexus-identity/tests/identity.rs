@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use nexus_crypto::{DomainTag, IdentityId, PublicKey, sha256, to_hex};
 use nexus_identity::{
-    AT_REST_HEADER_LENGTH, AT_REST_MAGIC, BACKUP_MAGIC, CRYPTOGRAPHIC_IDENTITY_NOTICE, Identity, IdentityVault,
-    KEY_LIMITS_NOTICE, KEY_LOSS_WARNING, LocalEncryptionKey, SIGNATURE_STATUS_LABEL, decrypt_identity,
+    AT_REST_HEADER_LENGTH, AT_REST_MAGIC, BACKUP_MAGIC, CRYPTOGRAPHIC_IDENTITY_NOTICE, Identity, IdentityError,
+    IdentityVault, KEY_LIMITS_NOTICE, KEY_LOSS_WARNING, LocalEncryptionKey, SIGNATURE_STATUS_LABEL, decrypt_identity,
     encrypt_identity_with_material, export_backup_with_params, restore_backup, v1_params,
 };
 
@@ -70,6 +70,33 @@ fn id_001_identity_survives_a_restart_and_never_needs_a_server() {
     assert_eq!(loaded.identity_id(), created.identity_id());
     assert_eq!(loaded.public_key(), created.public_key());
     assert!(restarted.create(&lek).is_err());
+}
+
+#[test]
+fn symlinked_secrets_directory_is_rejected_before_read_or_write() {
+    let source_root = TempRoot::new();
+    let source_vault = IdentityVault::new(source_root.path()).expect("vault");
+    let lek = LocalEncryptionKey::new([25_u8; 32]);
+    let identity = source_vault.create(&lek).expect("create");
+
+    let target_root = TempRoot::new();
+    let secrets = target_root.path().join("secrets");
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(source_root.path().join("secrets"), &secrets).is_ok();
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_dir(source_root.path().join("secrets"), &secrets).is_ok();
+    if !linked {
+        // Some Windows configurations require Developer Mode for directory links.
+        return;
+    }
+
+    let vault = IdentityVault::new(target_root.path()).expect("vault");
+    assert!(matches!(vault.exists(), Err(IdentityError::SymlinkRejected)));
+    assert!(matches!(vault.load(&lek), Err(IdentityError::SymlinkRejected)));
+    assert!(matches!(
+        vault.save(&lek, &identity),
+        Err(IdentityError::SymlinkRejected)
+    ));
 }
 
 #[test]

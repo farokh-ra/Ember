@@ -31,7 +31,8 @@ impl IdentityId {
         payload.extend_from_slice(&ED25519_PUBLIC_KEY_MULTICODEC);
         payload.extend_from_slice(public_key.as_bytes());
         let hrp = Hrp::parse_unchecked(IDENTITY_ID_HRP);
-        let encoded = bech32::encode::<Bech32m>(hrp, &payload).unwrap_or_else(|_| String::from("nx1invalid"));
+        let encoded = bech32::encode::<Bech32m>(hrp, &payload)
+            .expect("constant HRP and 34-byte payload always encode as canonical Bech32m");
         Self(encoded)
     }
 

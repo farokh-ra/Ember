@@ -101,6 +101,10 @@ SignedRecord = {
   envelope bytes from `SignedRecord::raw`.
 - Parsing the envelope requires canonical CBOR. Parsing a profile or publication
   additionally requires a canonical body and validates every schema field.
+- `ProfileV1::parse_body` and `PublicationV1::parse_body` validate shape and
+  canonical encoding only. They do not authenticate a record. Only
+  `SignedProfile::verify` and `SignedPublication::verify` establish that the
+  body was signed by the identity it names.
 
 Domain tags:
 
@@ -226,8 +230,9 @@ Plaintext payload layout (encrypted in both at-rest files and backups):
 Writes are atomic: a new file is created in the `secrets` directory, flushed,
 and renamed over the destination. Temporary files are removed on failure. Unix
 uses mode `0600` for the file and `0700` for the directory. On Windows the file
-inherits the app-private parent directory ACL. Symlinked roots, directories, and
-identity files are rejected.
+inherits the app-private parent directory ACL. Symbolic links, junctions, and
+other reparse points on the root, the `secrets` directory, or the identity file
+are rejected before any read or write.
 
 ## 8. Encrypted backup v1
 
@@ -264,10 +269,13 @@ ciphertext = XChaCha20-Poly1305 ciphertext || 16-byte tag
 
 Passphrases are NFC-normalized, must not be empty, are limited to 1,024 UTF-8
 bytes, and new backups require at least 12 Unicode scalar values. A wrong
-passphrase, changed header, truncated file, or changed ciphertext returns one
-generic error: `backup could not be opened; the passphrase or file is invalid`.
-The UI does not reveal which part failed, and a failed restore never replaces the
-live identity file.
+passphrase, changed authenticated header, truncated ciphertext, or changed
+ciphertext returns one generic error:
+`backup could not be opened; the passphrase or file is invalid`. The UI does not
+reveal which part failed, and a failed restore never replaces the live identity
+file. Structural damage and an unsupported format version, KDF, or Argon2
+parameter set are rejected before key derivation as `MalformedBackup` or
+`UnsupportedBackupVersion`; those checks reveal nothing about the passphrase.
 
 A valid backup of the zero-seed vector is 233 bytes with:
 

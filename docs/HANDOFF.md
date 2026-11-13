@@ -23,13 +23,13 @@ FFI bridge:
   unknown major-version rejection, and stable publication IDs.
 - Encrypted `secrets/identity.enc` storage with a host-supplied 32-byte LEK,
   HKDF-SHA256, XChaCha20-Poly1305, an authenticated 68-byte header, atomic
-  restrictive writes, and symlink rejection.
+  restrictive writes, and symlink/reparse-point rejection.
 - A versioned encrypted backup with Argon2id v1 defaults of 64 MiB, 3 iterations,
   and 1 lane; NFC passphrases; generic wrong-passphrase failure; and no central
   recovery.
 - User-facing statements that distinguish a verified signature from real-world
   identity and disclose the absence of v1 rotation or revocation.
-- 20 new integration tests and committed identity, signature, canonical CBOR,
+- 21 new integration tests plus committed identity, signature, canonical CBOR,
   signed-record, at-rest, and backup vectors.
 - Exact v1 format specification in
   `docs/architecture/SIGNED_RECORD_FORMATS.md`.
@@ -107,7 +107,7 @@ Result: PASS, exit 0, `All requested local checks passed.`
 - All 65 JVM tests passed.
 - `cargo fmt --all -- --check` passed.
 - `cargo clippy --workspace --all-targets -- -D warnings` passed.
-- `cargo test --workspace` passed with 96 Rust tests.
+- `cargo test --workspace` passed with 98 Rust tests.
 - `cargo deny check` reported `advisories ok, bans ok, licenses ok, sources ok`.
 - `cargo audit` scanned the realized graph with no vulnerability reported.
 - Repository hygiene scanned the working tree with no forbidden file or secret
@@ -118,13 +118,13 @@ Result: PASS, exit 0, `All requested local checks passed.`
 | Suite | Tests | Failures |
 |---|---:|---:|
 | `nexus-crypto` unit tests | 24 | 0 |
-| `nexus-identity` unit tests | 8 | 0 |
-| `nexus-identity` integration tests | 11 | 0 |
+| `nexus-identity` unit tests | 9 | 0 |
+| `nexus-identity` integration tests | 12 | 0 |
 | `nexus-protocol` unit tests | 10 | 0 |
 | `nexus-protocol` integration tests | 9 | 0 |
 | `nexus-store` unit and integration tests | 28 | 0 |
 | Other Rust workspace tests | 6 | 0 |
-| **Rust total** | **96** | **0** |
+| **Rust total** | **98** | **0** |
 | **JVM total** | **65** | **0** |
 
 ### Validators
@@ -142,7 +142,7 @@ After commit `fa40fcf` (`feat(crypto): add identity and signed records`),
 `scripts/verify-clean-checkout.ps1` cloned `HEAD` into
 `C:\Users\Elsa\AppData\Local\Temp\nexus-clean-96faa4d6` and ran the build, tests,
 and hygiene gate. It returned exit 0: Gradle built the Android debug APK and
-Windows app image, all 65 JVM tests passed, Rust format, Clippy, and all 96
+Windows app image, all 65 JVM tests passed, Rust format, Clippy, and all 98
 workspace tests passed, and repository hygiene passed. The clone was removed
 afterwards.
 
@@ -169,6 +169,18 @@ does not alter build inputs.
    compare the exact 44-byte backup prefix and 68-byte at-rest header.
 7. Unused direct dependencies were removed so the inventory matches the realized
    graph.
+8. A recheck found that vault `load` and `exists` validated only the final
+   `identity.enc` component, so a symlinked `secrets` directory could redirect
+   reads. The root and `secrets` directory are now checked with symlink metadata,
+   Windows reparse attributes, and directory checks before reads or writes.
+9. Restore paths copied the seed out of the decoded payload. They now move the
+   validated `KeyPair` into the identity.
+10. `IdentityId::from_public_key` fell back to the sentinel `nx1invalid` if
+    Bech32m encoding failed. The fixed HRP and 34-byte payload cannot fail to
+    encode, so the code now asserts that invariant.
+11. The format specification overstated that every changed backup header
+    returned the generic error. Version, KDF, Argon2-version, and parameter
+    failures are now documented as pre-derivation structural errors.
 
 ## Decisions and unresolved questions
 

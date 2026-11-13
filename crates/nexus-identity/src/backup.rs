@@ -109,7 +109,7 @@ pub fn restore_backup(backup: &[u8], passphrase: &str) -> Result<Identity, Ident
     let plaintext = decrypt(&key, &header.nonce, &associated_data, &backup[header.header.len()..])
         .map_err(|_| IdentityError::BackupUnreadable)?;
     let payload = decode_payload(&plaintext).map_err(|_| IdentityError::BackupUnreadable)?;
-    let identity = Identity::from_seed(*payload.keypair.secret_seed(), payload.created_at_ms);
+    let identity = Identity::from_keypair(payload.keypair, payload.created_at_ms);
     if identity.identity_id() != header.identity_id {
         return Err(IdentityError::BackupUnreadable);
     }
