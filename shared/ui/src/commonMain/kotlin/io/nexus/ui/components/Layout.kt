@@ -108,7 +108,9 @@ public fun NexusScreenHeader(
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(NexusSpacing.sm),
     ) {
-        if (onBack != null) {
+        // Compact layouts carry Back in the shell's top bar, so rendering it
+        // again here would duplicate the control.
+        if (onBack != null && expanded) {
             NexusBackButton(onBack = onBack)
         }
         Column(modifier = Modifier.weight(1f)) {
