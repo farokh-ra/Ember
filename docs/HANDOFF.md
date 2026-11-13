@@ -1,77 +1,95 @@
 # NEXUS Project Handoff
 
-**Current stage:** 05 - Local database and file-store foundation
+**Current stage:** 06 - Identity and cryptographic foundations
 **Stage status:** Complete
 **Last updated:** 2026-11-13
-**Next stage:** 06 - Identity and cryptographic foundations (waiting for user permission)
+**Next stage:** 07 - Publishing, manifests, revisions, and tombstones (waiting for user permission)
 
 ## What was implemented
 
-Stage 05 is complete. Rust now owns every read and write of durable local
-state, and Kotlin remains a shell that will reach storage through the future
-FFI boundary:
+Stage 06 is complete. The Rust core now creates and protects local identities and
+verifies exact-byte signed records, while Kotlin remains a demo shell until the
+FFI bridge:
 
-- An embedded SQLite schema with two transactional migrations, checksummed
-  history, `PRAGMA user_version`, and rollback on failure.
-- A dedicated writer thread, serialized `query_only` readers, WAL, foreign
-  keys, a busy timeout, and a bounded cache.
-- Tables for content, references, identities, profiles, publications,
-  tombstones, downloads, replicas, peers, settings, and rebuildable FTS5
-  search.
-- A locked, content-addressed managed store under the app-private root.
-- Read-only import staging, SHA-256 verification, atomic promotion, and an
-  untouched external original.
-- Safe display names, traversal and reserved-name handling, 255-byte limits,
-  and collision-free export paths.
-- A 10 GiB default quota, 1-500 GiB product range, 1 GiB free-space reserve,
-  and 4 GiB maximum file size.
-- Reference-counted deletion, with explicit confirmation required before the
-  last publication-original or active-replica reference removes bytes.
-- Resumable download rows with verified-prefix checkpoints counted from the
-  first allocated byte.
-- Startup reconciliation that adopts crash-window downloads, truncates
-  partials, quarantines corrupt or unexpected files, and preserves missing and
-  quarantined metadata.
-- Metadata export as a versioned CBOR manifest plus a consistent SQLite
-  snapshot, with validated restore that never overwrites current data with a
-  corrupt or incompatible archive.
-- 28 `nexus-store` tests: 16 unit and 12 integration.
-- Stage 05 evidence in `docs/progress/STAGE_05.md`.
+- Local Ed25519 key generation from the OS CSPRNG, with no account server.
+- Stable public identity IDs in Bech32m with HRP `nx` and the Ed25519 multicodec
+  payload.
+- Canonical CBOR with shortest integers, sorted scalar map keys, duplicate-key
+  rejection, NFC user text, bounded depth/items/input, and decode/re-encode byte
+  equality.
+- Exact-byte `{1: body bstr, 2: sig bstr}` envelopes with signatures over
+  `domain_tag || body`. Stored bodies are never re-encoded for verification.
+- Signed profile v1 and publication v1 schemas, unknown minor-field preservation,
+  unknown major-version rejection, and stable publication IDs.
+- Encrypted `secrets/identity.enc` storage with a host-supplied 32-byte LEK,
+  HKDF-SHA256, XChaCha20-Poly1305, an authenticated 68-byte header, atomic
+  restrictive writes, and symlink rejection.
+- A versioned encrypted backup with Argon2id v1 defaults of 64 MiB, 3 iterations,
+  and 1 lane; NFC passphrases; generic wrong-passphrase failure; and no central
+  recovery.
+- User-facing statements that distinguish a verified signature from real-world
+  identity and disclose the absence of v1 rotation or revocation.
+- 20 new integration tests and committed identity, signature, canonical CBOR,
+  signed-record, at-rest, and backup vectors.
+- Exact v1 format specification in
+  `docs/architecture/SIGNED_RECORD_FORMATS.md`.
+- Stage 06 evidence in `docs/progress/STAGE_06.md`.
 
-No identity key, signature, publication, transfer, hosting, or network
-operation is implemented yet. The Kotlin screens continue to use visibly
-labelled demo data and do not claim that Stage 05 storage is connected.
+No publishing, chunk manifest, transfer, hosting, DHT, or network operation is
+implemented yet. The Kotlin screens continue to use visibly labelled demo data
+and do not claim that Stage 06 identity behavior is connected.
 
 ## Files changed
 
-Storage crate:
+Crypto crate:
 
-- `crates/nexus-store/Cargo.toml`
-- `crates/nexus-store/migrations/0001_initial.sql`
-- `crates/nexus-store/migrations/0002_search_index.sql`
-- `crates/nexus-store/src/lib.rs`
-- `crates/nexus-store/src/backup.rs`
-- `crates/nexus-store/src/db.rs`
-- `crates/nexus-store/src/error.rs`
-- `crates/nexus-store/src/managed_store.rs`
-- `crates/nexus-store/src/migrations.rs`
-- `crates/nexus-store/src/model.rs`
-- `crates/nexus-store/src/paths.rs`
-- `crates/nexus-store/src/quota.rs`
-- `crates/nexus-store/src/store.rs`
-- `crates/nexus-store/src/util.rs`
-- `crates/nexus-store/tests/storage.rs`
+- `crates/nexus-crypto/Cargo.toml`
+- `crates/nexus-crypto/src/lib.rs`
+- `crates/nexus-crypto/src/aead.rs`
+- `crates/nexus-crypto/src/cbor.rs`
+- `crates/nexus-crypto/src/domain.rs`
+- `crates/nexus-crypto/src/error.rs`
+- `crates/nexus-crypto/src/hash.rs`
+- `crates/nexus-crypto/src/identity_id.rs`
+- `crates/nexus-crypto/src/kdf.rs`
+- `crates/nexus-crypto/src/key.rs`
+- `crates/nexus-crypto/src/random.rs`
+- `crates/nexus-crypto/src/text.rs`
+
+Identity crate:
+
+- `crates/nexus-identity/Cargo.toml`
+- `crates/nexus-identity/src/lib.rs`
+- `crates/nexus-identity/src/at_rest.rs`
+- `crates/nexus-identity/src/backup.rs`
+- `crates/nexus-identity/src/error.rs`
+- `crates/nexus-identity/src/identity.rs`
+- `crates/nexus-identity/src/local_key.rs`
+- `crates/nexus-identity/src/payload.rs`
+- `crates/nexus-identity/src/vault.rs`
+- `crates/nexus-identity/tests/identity.rs`
+
+Protocol crate:
+
+- `crates/nexus-protocol/Cargo.toml`
+- `crates/nexus-protocol/src/lib.rs`
+- `crates/nexus-protocol/src/envelope.rs`
+- `crates/nexus-protocol/src/error.rs`
+- `crates/nexus-protocol/src/fields.rs`
+- `crates/nexus-protocol/src/profile.rs`
+- `crates/nexus-protocol/src/publication.rs`
+- `crates/nexus-protocol/tests/records.rs`
 
 Workspace and documentation:
 
 - `Cargo.toml`, `Cargo.lock`
+- `docs/architecture/SIGNED_RECORD_FORMATS.md`
 - `docs/architecture/DEPENDENCY_LICENSE_INVENTORY.md`
-- `docs/progress/STAGE_05.md`
+- `docs/progress/STAGE_06.md`
 - `docs/HANDOFF.md`
 - `README.md`, `CHANGELOG.md`
 
-No Kotlin source was changed. A storage-access scan of `*.kt`, `*.kts`, and
-`*.java` found no SQLite, JDBC, managed-store, or generated blob-path access.
+No Kotlin source was changed.
 
 ## Commands and results
 
@@ -84,77 +102,46 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 Result: PASS, exit 0, `All requested local checks passed.`
 
-- Gradle `BUILD SUCCESSFUL in 43s`; Spotless and detekt passed.
+- Gradle `BUILD SUCCESSFUL`; Spotless and detekt passed.
 - Android debug APK and Windows desktop app image built.
 - All 65 JVM tests passed.
 - `cargo fmt --all -- --check` passed.
-- `cargo clippy -p nexus-store --all-targets -- -D warnings` passed.
-- `cargo test --workspace` passed with 34 Rust tests.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed.
+- `cargo test --workspace` passed with 96 Rust tests.
 - `cargo deny check` reported `advisories ok, bans ok, licenses ok, sources ok`.
-- `cargo audit` scanned 71 crate dependencies against 1,509 advisories with no
-  vulnerability reported.
-- Repository hygiene scanned 186 files with 7 forbidden names, 10 forbidden
-  suffixes, and 7 secret patterns.
-
-`cargo deny` reports a non-fatal duplicate-version warning for `syn` 2.0.119
-and 3.0.10. Both are expected from the pinned serde and zerocopy derive graphs
-and pass the license check.
+- `cargo audit` scanned the realized graph with no vulnerability reported.
+- Repository hygiene scanned the working tree with no forbidden file or secret
+  pattern.
 
 ### Test breakdown
 
 | Suite | Tests | Failures |
 |---|---:|---:|
-| `nexus-store` unit tests | 16 | 0 |
-| `nexus-store` integration tests | 12 | 0 |
+| `nexus-crypto` unit tests | 24 | 0 |
+| `nexus-identity` unit tests | 8 | 0 |
+| `nexus-identity` integration tests | 11 | 0 |
+| `nexus-protocol` unit tests | 10 | 0 |
+| `nexus-protocol` integration tests | 9 | 0 |
+| `nexus-store` unit and integration tests | 28 | 0 |
 | Other Rust workspace tests | 6 | 0 |
-| **Rust total** | **34** | **0** |
-| `NexusAppStateTest` | 10 | 0 |
-| `NavigationStateTest` | 11 | 0 |
-| `ContentStateTest` | 4 | 0 |
-| `DemoCatalogTest` | 11 | 0 |
-| `IdentityDraftTest` | 7 | 0 |
-| `StartupPresenterTest` | 1 | 0 |
-| `NexusAppControllerTest` | 9 | 0 |
-| `StateLabelsTest` | 5 | 0 |
-| `ThemeContrastTest` | 7 | 0 |
+| **Rust total** | **96** | **0** |
 | **JVM total** | **65** | **0** |
-
-Presentation subtotal: 44. Shared UI subtotal: 21.
-
-### Artifacts
-
-- Android debug APK:
-  `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk`,
-  31,039,671 bytes.
-- Windows app image:
-  `apps/desktopApp/build/compose/binaries/main/app/NEXUS`, 130,622,747 bytes
-  across 200 files.
-- Windows launcher: `.../app/NEXUS/NEXUS.exe`.
-
-The APK and desktop image still build from the same UI sources. Stage 05 adds
-no Kotlin runtime dependency and no screen behavior.
 
 ### Validators
 
 ```text
 python scripts/check_repo_hygiene.py
-python scripts/check_commit_message.py "feat(store): add SQLite and managed file store"
+python scripts/check_commit_message.py "feat(crypto): add identity and signed records"
 ```
 
 Both pass.
 
 ### Clean checkout
 
-`scripts/verify-clean-checkout.ps1` cloned the Stage 05 test-pass commit
-`700f4138b440a6d2541f1ee47fcba1e7a2aca310` into
-`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-aeafcf3e` and ran the build,
-tests, and hygiene gate. It returned exit 0: Gradle reported
-`BUILD SUCCESSFUL in 46s`, the Android debug APK and Windows app image were
-assembled, all 65 JVM tests passed, Rust format, Clippy, and all 34 workspace
-tests passed, and repository hygiene scanned 186 files. Some Kotlin tasks were
-served from the local Gradle build cache with matching inputs; Android
-packaging, desktop runtime-image creation, and the Rust workspace compiled
-freshly. The clone was removed afterwards.
+`scripts/verify-clean-checkout.ps1` runs after the Stage 06 test-pass commit is
+created. The follow-up evidence commit records the clone path, exit code, and
+result here and in `docs/progress/STAGE_06.md`. The result is not claimed before
+that run.
 
 The clean-checkout script does not run `-WithDependencyScan`; `cargo deny` and
 `cargo audit` were verified separately in the full local gate against the same
@@ -163,56 +150,52 @@ does not alter build inputs.
 
 ## Errors and failed attempts
 
-1. The metadata export test compared the snapshot hash against a placeholder
-   zero-length slice. It now parses the archive header, extracts the payload,
-   and compares its real SHA-256.
-2. A canonicalized Windows export path was compared with the non-canonical
-   path. The test now canonicalizes the destination first.
-3. The restore fixture omitted the publication row, so the restored feed was
-   empty. The fixture now inserts and verifies the publication record.
-4. `VACUUM INTO` was initially run on a `query_only` reader. It now runs on the
-   writer connection through `Database::snapshot_to`.
-5. A corrupt blob could be marked `quarantined` and then downgraded to
-   `missing` on the next open. Reconciliation now keeps quarantined IDs out of
-   the missing-state pass.
-6. Unreferenced partial files were counted but left in `partials/`. They are now
-   moved to `quarantine/`.
-7. Failed partial downloads stopped counting toward quota even though their
-   bytes remained on disk. Failed states now remain in the usage sum.
-8. Identical bytes under a full quota were rejected before hashing. The importer
-   now stages and hashes first, still checks the free-space reserve, and charges
-   only new content IDs.
-9. Directory scans followed symlinks and reparse points. Scans now use
-   `symlink_metadata`, never recurse through a link, and quarantine unexpected
-   links or files.
-10. Clippy rejected a nested `if`; the reconciliation code now uses a let-chain.
+1. The deterministic at-rest helper passed fixed-array references where byte
+   slices were expected. It now passes the arrays directly to HKDF and AEAD.
+2. The publication vector contained the wrong number of repeated content-ID
+   bytes. The test now asserts the exact body produced by the encoder.
+3. Signing a profile or publication returned the pre-normalization input object
+   while the signed body contained NFC text. Signing now parses the signed body
+   back into the returned model, so model and bytes cannot diverge.
+4. Clippy rejected needless explicit lifetimes and a ten-argument schema
+   constructor. Lifetimes were elided; the constructor documents its deliberate
+   field-mirroring signature.
+5. The first non-canonical-envelope test built invalid bytes. It now constructs a
+   real map with key 2 before key 1 and canonical parsing rejects it.
+6. The backup and at-rest vector tests initially used incorrect offsets. They now
+   compare the exact 44-byte backup prefix and 68-byte at-rest header.
+7. Unused direct dependencies were removed so the inventory matches the realized
+   graph.
 
 ## Decisions and unresolved questions
 
-- Stage 05 was explicitly approved by the project owner.
-- Rust remains the only SQLite and managed-store reader and writer, per
-  ADR-0004. Kotlin never opens these files.
-- The schema is two migrations: version 1 base schema and version 2 FTS5
-  `search_index`. Search remains derived state and is not populated until
-  Stage 16.
-- `QuotaPolicy::new` enforces the 1-500 GiB product range; `custom` supports
-  deterministic small-quota tests.
-- The managed store requires an absolute root and takes an exclusive lock.
-- Reconciliation never follows symlinks, preserves missing and quarantined
-  metadata, and deletes only unreferenced generated blobs.
-- Metadata archives contain metadata only. File bytes remain in the managed
-  store and are reconciled separately.
-- The storage-management screen is still a Stage 04 prototype. The settings
-  and quota model are ready for the FFI bridge.
-- No Android emulator or physical device is available, so Android SQLite
-  cross-compilation and runtime storage behavior are not locally exercised.
+- Stage 06 was explicitly approved by the project owner.
+- ADR-0006 and ADR-0007 are implemented without changing the architecture.
+- Canonical CBOR is hand-implemented in `nexus-crypto` rather than delegated to a
+  general CBOR library.
+- `getrandom` 0.3.4 is used directly instead of adding `rand`.
+- `SignedRecord::parse` requires a canonical envelope; verification still uses
+  the exact stored body bytes and never re-encodes them.
+- Profile and publication bodies must be NFC for user-visible text. Signing
+  normalizes first; parsing rejects non-NFC bytes.
+- The encrypted payload is a shared versioned fixed binary `NEXKEY01` payload,
+  not CBOR.
+- The backup format is versioned and stores Argon2id parameters in the header so
+  future calibration can change defaults without changing the file version.
+- Windows restrictive permissions rely on the app-private parent ACL. Unix uses
+  directory `0700` and file `0600`.
+- No Android emulator or physical device is available, so Android runtime
+  cross-verification is deferred to Stage 08. The committed vectors are the
+  byte-level contract.
 - Remote GitHub Actions execution has not run for this stage.
-- The Windows app image is not an installer. Inno Setup packaging is Stage 19.
+- Kotlin/FFI identity integration and platform Keystore/DPAPI adapters remain
+  Stage 08 work.
 
 ## Exact next action
 
-1. Review the Stage 05 evidence in `docs/progress/STAGE_05.md`.
-2. Give explicit approval to start Stage 06.
-3. Stage 06 adds local Ed25519 identity generation, stable public identity
-   IDs, signed-record verification, encrypted identity backup, and
-   cross-platform cryptographic vectors. Do not begin it before that approval.
+1. Review the Stage 06 evidence in `docs/progress/STAGE_06.md` and the exact
+   formats in `docs/architecture/SIGNED_RECORD_FORMATS.md`.
+2. Give explicit approval to start Stage 07.
+3. Stage 07 adds canonical chunk manifests, manifest roots, publishing,
+   revisions, publication IDs in the data layer, and tombstone verification.
+   Do not begin it before that approval.

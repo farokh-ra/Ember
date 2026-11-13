@@ -10,4 +10,5 @@ publish = false
 workspace = true
 
 [dependencies]
-nexus-types.workspace = true
+nexus-crypto.workspace = true
+thiserror.workspace = true
