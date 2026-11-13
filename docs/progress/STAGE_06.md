@@ -276,9 +276,24 @@ Result: PASS, exit 0, `All requested local checks passed.`
 
 ### Clean checkout
 
-`scripts/verify-clean-checkout.ps1` runs after the Stage 06 test-pass commit is
-created. The follow-up evidence commit records the clone path, exit code, and
-result here. The result is not claimed before that run.
+After commit `fa40fcf` (`feat(crypto): add identity and signed records`), the
+clean-checkout gate cloned `HEAD` into:
+
+```text
+C:\Users\Elsa\AppData\Local\Temp\nexus-clean-96faa4d6
+```
+
+and ran:
+
+```text
+.\scripts\verify-clean-checkout.ps1
+```
+
+Result: PASS, exit 0, `All requested local checks passed.`
+
+The clone built the Android debug APK and Windows app image, passed all 65 JVM
+tests, passed Rust formatting and Clippy, and passed all 96 Rust tests. Repository
+hygiene passed, and the script removed the clone afterwards.
 
 `verify-clean-checkout.ps1` runs `build.ps1` without `-WithDependencyScan`, so
 the clean-checkout run does not repeat `cargo deny` or `cargo audit`. Those
