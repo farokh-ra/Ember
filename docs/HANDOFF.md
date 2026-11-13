@@ -138,14 +138,17 @@ Both pass.
 
 ### Clean checkout
 
-`scripts/verify-clean-checkout.ps1` runs after the Stage 06 test-pass commit is
-created. The follow-up evidence commit records the clone path, exit code, and
-result here and in `docs/progress/STAGE_06.md`. The result is not claimed before
-that run.
+After commit `fa40fcf` (`feat(crypto): add identity and signed records`),
+`scripts/verify-clean-checkout.ps1` cloned `HEAD` into
+`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-96faa4d6` and ran the build, tests,
+and hygiene gate. It returned exit 0: Gradle built the Android debug APK and
+Windows app image, all 65 JVM tests passed, Rust format, Clippy, and all 96
+workspace tests passed, and repository hygiene passed. The clone was removed
+afterwards.
 
 The clean-checkout script does not run `-WithDependencyScan`; `cargo deny` and
 `cargo audit` were verified separately in the full local gate against the same
-committed graph. The follow-up evidence commit changes only documentation, so it
+committed graph. This follow-up evidence commit changes only documentation, so it
 does not alter build inputs.
 
 ## Errors and failed attempts
