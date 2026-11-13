@@ -5,11 +5,13 @@ a shared Kotlin Multiplatform and Compose Multiplatform interface, a shared Rust
 core, and peer-to-peer networking without a mandatory central account or content
 service.
 
-This repository is at the end of **Stage 04: UI foundation and design system**.
-The Android and Windows shells now run a shared, clickable UI prototype with
-light and dark themes and eleven screens. All content is visibly labelled mock
-data; real identity, storage, publishing, downloads, hosting, and networking
-begin in Stage 05 and later.
+This repository is at the end of **Stage 05: Local database and file-store
+foundation**. The Android and Windows shells still run the shared, clickable UI
+prototype with visibly labelled mock data. Underneath it, the Rust core now owns
+an embedded SQLite schema, migrations, a content-addressed managed file store,
+quota accounting, reference-counted cleanup, startup reconciliation, and
+metadata export/restore. Identity, publishing, downloads, hosting, and
+networking begin in Stage 06 and later.
 
 ## Current status
 
@@ -27,12 +29,18 @@ begin in Stage 05 and later.
 | Loading, empty, offline, error, and retry states | Complete on data-driven screens |
 | Accessibility and keyboard support | Implemented; focus, keyboard, and Escape checks passed |
 | Stage 04 desktop test pass | Complete; journeys, five states, themes, and compact layout verified |
+| SQLite schema and transactional migrations | Complete; schema version 2 |
+| Managed content-addressed file store | Complete; atomic import and exclusive lock |
+| Quota, free-space reserve, and file limits | Complete; 10 GiB default, 1 GiB reserve, 4 GiB file cap |
+| Reference-counted deletion and cleanup | Complete; published originals and replicas require confirmation |
+| Crash reconciliation and corrupt-file quarantine | Complete; verified by restart tests |
+| Metadata export and validated restore | Complete; CBOR manifest plus SQLite snapshot |
 | Formatting, linting, and static analysis | Enforced locally and in CI |
 | CI workflow and dependency review | Defined |
 | Developer setup and contribution guides | Complete |
-| Product features | Mock prototypes only; backend work starts in Stage 05 |
+| Product features | Mock UI prototypes; storage foundation complete, feature backends start in Stage 06 |
 
-See [docs/progress/STAGE_04.md](docs/progress/STAGE_04.md) for the exact
+See [docs/progress/STAGE_05.md](docs/progress/STAGE_05.md) for the exact
 evidence and commands used to verify this stage.
 
 ## Repository layout
@@ -179,6 +187,7 @@ details. Debug logs must be redacted according to
 
 ## Next stage
 
-Stage 05 establishes the SQLite schema, migration strategy, local file store,
-and persistence contracts. It must not begin until Stage 04 is reviewed and
-approved by the project owner.
+Stage 06 adds local Ed25519 identity generation, stable public identity IDs,
+signed-record verification, encrypted identity backup, and cross-platform
+cryptographic vectors on top of the Stage 05 storage layer. It must not begin
+until Stage 05 is reviewed and approved by the project owner.

@@ -3,15 +3,15 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-DEPS-001 |
-| Version | 1.1.0 |
-| Status | Stage 03 baseline locked; later-stage direct dependencies remain planned |
+| Version | 1.2.0 |
+| Status | Stage 05 storage dependencies realized; later-stage direct dependencies remain planned |
 | Date | 2026-11-13 |
 | Policy source | [ADR-0009](../decisions/ADR-0009-build-packaging-dependency-policy.md) |
 | Architecture | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 
 ## 1. Purpose and scope
 
-This inventory records the direct runtime, test, and build dependencies planned for NEXUS v1, their pinned compatibility versions, licenses, platform use, purpose, and fallback. Stage 03 establishes the build baseline and realizes only the dependencies needed by the empty shells and shared foundation. Product dependencies marked as planned in this document are activated in the stage that implements the owning feature. `Cargo.lock` is committed for the realized Rust graph; Gradle dependency locking and verification metadata are required before the first signed release.
+This inventory records the direct runtime, test, and build dependencies planned for NEXUS v1, their pinned compatibility versions, licenses, platform use, purpose, and fallback. Stage 03 realizes the build-baseline dependencies needed by the empty shells and shared foundation. Stage 05 realizes the storage dependencies listed in section 4.1: bundled SQLite through `rusqlite`/`libsqlite3-sys`, CBOR metadata archives, SHA-256 hashing, typed errors, and managed-store locking. Every other row in this table is planned for the stage that implements the owning feature and is not resolved by the current workspace. `Cargo.lock` contains 71 packages, including the twelve workspace crates and the transitive graphs of the realized dependencies.
 
 The inventory covers:
 
@@ -63,11 +63,11 @@ Build-only tools may use other licenses because they are not distributed with th
 
 ## 4. Rust direct dependencies
 
-Stage 03 realizes only `tracing` and `tracing-subscriber`. Every other row in
-this table is planned for the stage that implements the owning feature and is
-not resolved by the current workspace. `Cargo.lock` contains 34 packages,
-including the twelve workspace crates and the transitive graph of the two
-realized dependencies.
+Stage 03 realizes `tracing` and `tracing-subscriber`; Stage 05 adds the storage
+dependencies listed in section 4.1. Every other row in this table is planned for
+the stage that implements the owning feature and is not resolved by the current
+workspace. `Cargo.lock` contains 71 packages, including the twelve workspace
+crates and the transitive graphs of the realized dependencies.
 
 | Dependency | Pin | License | Platform | Purpose | Fallback |
 |---|---|---|---|---|---|
@@ -98,20 +98,20 @@ realized dependencies.
 | fs2 | 0.4.3 | MIT OR Apache-2.0 | Both | Store lock and free-space queries. | Platform-specific file lock and statvfs APIs. |
 | jni | 0.22.4 | MIT OR Apache-2.0 | Android | JNI shim for the C ABI. | JNA on Android. |
 
-### 4.1 Stage 03 locked Rust graph
+### 4.1 Stage 03 and Stage 05 locked Rust graph
 
 | Direct crate | Version | License | Purpose |
 |---|---|---|---|
 | `tracing` | 0.1.44 | MIT | Structured event emission. |
 | `tracing-subscriber` | 0.3.23 | MIT | Environment filter and stderr formatter. |
+| `rusqlite` | 0.42.0 | MIT | SQLite access, transactions, backup API, and migrations. Enabled with `backup`, `bundled`, and `fallible_uint`. |
+| `serde` | 1.0.229 | MIT OR Apache-2.0 | CBOR manifest serialization traits and derives. |
+| `ciborium` | 0.2.2 | Apache-2.0 | Versioned CBOR metadata manifests. |
+| `sha2` | 0.11.1 | MIT OR Apache-2.0 | SHA-256 content IDs, archive hashes, and migration checksums. |
+| `thiserror` | 2.0.21 | MIT OR Apache-2.0 | Typed storage errors with actionable context. |
+| `fs2` | 0.4.3 | MIT OR Apache-2.0 | Exclusive managed-store lock and free-space reporting. |
 
-Transitive crates in the committed `Cargo.lock` are limited to the graph of
-those two crates, including `tracing-core`, `tracing-attributes`, `matchers`,
-`regex-automata`, `sharded-slab`, `thread_local`, `nu-ansi-term`, and their small
-supporting dependencies such as `windows-sys`. All are MIT, Apache-2.0, or
-Unicode-3.0 licensed and are checked by `cargo-deny`. No SQLite, networking,
-cryptography, or JNA crate is linked in Stage 03. Run
-`cargo tree -p nexus-observability` for the exact realized graph.
+`libsqlite3-sys` 0.40.0 is realized transitively and compiles the bundled SQLite amalgamation with FTS5. The SQLite graph adds `bitflags`, `fallible-iterator`, `fallible-streaming-iterator`, `smallvec`, and the build-only `cc`, `find-msvc-tools`, `pkg-config`, `shlex`, and `vcpkg` crates. The CBOR, serde, hashing, and error graphs add `ciborium-io`, `ciborium-ll`, `half`, `zerocopy`, `zerocopy-derive`, `serde_core`, `serde_derive`, `proc-macro2`, `quote`, `syn` 2 and 3, `unicode-ident`, `cfg-if`, `cpufeatures`, `digest`, `block-buffer`, `hybrid-array`, `typenum`, `const-oid`, `crypto-common`, `thiserror-impl`, `winapi`, and `winapi-x86_64-pc-windows-gnu`. All are MIT, Apache-2.0, BSD, Zlib, or Unicode-3.0 licensed and are checked by `cargo-deny`. Run `cargo tree -p nexus-store` for the exact realized graph.
 
 ## 5. Kotlin, Compose, and JVM dependencies
 
@@ -205,22 +205,24 @@ Update cadence:
 - Major updates require an ADR or an amendment to this inventory and a cross-platform build.
 - Lockfiles are committed. Release builds use `--locked` and fail on an unlocked dependency.
 
-## 10. Stage 03 verification status
+## 10. Stage 03 and Stage 05 verification status
 
-Stage 03 verifies the build baseline. Feature-specific verification is deferred
-to the stage that activates the dependency, so the project does not claim
-runtime evidence it does not have.
+Stage 03 verifies the build baseline and Stage 05 verifies the realized storage
+graph. Feature-specific verification is deferred to the stage that activates
+the dependency, so the project does not claim runtime evidence it does not have.
 
 | Task | Stage | Status and evidence |
 |---|---|---|
 | Install and record the exact JDK, Gradle, Rust, NDK, and local linker versions. | 03 | Complete. `docs/progress/STAGE_03.md` records the exact versions. MSVC and the Windows SDK are absent locally; CI and release remain MSVC. |
-| Generate `Cargo.lock`; confirm the realized Rust graph resolves. | 03 | Complete. 34 packages, `cargo tree` and `cargo test --workspace` pass. |
-| Run `cargo deny check` and `cargo audit`; record the transitive license and advisory reports. | 03 | Complete for the realized tracing graph; evidence in `docs/progress/STAGE_03.md`. |
-| Confirm FTS5, WAL, and bundled SQLite compile for Android arm64 and x86_64 and Windows x64. | 05 | Deferred; SQLite is not a Stage 03 dependency. |
-| Confirm QUIC builds with the chosen crypto provider on both platforms, or activate the TCP fallback. | 09 | Deferred; libp2p is not a Stage 03 dependency. |
-| Confirm JNA 5.19.1 loads the Windows DLL and JNI loads the Android `.so`. | 08 | Deferred; the FFI bridge is not wired in Stage 03. |
+| Generate `Cargo.lock`; confirm the realized Rust graph resolves. | 03, 05 | Complete. Stage 05 resolves 71 packages; `cargo tree -p nexus-store` and `cargo test --workspace` pass. |
+| Run `cargo deny check` and `cargo audit`; record the transitive license and advisory reports. | 03, 05 | Complete for the realized tracing and storage graphs. Stage 05 reports `advisories ok, bans ok, licenses ok, sources ok`; `cargo audit` scanned 71 dependencies against 1,509 advisories. |
+| Confirm FTS5, WAL, and bundled SQLite compile and run on Windows x64. | 05 | Complete. `nexus-store` builds bundled SQLite 3.x through `libsqlite3-sys` 0.40.0, applies WAL, foreign keys, a busy timeout, and a bounded cache, and creates the FTS5 `search_index` table in migration 2. The 28 storage tests pass on the local GNU/MinGW host. |
+| Confirm FTS5, WAL, and bundled SQLite compile for Android arm64 and x86_64. | 05, 08 | Deferred. The Kotlin shells do not link `nexus-store` yet, so no Android cross-compiled SQLite binary is built or packaged. This must be verified before the first Android FFI integration. |
+| Confirm the CBOR metadata manifest and archive hashes round-trip. | 05 | Complete. `data_007_metadata_export_and_restore_round_trip` reads the archive magic, manifest length, raw snapshot hash, and CBOR manifest, then restores into a separate store and verifies its contents. |
+| Confirm QUIC builds with the chosen crypto provider on both platforms, or activate the TCP fallback. | 09 | Deferred; libp2p is not a dependency yet. |
+| Confirm JNA 5.19.1 loads the Windows DLL and JNI loads the Android `.so`. | 08 | Deferred; the FFI bridge is not wired yet. |
 | Confirm Android Rust cross-compilation and native library packaging. | 08 | Deferred. The NDK and Android Rust targets are installed, but no `.so` is packaged yet. |
-| Confirm Inno Setup 6.4.3 produces a per-user installer and prompts on uninstall. | 19 | Deferred; Stage 03 produces an app image only. |
+| Confirm Inno Setup 6.4.3 produces a per-user installer and prompts on uninstall. | 19 | Deferred; releases produce an app image only until Stage 19. |
 | Confirm the bundled JDK notices and source availability text are packaged. | 19 | Deferred to release packaging. |
 
 ## 11. Dependency ownership
