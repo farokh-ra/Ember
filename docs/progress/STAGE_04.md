@@ -302,6 +302,30 @@ local review but is not committed because it contains the host desktop.
 No Android emulator or physical device is installed in this environment, so the
 APK was built and tested but not launched at runtime.
 
+### Clean checkout
+
+The Stage 04 commit `2dc053e405b7bb2f8860cec4b2b0dc396da968d3` was cloned into
+`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-cb0c27ef`, and the full gate ran
+there:
+
+```text
+.\scripts\verify-clean-checkout.ps1
+```
+
+Result: PASS, exit 0.
+
+- Gradle reported `BUILD SUCCESSFUL in 42s`.
+- Android `assembleDebug` and desktop `createDistributable` executed.
+- All 65 JVM tests passed. Some Kotlin compile and test tasks were served from
+  the local Gradle build cache with matching source inputs; Android packaging,
+  desktop runtime-image creation, and the Rust workspace compiled freshly.
+- Rust format, Clippy, workspace tests, and repository hygiene passed.
+- The temporary clone was removed after the run.
+
+This proves that the committed source builds through the documented setup
+without untracked local files. The follow-up evidence commit changes only
+documentation and does not alter build inputs.
+
 ### Failure evidence
 
 - `StateLabelsTest` first failed because offline and degraded shared the same
@@ -367,7 +391,7 @@ After committing:
 .\scripts\verify-clean-checkout.ps1
 ```
 
-The clean-checkout result is recorded in the Stage 04 completion commit and
+The clean-checkout result is recorded in section 10 and in
 `docs/HANDOFF.md`.
 
 ## 13. Next stage

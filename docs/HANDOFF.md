@@ -153,14 +153,18 @@ Both pass.
 
 ### Clean checkout
 
-After committing Stage 04, run:
+`scripts/verify-clean-checkout.ps1` cloned commit
+`2dc053e405b7bb2f8860cec4b2b0dc396da968d3` into
+`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-cb0c27ef` and ran the full gate.
+It returned exit 0: Gradle reported `BUILD SUCCESSFUL in 42s`, the Android debug
+APK and Windows app image were assembled, all 65 JVM tests passed, Rust format,
+Clippy, tests, and hygiene passed. Some Kotlin tasks were served from the local
+Gradle build cache with matching inputs; Android packaging, desktop runtime
+image creation, and the Rust workspace compiled freshly. The clone was removed
+afterwards.
 
-```powershell
-.\scripts\verify-clean-checkout.ps1
-```
-
-The result is recorded in the follow-up evidence commit. The follow-up changes
-only documentation, so it does not alter build inputs.
+The follow-up evidence commit changes only documentation, so it does not alter
+build inputs.
 
 ## Errors and failed attempts
 
