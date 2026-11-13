@@ -131,16 +131,16 @@ Result: PASS, exit 0, `All requested local checks passed.`
 
 ```text
 python scripts/check_repo_hygiene.py
-python scripts/check_commit_message.py "feat(crypto): add identity and signed records"
+python scripts/check_commit_message.py "fix(identity): harden vault paths and restore handling"
 ```
 
 Both pass.
 
 ### Clean checkout
 
-After commit `fa40fcf` (`feat(crypto): add identity and signed records`),
-`scripts/verify-clean-checkout.ps1` cloned `HEAD` into
-`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-96faa4d6` and ran the build, tests,
+After commit `ecbd659` (`fix(identity): harden vault paths and restore
+handling`), `scripts/verify-clean-checkout.ps1` cloned `HEAD` into
+`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-32257651` and ran the build, tests,
 and hygiene gate. It returned exit 0: Gradle built the Android debug APK and
 Windows app image, all 65 JVM tests passed, Rust format, Clippy, and all 98
 workspace tests passed, and repository hygiene passed. The clone was removed
