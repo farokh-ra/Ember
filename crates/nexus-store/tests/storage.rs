@@ -248,6 +248,11 @@ fn data_004_safe_export_names_and_no_silent_overwrite() {
         Some(".._.._report (1).bin")
     );
 
+    let error = store
+        .export_content(&imported.content_id, store.store_path(), "inside.bin")
+        .expect_err("exports must stay outside the managed store");
+    assert!(matches!(error, StoreError::UnsafePath(_)));
+
     assert_eq!(safe_display_name("CON"), "_CON");
     assert_eq!(safe_display_name(""), "untitled");
 }
@@ -373,6 +378,31 @@ fn data_006_reference_counting_and_confirmation_rules() {
     assert_eq!(outcome, nexus_store::ReleaseOutcome::BytesDeleted);
     assert!(!blob_path(&root, &content).exists());
     assert!(!store.content_exists(&content).expect("content existence"));
+
+    let partial_content = content_id(b"partial cleanup");
+    store
+        .begin_download("download-cleanup", &partial_content, 8, "cleanup.bin")
+        .expect("begin cleanup download");
+    let partial = store.partial_path("download-cleanup").expect("partial path");
+    fs::write(&partial, b"partial!").expect("write partial");
+    store
+        .checkpoint_partial("download-cleanup", 8)
+        .expect("checkpoint partial");
+    assert_eq!(store.usage().expect("usage").partial_bytes, 8);
+
+    assert_eq!(
+        store.cleanup_partials(3_600, true).expect("recent partial is retained"),
+        0
+    );
+    let error = store
+        .cleanup_partials(0, false)
+        .expect_err("partial cleanup requires confirmation");
+    assert!(matches!(error, StoreError::ConfirmationRequired(_)));
+    assert!(store.download("download-cleanup").is_ok());
+    assert_eq!(store.cleanup_partials(0, true).expect("remove old partial"), 1);
+    assert!(store.download("download-cleanup").is_err());
+    assert!(!partial.exists());
+    assert_eq!(store.usage().expect("usage").partial_bytes, 0);
 }
 
 #[test]
@@ -448,6 +478,19 @@ fn data_007_metadata_export_and_restore_round_trip() {
         error,
         StoreError::CorruptArchive(_) | StoreError::IncompatibleArchive(_) | StoreError::Database(_)
     ));
+    assert_eq!(
+        sentinel.get_setting("sentinel").expect("setting"),
+        Some("keep me".to_owned())
+    );
+
+    let incompatible = sentinel_root.path.join("incompatible.nexus");
+    let mut bytes = fs::read(&archive).expect("archive bytes");
+    bytes[15..17].copy_from_slice(&2_u16.to_le_bytes());
+    fs::write(&incompatible, bytes).expect("write incompatible archive");
+    let error = sentinel
+        .restore_metadata(&incompatible)
+        .expect_err("incompatible archive must be rejected");
+    assert!(matches!(error, StoreError::IncompatibleArchive(_)));
     assert_eq!(
         sentinel.get_setting("sentinel").expect("setting"),
         Some("keep me".to_owned())
