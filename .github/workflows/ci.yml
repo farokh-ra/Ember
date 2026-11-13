@@ -145,6 +145,7 @@ jobs:
           :shared:core-api:jvmTest
           :shared:core-client:jvmTest
           :shared:presentation:jvmTest
+          :shared:ui:jvmTest
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
