@@ -408,9 +408,9 @@ check.
 ### Clean checkout
 
 The Stage 05 test-pass commit
-`3535eee13dc755683f3abfd15db052fca03b379c` was cloned into
-`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-400c95a5`, and the full gate ran
-there:
+`700f4138b440a6d2541f1ee47fcba1e7a2aca310` was cloned into
+`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-aeafcf3e`, and the clean-checkout
+gate ran there:
 
 ```text
 .\scripts\verify-clean-checkout.ps1
@@ -418,16 +418,19 @@ there:
 
 Result: PASS, exit 0, `All requested local checks passed.`
 
-- Gradle reported `BUILD SUCCESSFUL in 47s`; Android debug assembly and the
+- Gradle reported `BUILD SUCCESSFUL in 46s`; Android debug assembly and the
   Windows app image passed.
 - All 65 JVM tests passed. Some Kotlin compile and test tasks were served from
   the local Gradle build cache with matching source inputs; Android packaging,
   desktop runtime-image creation, and the Rust workspace compiled freshly.
 - Rust format, Clippy with warnings denied, and all 34 workspace tests passed.
   `nexus-store` ran its 16 unit and 12 integration tests.
-- `cargo deny` reported all four policies passing, and `cargo audit` scanned the
-  committed 71-package graph with no vulnerability reported.
 - Repository hygiene scanned 186 files.
+
+`verify-clean-checkout.ps1` runs `build.ps1` without `-WithDependencyScan`, so
+the clean-checkout run does not repeat `cargo deny` or `cargo audit`. Those
+policies were verified separately in the full local gate above against the same
+committed dependency graph.
 
 The temporary clone was removed after the run. This proves that the committed
 Stage 05 tree builds and tests from a clean checkout without untracked local
