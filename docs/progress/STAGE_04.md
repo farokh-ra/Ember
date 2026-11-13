@@ -138,10 +138,14 @@ The component package includes:
 - Interactive components receive a visible 2 dp focus ring.
 - Controls use Material roles and semantics so assistive technology can report
   button, radio, tab, and selection state.
-- Escape performs back navigation on desktop when a back action is available.
+- Escape performs back navigation on desktop when a back action is available. The
+  shared root handler covers focused controls, and the desktop window handles
+  Escape when no Compose child owns focus.
 - Android installs `BackHandler`; back is ignored when the current screen is the
   root of its journey.
-- The top bar exposes a labelled back button for discoverability.
+- The shell top bar exposes a labelled back button for discoverability. Expanded
+  screens also show a header back action; compact screens rely on the shell top
+  bar so Back is not duplicated.
 
 ## 6. Screen prototypes
 
@@ -250,9 +254,10 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 .\scripts\build.ps1 -WithDependencyScan
 ```
 
-Result: exit 0, `All requested local checks passed.`
+Result: PASS, exit 0, `All requested local checks passed.` Re-run after the two
+runtime fixes below.
 
-- Gradle `BUILD SUCCESSFUL`; Spotless and detekt passed.
+- Gradle `BUILD SUCCESSFUL in 1m 6s`; Spotless and detekt passed.
 - `:apps:androidApp:assembleDebug` passed.
 - `:apps:desktopApp:createDistributable` passed.
 - `:shared:presentation:jvmTest` and `:shared:ui:jvmTest` passed.
@@ -261,8 +266,40 @@ Result: exit 0, `All requested local checks passed.`
 - `cargo deny check` passed: `advisories ok, bans ok, licenses ok, sources ok`.
 - `cargo audit` scanned 34 crate dependencies against 1,490 advisories with no
   vulnerability reported.
-- Repository hygiene passed: 171 files scanned, 7 forbidden names, 10 forbidden
+- Repository hygiene passed: 172 files scanned, 7 forbidden names, 10 forbidden
   suffixes, and 7 secret patterns.
+
+### Manual desktop test pass
+
+The rebuilt Windows app image was exercised through the documented journeys at
+an expanded client size of 1582x853 px and a compact client size of 982x753 px
+(about 786 dp wide). Checks performed:
+
+- Welcome, demo onboarding, Explore categories and cards, Search with a query and
+  results, Downloads delete confirmation and snackbar, Hosted files and Stop
+  hosting confirmation, Publish, Profile, Network status, and Settings.
+- Five content states on Explore: Ready, Loading, Empty, Offline, and Error.
+- Four global network states on Explore and Network status: Offline, Connecting,
+  Online, and Degraded.
+- Light, Dark, and System theme selection; Light persisted across a full restart.
+- Keyboard Tab focus rings and Enter activation on rail items and action rows.
+- Escape back with no focused Compose child, after the window-level fix.
+- Compact top bar, bottom navigation, Explore, Search, Settings, and File details.
+- Expanded and compact File details back affordances.
+- Demo banner wrapping at 1082x713 and 1272x713 px client sizes.
+
+Two defects were found and fixed:
+
+1. Escape did nothing when no Compose child owned focus after mouse-only
+   navigation. The desktop `Window` now handles Escape through
+   `onPreviewKeyEvent`; the shared root handler remains for focused and Android
+   cases.
+2. Compact File details rendered both the shell top-bar Back button and the
+   screen header Back button. The header now renders Back only at expanded
+   width.
+
+A suspected banner clipping issue at narrow desktop widths did not reproduce at
+1082 or 1272 px client widths; the text wrapped fully. No banner code changed.
 
 ### Kotlin tests
 
@@ -286,18 +323,19 @@ Presentation subtotal: 44. Shared UI subtotal: 21.
 
 | Artifact | Path | Size |
 |---|---|---|
-| Android debug APK | `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk` | 30,661,291 bytes |
-| Windows app image | `apps/desktopApp/build/compose/binaries/main/app/NEXUS` | 130,621,045 bytes across 200 files |
+| Android debug APK | `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk` | 31,039,671 bytes |
+| Windows app image | `apps/desktopApp/build/compose/binaries/main/app/NEXUS` | 130,622,747 bytes across 200 files |
 | Windows launcher | `.../app/NEXUS/NEXUS.exe` | 540,672 bytes |
 
 ### Runtime smoke test
 
-The Windows app image was launched from a clean start, left running for eight
-seconds, and captured. It rendered the welcome screen in dark theme with the
-NEXUS wordmark, the stage preview label, the persistent preview/network banner,
-demo data badges, and both onboarding actions. The process stayed alive and
-closed normally through the window close request. A screenshot was captured for
-local review but is not committed because it contains the host desktop.
+The rebuilt Windows app image was launched from a clean start and exercised
+through the manual desktop test pass above. It rendered the welcome screen in
+the persisted Light theme with the NEXUS wordmark, stage preview label,
+persistent preview/network banner, demo data badges, and both onboarding
+actions. It stayed running through the expanded and compact journeys and closed
+normally through the window close request. Screenshots were captured for local
+review but are not committed because they contain the host desktop.
 
 No Android emulator or physical device is installed in this environment, so the
 APK was built and tested but not launched at runtime.
@@ -339,6 +377,12 @@ documentation and does not alter build inputs.
   palette/icon/brand files use a narrow file-level magic-number suppression,
   the test package was corrected, and the early-return functions carry narrow
   `ReturnCount` suppressions.
+- Escape did nothing on desktop when no Compose child owned focus after
+  mouse-only navigation. The window now handles Escape while the shared root
+  handler continues to cover focused controls and Android.
+- Compact File details displayed two Back buttons because the screen header and
+  the compact shell top bar both rendered one. The header Back action is now
+  limited to expanded layouts.
 
 ## 11. Known limitations
 
@@ -356,6 +400,9 @@ documentation and does not alter build inputs.
 - The Windows app image is not an installer. Inno Setup packaging is Stage 19.
 - GitHub Actions has not run remotely; the workflow runs the same commands that
   pass locally.
+- Desktop GUI automation was intermittent: the test harness occasionally missed
+  click targets or lost foreground focus. Keyboard navigation and screenshot
+  review were used to complete and confirm the journeys.
 - Local Rust uses the GNU/MinGW host because MSVC C++ tools are unavailable.
   CI and release remain MSVC.
 - Real screens will be revisited as features land; Stage 04 prototypes are not

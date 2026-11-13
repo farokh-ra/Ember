@@ -25,7 +25,8 @@ begin in Stage 05 and later.
 | Clickable screen prototypes | Complete; eleven screens with demo data |
 | Dark, light, and system themes | Complete; selection persists |
 | Loading, empty, offline, error, and retry states | Complete on data-driven screens |
-| Accessibility and keyboard support | Implemented and tested where automatable |
+| Accessibility and keyboard support | Implemented; focus, keyboard, and Escape checks passed |
+| Stage 04 desktop test pass | Complete; journeys, five states, themes, and compact layout verified |
 | Formatting, linting, and static analysis | Enforced locally and in CI |
 | CI workflow and dependency review | Defined |
 | Developer setup and contribution guides | Complete |
