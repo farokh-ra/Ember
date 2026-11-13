@@ -66,6 +66,13 @@ All notable changes to NEXUS are recorded here. The format follows
   Compose Multiplatform 1.12.2, Material3 1.9.0, AGP 9.5.1, Rust 1.99.1, and
   Android NDK 29.0.14206865.
 
+### Fixed
+
+- Desktop Escape now navigates back when no Compose child owns focus after
+  mouse-only navigation.
+- Compact screen headers no longer duplicate the shell top-bar Back button;
+  expanded layouts keep the header Back action.
+
 ### Security
 
 - No API keys, private keys, keystores, or signing material are committed.
@@ -83,6 +90,8 @@ All notable changes to NEXUS are recorded here. The format follows
   were not exercised on a device or emulator in this environment.
 - Desktop reduced motion is a no-op in Stage 04; Android reads the system
   animator scale.
+- Desktop GUI automation was intermittent during the Stage 04 test pass; keyboard
+  navigation and screenshot review were used to complete the journeys.
 - The Windows application image is not yet an installer; Inno Setup packaging is
   Stage 19.
 - The local non-admin Windows toolchain uses a MinGW GNU Rust host when MSVC C++

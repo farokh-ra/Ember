@@ -95,16 +95,35 @@ Documentation:
 .\scripts\build.ps1 -WithDependencyScan
 ```
 
-Result: exit 0, `All requested local checks passed.`
+Result: PASS, exit 0, `All requested local checks passed.` Re-run after the two
+runtime fixes below.
 
-- Gradle `BUILD SUCCESSFUL`; Spotless and detekt passed.
+- Gradle `BUILD SUCCESSFUL in 1m 6s`; Spotless and detekt passed.
 - Android debug APK and Windows desktop app image built.
 - Presentation and UI JVM tests passed: 65 tests, 0 failures.
 - Rust format, Clippy with warnings denied, and workspace tests passed.
 - `cargo deny check` passed all four policies.
 - `cargo audit` scanned 34 crate dependencies against 1,490 advisories with no
   vulnerabilities.
-- Repository hygiene passed.
+- Repository hygiene passed: 172 files scanned.
+
+### Manual desktop test pass
+
+The rebuilt Windows app image was exercised at 1582x853 px expanded and
+982x753 px compact client sizes. Covered journeys: Welcome, demo onboarding,
+Explore categories and cards, Search, Downloads delete confirmation and
+snackbar, Hosted files and Stop hosting confirmation, Publish, Profile, Network
+status, and Settings. Also verified the five content states, four network
+states, Light/Dark/System themes, Light persistence across restart, Tab focus
+rings, Enter activation, Escape back, compact navigation, and banner wrapping.
+
+Two defects were found and fixed:
+
+1. Escape with no focused Compose child did not navigate back. The desktop
+   `Window` now handles it with `onPreviewKeyEvent`; the shared root handler
+   remains for focused and Android cases.
+2. Compact File details showed both the shell top-bar Back button and the screen
+   header Back button. The header now renders Back only at expanded width.
 
 ### Test breakdown
 
@@ -126,18 +145,19 @@ Presentation subtotal: 44. Shared UI subtotal: 21.
 
 - Android debug APK:
   `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk`,
-  30,661,291 bytes.
+  31,039,671 bytes.
 - Windows app image:
-  `apps/desktopApp/build/compose/binaries/main/app/NEXUS`, 130,621,045 bytes
+  `apps/desktopApp/build/compose/binaries/main/app/NEXUS`, 130,622,747 bytes
   across 200 files.
 - Windows launcher: `.../app/NEXUS/NEXUS.exe`, 540,672 bytes.
 
 ### Runtime smoke test
 
-The Windows app image launched and rendered the welcome screen in dark theme
-with the NEXUS wordmark, preview label, persistent network-inactive banner, demo
-badges, and both onboarding actions. It stayed running and closed normally
-through the window close request.
+The rebuilt Windows app image launched and rendered the welcome screen in the
+persisted Light theme with the NEXUS wordmark, preview label, persistent
+network-inactive banner, demo badges, and both onboarding actions. It stayed
+running through the expanded and compact journeys and closed normally through
+the window close request.
 
 No Android emulator or physical device is installed, so the APK was not launched
 at runtime.
@@ -190,6 +210,12 @@ build inputs.
 7. The global preview bar and network selector are prototype controls, not
    product settings. They remain visibly labelled as simulated to avoid implying
    that networking works.
+8. Escape did nothing on desktop when no Compose child owned focus after
+   mouse-only navigation. The window now handles Escape while the shared root
+   handler continues to cover focused controls and Android.
+9. Compact File details displayed two Back buttons because the screen header and
+   the compact shell top bar both rendered one. The header Back action is now
+   limited to expanded layouts.
 
 ## Decisions and unresolved questions
 
@@ -205,6 +231,10 @@ build inputs.
 - The responsive breakpoint is 840 dp: side rail at or above, bottom bar below.
 - Navigation state is owned by `NexusAppController` so Android can restore it and
   install `BackHandler`; desktop uses `remember`.
+- Escape is handled at the desktop window level as a fallback when no Compose
+  child owns focus; the shared root handler still covers focused controls.
+- Compact layouts own Back in the shell top bar; screen headers render a Back
+  action only when expanded.
 - Persistence tokens are versioned; invalid tokens fall back to a safe
   first-launch state.
 - Compose declarative functions are exempt from detekt complexity and naming
@@ -216,6 +246,9 @@ build inputs.
 - The Windows app image is not an installer. Inno Setup packaging is Stage 19.
 - Remote GitHub Actions execution and device-level TalkBack/Narrator/200%
   scaling validation remain environment limitations.
+- Desktop GUI automation was intermittent: the harness occasionally missed click
+  targets or lost foreground focus. Keyboard navigation and screenshot review
+  were used to complete and confirm the Stage 04 test pass.
 
 ## Exact next action
 
