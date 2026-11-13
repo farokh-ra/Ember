@@ -2,6 +2,10 @@ package io.nexus.desktop
 
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
@@ -29,6 +33,19 @@ fun main() =
                     width = INITIAL_WINDOW_WIDTH_DP.dp,
                     height = INITIAL_WINDOW_HEIGHT_DP.dp,
                 ),
+            // Handle Escape at the window level so Back works even while no
+            // Compose child owns focus after mouse-only navigation.
+            onPreviewKeyEvent = { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    event.key == Key.Escape &&
+                    controller.state.canGoBack
+                ) {
+                    controller.back()
+                    true
+                } else {
+                    false
+                }
+            },
         ) {
             LaunchedEffect(Unit) {
                 window.minimumSize = Dimension(MINIMUM_WINDOW_WIDTH, MINIMUM_WINDOW_HEIGHT)
