@@ -3,15 +3,15 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-DEPS-001 |
-| Version | 1.3.0 |
-| Status | Stage 06 crypto, identity, and protocol dependencies realized; later-stage direct dependencies remain planned |
-| Date | 2026-11-13 |
+| Version | 1.4.0 |
+| Status | Stage 07 manifest, transfer, and store dependencies realized; later-stage direct dependencies remain planned |
+| Date | 2026-11-14 |
 | Policy source | [ADR-0009](../decisions/ADR-0009-build-packaging-dependency-policy.md) |
 | Architecture | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 
 ## 1. Purpose and scope
 
-This inventory records the direct runtime, test, and build dependencies planned for NEXUS v1, their pinned compatibility versions, licenses, platform use, purpose, and fallback. Stage 03 realizes the build-baseline dependencies needed by the empty shells and shared foundation. Stage 05 realizes the storage dependencies listed in section 4.1: bundled SQLite through `rusqlite`/`libsqlite3-sys`, CBOR metadata archives, SHA-256 hashing, typed errors, and managed-store locking. Stage 06 realizes the cryptographic primitives, canonical encoding, identity storage, and signed-record validation dependencies: Ed25519, Bech32m, XChaCha20-Poly1305, HKDF, Argon2id, NFC normalization, OS randomness, and secret zeroization. Every other row in this table is planned for the stage that implements the owning feature and is not resolved by the current workspace. `Cargo.lock` contains 109 packages, including the twelve workspace crates and the transitive graphs of the realized dependencies.
+This inventory records the direct runtime, test, and build dependencies planned for NEXUS v1, their pinned compatibility versions, licenses, platform use, purpose, and fallback. Stage 03 realizes the build-baseline dependencies needed by the empty shells and shared foundation. Stage 05 realizes the storage dependencies listed in section 4.1: bundled SQLite through `rusqlite`/`libsqlite3-sys`, CBOR metadata archives, SHA-256 hashing, typed errors, and managed-store locking. Stage 06 realizes the cryptographic primitives, canonical encoding, identity storage, and signed-record validation dependencies: Ed25519, Bech32m, XChaCha20-Poly1305, HKDF, Argon2id, NFC normalization, OS randomness, and secret zeroization. Stage 07 realizes the streaming manifest and verification path through `sha2` plus the existing `nexus-crypto` and `nexus-protocol` crates, and wires both into `nexus-transfer` and `nexus-store`. Every other row in this table is planned for the stage that implements the owning feature and is not resolved by the current workspace. `Cargo.lock` contains 109 packages, including the twelve workspace crates and the transitive graphs of the realized dependencies.
 
 The inventory covers:
 
@@ -65,8 +65,9 @@ Build-only tools may use other licenses because they are not distributed with th
 
 Stage 03 realizes `tracing` and `tracing-subscriber`; Stage 05 adds the storage
 dependencies listed in section 4.1; Stage 06 adds the crypto, identity, and
-signed-record dependencies. Every other row in this table is planned for the
-stage that implements the owning feature and is not resolved by the current
+signed-record dependencies; Stage 07 adds the streaming transfer and manifest
+store wiring over those same crates. Every other row in this table is planned for
+the stage that implements the owning feature and is not resolved by the current
 workspace. `Cargo.lock` contains 109 packages, including the twelve workspace
 crates and the transitive graphs of the realized dependencies.
 
@@ -99,7 +100,7 @@ crates and the transitive graphs of the realized dependencies.
 | fs2 | 0.4.3 | MIT OR Apache-2.0 | Both | Store lock and free-space queries. | Platform-specific file lock and statvfs APIs. |
 | jni | 0.22.4 | MIT OR Apache-2.0 | Android | JNI shim for the C ABI. | JNA on Android. |
 
-### 4.1 Stage 03, Stage 05, and Stage 06 locked Rust graph
+### 4.1 Stage 03, Stage 05, Stage 06, and Stage 07 locked Rust graph
 
 | Direct crate | Version | License | Purpose |
 |---|---|---|---|
@@ -117,11 +118,11 @@ crates and the transitive graphs of the realized dependencies.
 | `unicode-normalization` | 0.1.26 | (MIT OR Apache-2.0) AND Unicode-3.0 | NFC normalization of user text and passphrases. |
 | `zeroize` | 1.9.1 | Apache-2.0 OR MIT | Secret zeroization for keys and derived material. |
 | `hex` | 0.4.3 | MIT OR Apache-2.0 | ID display and committed test vectors. |
-| `sha2` | 0.11.1 | MIT OR Apache-2.0 | SHA-256 content IDs, archive hashes, migration checksums, and domain-separated hashes. |
-| `thiserror` | 2.0.21 | MIT OR Apache-2.0 | Typed crypto, identity, protocol, and storage errors with actionable context. |
+| `sha2` | 0.11.1 | MIT OR Apache-2.0 | SHA-256 content IDs, chunk and manifest hashes, archive hashes, migration checksums, and domain-separated hashes. |
+| `thiserror` | 2.0.21 | MIT OR Apache-2.0 | Typed crypto, identity, protocol, transfer, and storage errors with actionable context. |
 | `fs2` | 0.4.3 | MIT OR Apache-2.0 | Exclusive managed-store lock and free-space reporting. |
 
-`libsqlite3-sys` 0.40.0 is realized transitively and compiles the bundled SQLite amalgamation with FTS5. The SQLite graph adds `bitflags`, `fallible-iterator`, `fallible-streaming-iterator`, `smallvec`, and the build-only `cc`, `find-msvc-tools`, `pkg-config`, `shlex`, and `vcpkg` crates. The CBOR, serde, hashing, and error graphs add `ciborium-io`, `ciborium-ll`, `half`, `zerocopy`, `zerocopy-derive`, `serde_core`, `serde_derive`, `proc-macro2`, `quote`, `syn` 2 and 3, `unicode-ident`, `cfg-if`, `cpufeatures`, `digest`, `block-buffer`, `hybrid-array`, `typenum`, `const-oid`, `crypto-common`, `thiserror-impl`, `winapi`, and `winapi-x86_64-pc-windows-gnu`. The Stage 06 crypto graph adds `aead`, `chacha20`, `poly1305`, `cipher`, `cmov`, `crypto-common`, `curve25519-dalek`, `curve25519-dalek-derive`, `ed25519`, `signature`, `rand_core`, `blake2`, `password-hash`, `phc`, `universal-hash`, `subtle`, `inout`, `base64ct`, `hmac`, and `zeroize_derive`. All are MIT, Apache-2.0, BSD, Zlib, or Unicode-3.0 licensed and are checked by `cargo-deny`. Run `cargo tree -p nexus-crypto -p nexus-identity -p nexus-protocol` for the exact realized graph.
+`libsqlite3-sys` 0.40.0 is realized transitively and compiles the bundled SQLite amalgamation with FTS5. The SQLite graph adds `bitflags`, `fallible-iterator`, `fallible-streaming-iterator`, `smallvec`, and the build-only `cc`, `find-msvc-tools`, `pkg-config`, `shlex`, and `vcpkg` crates. The CBOR, serde, hashing, and error graphs add `ciborium-io`, `ciborium-ll`, `half`, `zerocopy`, `zerocopy-derive`, `serde_core`, `serde_derive`, `proc-macro2`, `quote`, `syn` 2 and 3, `unicode-ident`, `cfg-if`, `cpufeatures`, `digest`, `block-buffer`, `hybrid-array`, `typenum`, `const-oid`, `crypto-common`, `thiserror-impl`, `winapi`, and `winapi-x86_64-pc-windows-gnu`. The Stage 06 crypto graph adds `aead`, `chacha20`, `poly1305`, `cipher`, `cmov`, `crypto-common`, `curve25519-dalek`, `curve25519-dalek-derive`, `ed25519`, `signature`, `rand_core`, `blake2`, `password-hash`, `phc`, `universal-hash`, `subtle`, `inout`, `base64ct`, `hmac`, and `zeroize_derive`. All are MIT, Apache-2.0, BSD, Zlib, or Unicode-3.0 licensed and are checked by `cargo-deny`. Run `cargo tree -p nexus-crypto -p nexus-identity -p nexus-protocol -p nexus-transfer -p nexus-store` for the exact realized graph.
 
 ## 5. Kotlin, Compose, and JVM dependencies
 
@@ -215,21 +216,23 @@ Update cadence:
 - Major updates require an ADR or an amendment to this inventory and a cross-platform build.
 - Lockfiles are committed. Release builds use `--locked` and fail on an unlocked dependency.
 
-## 10. Stage 03, Stage 05, and Stage 06 verification status
+## 10. Stage 03, Stage 05, Stage 06, and Stage 07 verification status
 
 Stage 03 verifies the build baseline, Stage 05 verifies the realized storage
-graph, and Stage 06 verifies the realized crypto and identity graph.
+graph, Stage 06 verifies the realized crypto and identity graph, and Stage 07
+verifies the streaming manifest, transfer, and store integration.
 Feature-specific verification is deferred to the stage that activates the
 dependency, so the project does not claim runtime evidence it does not have.
 
 | Task | Stage | Status and evidence |
 |---|---|---|
 | Install and record the exact JDK, Gradle, Rust, NDK, and local linker versions. | 03 | Complete. `docs/progress/STAGE_03.md` records the exact versions. MSVC and the Windows SDK are absent locally; CI and release remain MSVC. |
-| Generate `Cargo.lock`; confirm the realized Rust graph resolves. | 03, 05, 06 | Complete. Stage 06 resolves 109 packages; `cargo tree -p nexus-crypto -p nexus-identity -p nexus-protocol` and `cargo test --workspace` pass. |
-| Run `cargo deny check` and `cargo audit`; record the transitive license and advisory reports. | 03, 05, 06 | Complete for the realized tracing, storage, and crypto graphs. Stage 06 reports `advisories ok, bans ok, licenses ok, sources ok`; `cargo audit` scanned 109 dependencies against 1,509 advisories with no vulnerability reported. |
-| Confirm the committed Ed25519, Bech32m, canonical CBOR, signed-record, at-rest, and backup vectors. | 06 | Complete on Windows. `nexus-crypto`, `nexus-identity`, and `nexus-protocol` assert all vectors; Android runtime cross-verification is deferred to Stage 08. |
+| Generate `Cargo.lock`; confirm the realized Rust graph resolves. | 03, 05, 06, 07 | Complete. Stage 07 resolves 109 packages; `cargo tree -p nexus-crypto -p nexus-identity -p nexus-protocol -p nexus-transfer -p nexus-store` and `cargo test --workspace` pass. |
+| Run `cargo deny check` and `cargo audit`; record the transitive license and advisory reports. | 03, 05, 06, 07 | Complete for the realized tracing, storage, crypto, and transfer graphs. Stage 07 reports `advisories ok, bans ok, licenses ok, sources ok`; `cargo audit` scanned 109 dependencies with no vulnerability reported. |
+| Confirm the committed Ed25519, Bech32m, canonical CBOR, signed-record, content, manifest, tombstone, at-rest, and backup vectors. | 06, 07 | Complete on Windows. `nexus-crypto`, `nexus-identity`, `nexus-protocol`, `nexus-transfer`, and `nexus-store` assert all vectors; Android runtime cross-verification is deferred to Stage 08. |
 | Confirm secret material stays out of SQLite, logs, temporary files, and Debug output. | 06 | Complete in Rust. The identity file is encrypted with a host-supplied LEK, temporary identity writes are removed on failure, and secret types redact `Debug`. Kotlin/FFI logging is verified at Stage 08. |
-| Confirm FTS5, WAL, and bundled SQLite compile and run on Windows x64. | 05 | Complete. `nexus-store` builds bundled SQLite 3.x through `libsqlite3-sys` 0.40.0, applies WAL, foreign keys, a busy timeout, and a bounded cache, and creates the FTS5 `search_index` table in migration 2. The 28 storage tests pass on the local GNU/MinGW host. |
+| Confirm FTS5, WAL, and bundled SQLite compile and run on Windows x64. | 05 | Complete. `nexus-store` builds bundled SQLite 3.x through `libsqlite3-sys` 0.40.0, applies WAL, foreign keys, a busy timeout, and a bounded cache, and creates the FTS5 `search_index` table in migration 2. All 33 `nexus-store` tests pass on the local GNU/MinGW host. |
+| Confirm content IDs, chunk manifests, manifest roots, revisions, and tombstones round-trip and reject corruption. | 07 | Complete on Windows. `nexus-transfer` and `nexus-store` assert the committed 2.5 MB vector, one-byte change, chunk corruption, reordering, truncation, root mismatch, immutable publications, monotonic tombstones, manifest repair, and reconciliation quarantine. |
 | Confirm FTS5, WAL, and bundled SQLite compile for Android arm64 and x86_64. | 05, 08 | Deferred. The Kotlin shells do not link `nexus-store` yet, so no Android cross-compiled SQLite binary is built or packaged. This must be verified before the first Android FFI integration. |
 | Confirm the CBOR metadata manifest and archive hashes round-trip. | 05 | Complete. `data_007_metadata_export_and_restore_round_trip` reads the archive magic, manifest length, raw snapshot hash, and CBOR manifest, then restores into a separate store and verifies its contents. |
 | Confirm QUIC builds with the chosen crypto provider on both platforms, or activate the TCP fallback. | 09 | Deferred; libp2p is not a dependency yet. |

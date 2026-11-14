@@ -5,6 +5,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
+use nexus_crypto::{DomainTag, domain_sha256};
+use nexus_protocol::{MAX_MANIFEST_BYTES, ManifestV1};
 use sha2::{Digest, Sha256};
 
 use crate::error::{StoreError, StoreResult};
@@ -148,6 +150,99 @@ impl ManagedStore {
     pub fn partial_relative_path(download_id: &str) -> StoreResult<String> {
         validate_store_component(download_id, "download ID")?;
         Ok(format!("partials/{download_id}.part"))
+    }
+
+    /// Generated manifest path for a trusted manifest root.
+    pub fn manifest_path(&self, root: &str) -> StoreResult<PathBuf> {
+        if !is_content_id(root) {
+            return Err(StoreError::InvalidContentId(root.to_owned()));
+        }
+        Ok(self.manifests.join(format!("{root}.cbor")))
+    }
+
+    /// Stores exact canonical manifest bytes under their trusted root.
+    ///
+    /// Identical bytes are idempotent. A corrupt file occupying the same name
+    /// is quarantined before verified bytes are written.
+    pub(crate) fn write_manifest(&self, expected_root: &str, bytes: &[u8]) -> StoreResult<()> {
+        let path = self.manifest_path(expected_root)?;
+        let Some(root_length) = u64::try_from(MAX_MANIFEST_BYTES).ok() else {
+            return Err(StoreError::InvalidManifest(expected_root.to_owned()));
+        };
+        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > root_length {
+            return Err(StoreError::InvalidManifest(expected_root.to_owned()));
+        }
+        let actual = hex_lower(&domain_sha256(DomainTag::Manifest, bytes));
+        if actual != expected_root {
+            return Err(StoreError::InvalidManifest(expected_root.to_owned()));
+        }
+
+        if let Ok(metadata) = fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                self.quarantine_file(&path, expected_root)?;
+            } else if fs::read(&path).is_ok_and(|existing| existing == bytes) {
+                return Ok(());
+            } else {
+                self.quarantine_file(&path, expected_root)?;
+            }
+        }
+
+        let temporary = self.temporary.join(format!("manifest-{}.part", unique_suffix()));
+        let result = (|| -> StoreResult<()> {
+            let mut file = OpenOptions::new().create_new(true).write(true).open(&temporary)?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&temporary, &path)?;
+            sync_directory(&self.manifests);
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+
+    /// Reads and verifies exact manifest bytes by their trusted root.
+    pub(crate) fn read_manifest(&self, root: &str) -> StoreResult<Vec<u8>> {
+        let path = self.manifest_path(root)?;
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(StoreError::ManifestMissing(root.to_owned()));
+            }
+            Err(error) => return Err(StoreError::Io(error)),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(StoreError::InvalidManifest(root.to_owned()));
+        }
+        if metadata.len() > u64::try_from(MAX_MANIFEST_BYTES).unwrap_or(u64::MAX) {
+            return Err(StoreError::InvalidManifest(root.to_owned()));
+        }
+        let bytes = fs::read(&path)?;
+        let actual = hex_lower(&domain_sha256(DomainTag::Manifest, &bytes));
+        if actual != root {
+            return Err(StoreError::InvalidManifest(root.to_owned()));
+        }
+        Ok(bytes)
+    }
+
+    /// Verifies a named manifest file during reconciliation.
+    pub(crate) fn verify_manifest_file(&self, path: &Path, root: &str) -> StoreResult<()> {
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink()
+            || !metadata.is_file()
+            || metadata.len() > u64::try_from(MAX_MANIFEST_BYTES).unwrap_or(u64::MAX)
+        {
+            return Err(StoreError::InvalidManifest(root.to_owned()));
+        }
+        let bytes = fs::read(path)?;
+        let actual = hex_lower(&domain_sha256(DomainTag::Manifest, &bytes));
+        if actual != root {
+            return Err(StoreError::InvalidManifest(root.to_owned()));
+        }
+        ManifestV1::parse_body(&bytes).map_err(|_| StoreError::InvalidManifest(root.to_owned()))?;
+        Ok(())
     }
 
     /// Copies a source file into a temporary file while hashing it.

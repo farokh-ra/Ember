@@ -205,6 +205,10 @@ pub struct PublicationRecord {
 pub struct TombstoneRecord {
     /// Publication being withdrawn.
     pub publication_id: String,
+    /// Original uploader identity from the signed record.
+    pub identity_id: String,
+    /// Content ID of the withdrawn publication from the signed record.
+    pub content_id: String,
     /// Tombstone revision.
     pub revision: u64,
     /// Exact signed record bytes.

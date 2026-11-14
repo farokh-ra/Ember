@@ -26,10 +26,15 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "FTS5 search index",
         sql: include_str!("../migrations/0002_search_index.sql"),
     },
+    Migration {
+        version: 3,
+        name: "independent signed tombstones",
+        sql: include_str!("../migrations/0003_signed_tombstones.sql"),
+    },
 ];
 
 /// Newest schema version understood by this build.
-pub(crate) const LATEST_VERSION: i64 = 2;
+pub(crate) const LATEST_VERSION: i64 = 3;
 
 /// Runs all outstanding migrations on the writer connection.
 pub(crate) fn run(conn: &mut Connection) -> StoreResult<()> {
@@ -238,13 +243,61 @@ mod tests {
         .expect("insert setting");
 
         run_with(&mut conn, MIGRATIONS).expect("upgrade to latest");
-        assert_eq!(user_version(&conn), 2);
+        assert_eq!(user_version(&conn), 3);
         assert!(table_exists(&conn, "search_index"));
 
         let theme: String = conn
             .query_row("SELECT value FROM settings WHERE key = 'theme'", [], |row| row.get(0))
             .expect("read setting");
         assert_eq!(theme, "dark");
+    }
+
+    #[test]
+    fn upgrades_version_two_tombstones_with_publication_attribution() {
+        let mut conn = Connection::open_in_memory().expect("open memory database");
+        run_with(&mut conn, &MIGRATIONS[..2]).expect("run version two");
+
+        let content_id = "a".repeat(64);
+        conn.execute(
+            "INSERT INTO identity_refs (identity_id, public_key, key_file, label, created_at)
+             VALUES ('nx1testidentity', zeroblob(32), 'secrets/identity.enc', NULL, 1)",
+            [],
+        )
+        .expect("insert identity");
+        conn.execute(
+            "INSERT INTO contents (content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at)
+             VALUES (?1, 1, 'verified', 'blobs/aa/aa/blob', 1, 1, 1)",
+            [&content_id],
+        )
+        .expect("insert content");
+        conn.execute(
+            "INSERT INTO publications
+             (publication_id, identity_id, content_id, revision, record_bytes, title, description,
+              filename, published_at, updated_at, tombstoned)
+             VALUES ('pub-001', 'nx1testidentity', ?1, 1, x'01', 'Title', NULL, 'file.bin', 1, 1, 0)",
+            [&content_id],
+        )
+        .expect("insert publication");
+        conn.execute(
+            "INSERT INTO tombstones (publication_id, revision, record_bytes, created_at)
+             VALUES ('pub-001', 2, x'02', 5)",
+            [],
+        )
+        .expect("insert version two tombstone");
+
+        run_with(&mut conn, MIGRATIONS).expect("upgrade to version three");
+        assert_eq!(user_version(&conn), 3);
+        let (identity, content, revision, created): (String, String, i64, i64) = conn
+            .query_row(
+                "SELECT identity_id, content_id, revision, created_at FROM tombstones WHERE publication_id = 'pub-001'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("read upgraded tombstone");
+        assert_eq!(identity, "nx1testidentity");
+        assert_eq!(content, content_id);
+        assert_eq!(revision, 2);
+        assert_eq!(created, 5);
     }
 
     #[test]

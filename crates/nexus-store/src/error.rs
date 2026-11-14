@@ -92,6 +92,26 @@ pub enum StoreError {
     #[error("content {0} failed integrity verification")]
     IntegrityMismatch(String),
 
+    /// An immutable stored record conflicts with incoming bytes.
+    #[error("stored record conflicts with incoming bytes: {0}")]
+    RecordConflict(String),
+
+    /// A requested metadata record does not exist.
+    #[error("record not found: {0}")]
+    RecordNotFound(String),
+
+    /// A manifest is absent from the managed store.
+    #[error("manifest {0} is missing from the managed store")]
+    ManifestMissing(String),
+
+    /// A manifest is malformed or does not hash to its root.
+    #[error("manifest {0} failed integrity verification")]
+    InvalidManifest(String),
+
+    /// A signed record was malformed or failed verification.
+    #[error("invalid signed record: {0}")]
+    InvalidRecord(String),
+
     /// A destructive operation requires explicit user confirmation.
     #[error("explicit confirmation is required to remove {0}")]
     ConfirmationRequired(&'static str),

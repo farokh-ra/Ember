@@ -36,4 +36,16 @@ pub enum ProtocolError {
     /// The signature did not verify over the exact signed body bytes.
     #[error("signature verification failed")]
     VerificationFailed,
+    /// A manifest exceeded the 256 KiB cap.
+    #[error("manifest exceeds 256 KiB")]
+    ManifestTooLarge,
+    /// A manifest did not match its publication record.
+    #[error("manifest does not match the publication record")]
+    ManifestMismatch,
+    /// A publication or tombstone revision chain is inconsistent.
+    #[error("revision chain is inconsistent")]
+    RevisionChainMismatch,
+    /// A tombstone did not match the publication it withdraws.
+    #[error("tombstone does not match the publication it withdraws")]
+    TombstoneMismatch,
 }

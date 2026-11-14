@@ -5,14 +5,15 @@ a shared Kotlin Multiplatform and Compose Multiplatform interface, a shared Rust
 core, and peer-to-peer networking without a mandatory central account or content
 service.
 
-This repository is at the end of **Stage 06: Identity and cryptographic
-foundations**. The Android and Windows shells still run the shared, clickable UI
-prototype with visibly labelled mock data. Underneath it, the Rust core now owns
-an embedded SQLite schema, migrations, a content-addressed managed file store,
-quota accounting, reference-counted cleanup, startup reconciliation, metadata
-export/restore, local Ed25519 identities, stable `nx1...` identity IDs, canonical
-signed records, encrypted identity storage, and passphrase-encrypted backups.
-Publishing, downloads, hosting, and networking begin in Stage 07 and later.
+This repository is at the end of **Stage 07: Publishing, chunk manifests,
+revisions, and tombstones**. The Android and Windows shells still run the shared,
+clickable UI prototype with visibly labelled mock data. Underneath it, the Rust
+core now owns an embedded SQLite schema, migrations, a content-addressed managed
+file store, quota accounting, reference-counted cleanup, startup reconciliation,
+metadata export/restore, local Ed25519 identities, stable `nx1...` identity IDs,
+canonical signed records, encrypted identity storage, passphrase-encrypted
+backups, streaming content IDs, chunk manifests, publication revisions, and
+signed tombstones. Downloads, hosting, and networking remain later stages.
 
 ## Current status
 
@@ -30,7 +31,7 @@ Publishing, downloads, hosting, and networking begin in Stage 07 and later.
 | Loading, empty, offline, error, and retry states | Complete on data-driven screens |
 | Accessibility and keyboard support | Implemented; focus, keyboard, and Escape checks passed |
 | Stage 04 desktop test pass | Complete; journeys, five states, themes, and compact layout verified |
-| SQLite schema and transactional migrations | Complete; schema version 2 |
+| SQLite schema and transactional migrations | Complete; schema version 3 |
 | Managed content-addressed file store | Complete; atomic import and exclusive lock |
 | Quota, free-space reserve, and file limits | Complete; 10 GiB default, 1 GiB reserve, 4 GiB file cap |
 | Reference-counted deletion and cleanup | Complete; published originals and replicas require confirmation |
@@ -38,15 +39,17 @@ Publishing, downloads, hosting, and networking begin in Stage 07 and later.
 | Metadata export and validated restore | Complete; CBOR manifest plus SQLite snapshot |
 | Local Ed25519 identity and stable identity ID | Complete; Bech32m `nx1...` IDs and committed vectors |
 | Canonical CBOR and signed records | Complete; exact-byte envelopes, profile and publication v1 |
+| Streaming content IDs and chunk manifests | Complete; raw SHA-256, fixed 1 MiB chunks, signed manifest roots |
+| Publication revisions and signed tombstones | Complete; immutability, attribution, and revision rules |
 | Encrypted identity at rest and backup | Complete; LEK/HKDF at rest, Argon2id/XChaCha20-Poly1305 backup |
 | Formatting, linting, and static analysis | Enforced locally and in CI |
 | CI workflow and dependency review | Defined |
 | Developer setup and contribution guides | Complete |
-| Product features | Mock UI prototypes; storage and crypto foundations complete, feature backends start in Stage 07 |
+| Product features | Mock UI prototypes; storage, crypto, and publication foundations complete, feature backends start in Stage 08 |
 
-See [docs/progress/STAGE_06.md](docs/progress/STAGE_06.md) for the exact
+See [docs/progress/STAGE_07.md](docs/progress/STAGE_07.md) for the exact
 evidence and commands used to verify this stage. The byte-level record, identity,
-at-rest, and backup formats are specified in
+manifest, tombstone, at-rest, and backup formats are specified in
 [docs/architecture/SIGNED_RECORD_FORMATS.md](docs/architecture/SIGNED_RECORD_FORMATS.md).
 
 ## Repository layout
@@ -176,7 +179,7 @@ workflow and release conventions.
 |---|---|
 | [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md) | Product scope and v1 requirements. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System, module, crate, storage, security, and lifecycle design. |
-| [docs/architecture/SIGNED_RECORD_FORMATS.md](docs/architecture/SIGNED_RECORD_FORMATS.md) | Exact v1 identity, CBOR, signed-record, at-rest, and backup formats. |
+| [docs/architecture/SIGNED_RECORD_FORMATS.md](docs/architecture/SIGNED_RECORD_FORMATS.md) | Exact v1 identity, CBOR, signed-record, manifest, tombstone, at-rest, and backup formats. |
 | [docs/decisions](docs/decisions/README.md) | Accepted architecture decision records. |
 | [docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md) | Repeatable Windows setup and troubleshooting. |
 | [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) | Branches, commits, pull requests, releases, and CI. |
@@ -194,7 +197,6 @@ details. Debug logs must be redacted according to
 
 ## Next stage
 
-Stage 07 adds publishing, canonical chunk manifests, publication IDs, revisions,
-and tombstone verification on top of the Stage 06 identity and signed-record
-foundations. It must not begin until Stage 06 is reviewed and approved by the
-project owner.
+Stage 08 adds Kotlin/FFI integration and Android runtime verification for the
+identity, signed-record, manifest, and tombstone layers. It must not begin until
+Stage 07 is reviewed and approved by the project owner.
