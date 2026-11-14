@@ -90,6 +90,21 @@ All notable changes to NEXUS are recorded here. The format follows
   CBOR, signed-record, at-rest, and backup vectors.
 - Exact signed-record and identity format specification in
   `docs/architecture/SIGNED_RECORD_FORMATS.md`.
+- Raw SHA-256 content IDs and fixed 1 MiB chunking for publishable files up to
+  4 GiB.
+- Canonical flat chunk manifests with per-chunk SHA-256 hashes, a 4,096-entry
+  limit, a 256 KiB cap, and domain-separated manifest roots.
+- Streaming file hashing, one-pass manifest construction, chunk verification,
+  and whole-file verification with bounded memory in `nexus-transfer`.
+- Publication revision rules, successor validation, and exact manifest binding.
+- Signed tombstone v1 records with original-uploader attribution, skip-tolerant
+  revisions, and equal-revision conflict detection.
+- Schema version 3 with independent signed tombstones, immutable publication
+  upserts, monotonic tombstone upserts, content-addressed manifest files, and
+  manifest verification during startup reconciliation.
+- 33 Stage 07 Rust tests plus committed 2.5 MB content, chunk, manifest, root,
+  tombstone, and rejection vectors.
+- Stage 07 evidence record.
 
 ### Changed
 
@@ -108,6 +123,8 @@ All notable changes to NEXUS are recorded here. The format follows
   identity storage, and encrypted backups; no private key enters Kotlin.
 - The committed `Cargo.lock` now resolves 109 packages, and the dependency and
   license inventory is at version 1.3.0.
+- The SQLite schema is now version 3; tombstones are independent signed records
+  and publications are immutable.
 
 ### Fixed
 

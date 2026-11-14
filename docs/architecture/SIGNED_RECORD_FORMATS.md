@@ -3,17 +3,18 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-RECORDS-001 |
-| Version | 1.0.0 |
-| Status | Stage 06 implementation reference |
-| Date | 2026-11-13 |
+| Version | 1.1.0 |
+| Status | Stage 07 implementation reference |
+| Date | 2026-11-14 |
 | Normative sources | [ADR-0006](../decisions/ADR-0006-crypto-and-record-formats.md), [ADR-0007](../decisions/ADR-0007-protocol-boundaries-versioning.md) |
-| Code | `nexus-crypto`, `nexus-identity`, `nexus-protocol` |
+| Code | `nexus-crypto`, `nexus-identity`, `nexus-protocol`, `nexus-transfer`, `nexus-store` |
 
 This document defines the exact v1 bytes for identity IDs, canonical CBOR,
-signed record envelopes, profile and publication bodies, identity-at-rest
-storage, and encrypted identity backups. It also records the committed
-cross-platform vectors. Changing a byte layout, a domain tag, a field meaning, or
-a canonical-encoding rule requires a protocol major-version review.
+signed record envelopes, profile, publication, chunk-manifest, and tombstone
+bodies, identity-at-rest storage, and encrypted identity backups. It also records
+the committed cross-platform vectors. Changing a byte layout, a domain tag, a
+field meaning, or a canonical-encoding rule requires a protocol major-version
+review.
 
 ## 1. Ownership and trust
 
@@ -21,8 +22,13 @@ a canonical-encoding rule requires a protocol major-version review.
   primitives. It has no network, SQLite, filesystem, or UI dependency.
 - `nexus-identity` owns local key generation, encrypted at-rest storage, backup,
   restore, and user-facing key-loss statements. It does not store keys in SQLite.
-- `nexus-protocol` owns signed-record schemas, exact-byte envelopes, profile and
-  publication verification, and publication IDs.
+- `nexus-protocol` owns signed-record schemas, exact-byte envelopes, profile,
+  publication, manifest, and tombstone verification, and publication IDs.
+- `nexus-transfer` owns streaming content hashing, manifest construction, chunk
+  verification, and whole-file verification with bounded memory.
+- `nexus-store` owns immutable storage of exact signed publication and tombstone
+  bytes, content-addressed manifest files, and reconciliation. It never rewrites
+  signed bytes or reassigns uploader attribution.
 - Kotlin and the FFI layer never parse a signed record as authoritative and never
   receive a plaintext private key.
 - Only verified record bytes may become authoritative local metadata. Derived
@@ -99,12 +105,15 @@ SignedRecord = {
 - The signature covers `domain_tag || body`, using the exact stored body bytes.
 - Verification never re-encodes a stored body. Replicas store and serve the exact
   envelope bytes from `SignedRecord::raw`.
-- Parsing the envelope requires canonical CBOR. Parsing a profile or publication
-  additionally requires a canonical body and validates every schema field.
-- `ProfileV1::parse_body` and `PublicationV1::parse_body` validate shape and
-  canonical encoding only. They do not authenticate a record. Only
-  `SignedProfile::verify` and `SignedPublication::verify` establish that the
-  body was signed by the identity it names.
+- Parsing the envelope requires canonical CBOR. Parsing a profile, publication,
+  manifest, or tombstone additionally requires a canonical body and validates
+  every schema field.
+- `ProfileV1::parse_body`, `PublicationV1::parse_body`, `ManifestV1::parse_body`,
+  and `TombstoneV1::parse_body` validate shape and canonical encoding only. They
+  do not authenticate a record. Only the signed-record wrappers establish that
+  the body was signed by the identity it names.
+- A manifest is authenticated indirectly: the publication signs its
+  domain-separated root.
 
 Domain tags:
 
@@ -121,7 +130,7 @@ Domain tags:
 | DHT tombstone key | `NEXUS-DHT-TOMB-v1` |
 | DHT profile key | `NEXUS-DHT-PROFILE-v1` |
 
-The DHT values are reserved protocol constants; Stage 06 does not perform network
+The DHT values are reserved protocol constants; Stage 07 does not perform network
 lookups.
 
 ## 5. Profile body v1
@@ -181,7 +190,86 @@ publication_id = SHA-256("NEXUS-PUB-ID-v1" || body)
 
 It is computed over the exact canonical body bytes and is stable across replicas.
 
-## 7. Identity at rest
+## 7. Chunk manifest v1
+
+A manifest is not separately signed. The publication record signs the
+domain-separated root of the canonical manifest body, so a replica that forwards
+the manifest cannot alter chunk lengths, chunk hashes, the content ID, or the
+total size without changing the signed root.
+
+The manifest body is a CBOR map with integer keys 1-5. All are required.
+
+| Key | Type | Rule |
+|---:|---|---|
+| 1 | uint | Schema major version, `1`. |
+| 2 | bstr(32) | SHA-256 of the complete file bytes; the content ID. |
+| 3 | uint | Complete file size, 1 byte to 4 GiB. |
+| 4 | uint | Chunk size, exactly `1,048,576`. |
+| 5 | array | Ordered chunk entries, 1 to 4,096 items. |
+
+Each chunk entry is a two-item array `[length: uint, sha256: bstr(32)]`. Schema
+rules:
+
+1. Every chunk except the last is exactly `1,048,576` bytes.
+2. The final chunk is 1 to `1,048,576` bytes.
+3. Chunk lengths sum exactly to the total size.
+4. The entry count is exactly `ceil(total_size / chunk_size)`.
+5. The canonical manifest body is at most 262,144 bytes.
+6. Empty files are not publishable in v1.
+7. Manifest decoding uses depth 8, 20,000 parsed values, and the 262,144-byte
+   input cap. Unknown integer keys above 5 are preserved; a schema value other
+   than 1 is rejected.
+
+```text
+manifest_root = SHA-256("NEXUS-MANIFEST-v1" || canonical_manifest_body)
+```
+
+The root is domain-separated from the raw content ID. A publication record must
+have the same content ID, total size, chunk size, and manifest root as the
+manifest it references. Verification computes the root over the exact stored
+manifest bytes and never re-encodes them first.
+
+Manifests contain no file bytes. They are stored as exact canonical bytes at
+`store/manifests/<root-hex>.cbor`; the filename is the trusted root, and a file
+whose bytes do not hash to that root is corrupt and quarantined.
+
+## 8. Tombstone body v1
+
+A tombstone withdraws a publication without deleting any stored file or
+rewriting the original publication record. The original uploader signs it. A
+replica may relay and store a tombstone but cannot alter uploader attribution.
+
+The body is a CBOR map with integer keys 1-6. All are required.
+
+| Key | Type | Rule |
+|---:|---|---|
+| 1 | uint | Schema major version, `1`. |
+| 2 | text | Canonical `nx1...` identity ID of the original uploader. |
+| 3 | bstr(32) | Publication ID being withdrawn. |
+| 4 | bstr(32) | Content ID of the withdrawn publication. |
+| 5 | uint | Tombstone revision, at least 1. |
+| 6 | uint | Informational unpublish time, Unix milliseconds. |
+
+Unknown integer keys above 6 are preserved. A schema value other than 1 is
+rejected. The envelope and signature rules are the same as for other signed
+records, with domain tag `NEXUS-TOMBSTONE-v1`.
+
+Tombstone rules:
+
+1. A tombstone must reference the identity, publication ID, and content ID of
+   the signed publication it withdraws. Any mismatch is rejected.
+2. A higher tombstone revision supersedes a lower revision. Revisions may skip
+   numbers because a peer may observe only part of the history.
+3. A successor must keep the same identity, publication ID, and content ID.
+4. Equal revisions with different signed bytes are conflicts. They remain
+   distinct records; no silent merge or discard is permitted.
+5. A tombstone may arrive before its publication row and remains authoritative
+   on its own. Storage must preserve its original signed attribution.
+6. A tombstone does not delete replicas, does not prove deletion from other
+   peers, and does not revoke the cryptographic validity of the publication
+   signature. It records the original uploader's withdrawal verdict.
+
+## 9. Identity at rest
 
 The identity keypair is stored only in:
 
@@ -234,7 +322,7 @@ inherits the app-private parent directory ACL. Symbolic links, junctions, and
 other reparse points on the root, the `secrets` directory, or the identity file
 are rejected before any read or write.
 
-## 8. Encrypted backup v1
+## 10. Encrypted backup v1
 
 A backup is one user-selected binary file. It contains only the identity keypair
 and creation time: no device peer key, no SQLite database, and no managed files.
@@ -287,7 +375,7 @@ length     = 233
 SHA-256    = d3cf4d6ba0e22e5e8c26276629c8c3f77899d05d1b1656eb78a3cb493c3febee
 ```
 
-## 9. Versioning and unknown fields
+## 11. Versioning and unknown fields
 
 - Unknown fields in a valid minor record are preserved. They are carried through
   parse and re-sign, and are never treated as authoritative display data.
@@ -301,7 +389,7 @@ SHA-256    = d3cf4d6ba0e22e5e8c26276629c8c3f77899d05d1b1656eb78a3cb493c3febee
 - A newer verified revision may supersede an older one. Old cached records remain
   valid and are labelled as superseded by higher layers.
 
-## 10. Key lifecycle and recovery limits
+## 12. Key lifecycle and recovery limits
 
 - v1 has no automatic key rotation and no central revocation or recovery.
 - Losing the identity file and every backup loses the identity. There is no
@@ -316,7 +404,7 @@ SHA-256    = d3cf4d6ba0e22e5e8c26276629c8c3f77899d05d1b1656eb78a3cb493c3febee
   signature proves control of the identity key. It does not prove a real name,
   legal authorship, or that content is legal.
 
-## 11. Committed cross-platform vectors
+## 13. Committed cross-platform vectors
 
 All vectors use synthetic material. The seed is 32 zero bytes unless stated.
 
@@ -365,6 +453,54 @@ publication ID = 40fcc4cc64e3c49ce8e102cfa34ba4c5b225a637b48098f463d428356b028c2
 The committed tests assert the full canonical body hex, the exact signature, the
 exact envelope hash, and the publication ID.
 
+### Chunk manifest v1
+
+The vector is 2,500,000 bytes generated by `(i * 31 + 7) % 251`, independently
+of the Rust implementation. It produces three chunks: 1,048,576, 1,048,576, and
+402,848 bytes.
+
+```text
+content ID     = 910b21fbdf3343e088e1ac6c2aa9aaffad0e893a43ff3b7d282e43f2f4d1e0fa
+chunk 0 SHA-256 = 1c59b8670027384143781a8a8bff2f3b44bd8818d0f53b13b064c2375a1afe38
+chunk 1 SHA-256 = d50d98efacff4cc59dedce2c1b0add120d2c6264418cc699883fa1fd389ac7a9
+chunk 2 SHA-256 = 3ff806e9f7fdd1004fa33358186c040d7cf5704684cc360d53c7864b83ede395
+manifest root  = d99a72330148d149138852e4afebcf486e84ac1853b1da13f937e5485a913a30
+body length    = 172 bytes
+one-byte change content ID = 3441cd7ebe54222fcc3f01bffc3194f41a3a7a237b09fedc8d8910d983e920b8
+```
+
+Canonical manifest body hex:
+
+```text
+a50101025820910b21fbdf3343e088e1ac6c2aa9aaffad0e893a43ff3b7d282e43f2f4d1e0fa
+031a002625a0041a001000000583821a0010000058201c59b8670027384143781a8a8bff2f3b
+44bd8818d0f53b13b064c2375a1afe38821a001000005820d50d98efacff4cc59dedce2c1b0a
+dd120d2c6264418cc699883fa1fd389ac7a9821a000625a058203ff806e9f7fdd1004fa33358
+186c040d7cf5704684cc360d53c7864b83ede395
+```
+
+### Tombstone v1
+
+```text
+identity ID      = nx1a5qnk638hn8tdfpdv23635p2duxhxefjz4m3mcjr5cavqj9p3dva52g6l8d37
+publication ID   = 32 bytes of 0x44
+content ID       = 32 bytes of 0x11
+revision         = 1
+unpublished_at   = 1700000100000
+body length      = 152 bytes
+signature        = 988cafcacf714ac3dde780c2785af0b66d2c41bc75787e4ca9718a2f55c06e86a1e2784254381374b9e6e5f9ec66d420b7c82e49672606ff528a1f2a7c548f09
+envelope SHA-256 = c018998945ee4355c349238a849dafbb59ec44aee9027375ec2ded7d4caa0561
+```
+
+Canonical tombstone body hex:
+
+```text
+a601010278406e78316135716e6b363338686e387464667064763233363335703264757868786566
+6a7a346d336d636a7235636176716a397033647661353267366c3864333703582044444444444444
+44444444444444444444444444444444444444444444444444045820111111111111111111111111
+11111111111111111111111111111111111111110501061b0000018bcfe6eea0
+```
+
 ### Deterministic at-rest file
 
 ```text
@@ -389,21 +525,38 @@ The tests also commit and exercise:
   and a non-canonical envelope fail;
 - non-NFC user text fails parsing;
 - depth, item, and 64 KiB bounds fail;
-- unknown minor fields are preserved and unknown major versions are rejected.
+- unknown minor fields are preserved and unknown major versions are rejected;
+- a one-byte change produces a different content ID and manifest root;
+- corrupted, reordered, truncated, and over-long chunks and whole files are
+  rejected;
+- manifest bytes that do not hash to the signed root are rejected;
+- a manifest whose content ID, size, chunk size, or root differs from its signed
+  publication is rejected;
+- a changed tombstone body, changed signature, or publication-domain replay
+  fails verification;
+- a tombstone that changes identity, publication ID, or content ID relative to
+  the signed publication is rejected;
+- a lower or equal tombstone revision cannot replace a higher revision, and
+  equal revisions with different bytes are conflicts.
 
-## 12. Cross-platform conformance
+## 14. Cross-platform conformance
 
 Android and Windows must reproduce:
 
 1. the same public key and `nx1...` ID for the same seed;
 2. the same canonical body bytes and Ed25519 signature;
 3. the same envelope bytes and publication ID;
-4. the same backup header and derived bytes for fixed salt, nonce, passphrase,
+4. the same content ID, chunk hashes, canonical manifest bytes, and manifest root
+   for the committed 2.5 MB fixture;
+5. the same tombstone body, signature, and envelope hash;
+6. the same backup header and derived bytes for fixed salt, nonce, passphrase,
    parameters, and seed;
-5. the same generic failure for a wrong passphrase or tampered file.
+7. the same generic failure for a wrong passphrase or tampered file, and the same
+   rejection of corrupted chunks or invalid signatures.
 
-The Rust tests in `nexus-crypto`, `nexus-identity`, and `nexus-protocol` are the
-executable reference. Stage 06 runs them on Windows. Android runtime
-cross-verification is deferred to Stage 08 because the Kotlin shells do not link
-the Rust core yet and no Android device or emulator is available locally. The
-committed vectors are the byte-level contract for that later check.
+The Rust tests in `nexus-crypto`, `nexus-identity`, `nexus-protocol`,
+`nexus-transfer`, and `nexus-store` are the executable reference. Stage 07 runs
+them on Windows. Android runtime cross-verification is deferred to Stage 08
+because the Kotlin shells do not link the Rust core yet and no Android device or
+emulator is available locally. The committed vectors are the byte-level contract
+for that later check.

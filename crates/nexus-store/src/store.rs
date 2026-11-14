@@ -8,6 +8,8 @@ use std::time::Duration;
 use rusqlite::types::Type;
 use rusqlite::{OptionalExtension, Row, params};
 
+use nexus_protocol::{ManifestV1, SignedPublication};
+
 use crate::backup::{self, ExportReport, RestoreReport};
 use crate::db::Database;
 use crate::error::{StoreError, StoreResult};
@@ -19,7 +21,7 @@ use crate::model::{
 };
 use crate::paths::{safe_display_name, unique_export_path, validate_store_component};
 use crate::quota::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage};
-use crate::util::{is_content_id, is_safe_id, now_secs};
+use crate::util::{hex_lower, is_content_id, is_safe_id, now_secs};
 
 const CONTENT_COLUMNS: &str = "content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at";
 const DOWNLOAD_COLUMNS: &str = "download_id, content_id, display_name, expected_size, verified_prefix, state, partial_file, created_at, updated_at, last_error";
@@ -62,6 +64,8 @@ pub struct ExportedContent {
 pub struct ReconciliationReport {
     /// Blobs whose size and hash verified.
     pub verified_blobs: usize,
+    /// Named manifests whose root and canonical encoding verified.
+    pub verified_manifests: usize,
     /// Completed-download crashes adopted into content records.
     pub adopted_downloads: usize,
     /// Unexpected or invalid files moved to quarantine.
@@ -811,7 +815,12 @@ impl Store {
         })
     }
 
-    /// Adds or replaces a verified publication record.
+    /// Stores a verified publication record exactly once.
+    ///
+    /// The signed identity, content ID, revision, and exact record bytes are
+    /// immutable. Repeating the same record is an idempotent no-op; any
+    /// difference for an existing publication ID is a conflict that preserves
+    /// the original row.
     pub fn upsert_publication(&self, record: &PublicationRecord) -> StoreResult<()> {
         validate_entity_id(&record.publication_id, "publication ID")?;
         validate_entity_id(&record.identity_id, "identity ID")?;
@@ -819,22 +828,41 @@ impl Store {
         let record = record.clone();
         let filename = safe_display_name(&record.filename);
         self.db.write(move |connection| {
-            connection.execute(
+            let transaction = connection.transaction()?;
+            let existing = transaction
+                .query_row(
+                    "SELECT identity_id, content_id, revision, record_bytes
+                     FROM publications WHERE publication_id = ?1",
+                    [&record.publication_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, Vec<u8>>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+
+            if let Some((identity_id, content_id, revision, record_bytes)) = existing {
+                let incoming_revision = i64::try_from(record.revision).unwrap_or(i64::MAX);
+                if identity_id != record.identity_id
+                    || content_id != record.content_id
+                    || revision != incoming_revision
+                    || record_bytes != record.record_bytes
+                {
+                    return Err(StoreError::RecordConflict(record.publication_id));
+                }
+                transaction.commit()?;
+                return Ok(());
+            }
+
+            transaction.execute(
                 "INSERT INTO publications
                  (publication_id, identity_id, content_id, revision, record_bytes, title, description,
                   filename, published_at, updated_at, tombstoned)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-                 ON CONFLICT(publication_id) DO UPDATE SET
-                     identity_id = excluded.identity_id,
-                     content_id = excluded.content_id,
-                     revision = excluded.revision,
-                     record_bytes = excluded.record_bytes,
-                     title = excluded.title,
-                     description = excluded.description,
-                     filename = excluded.filename,
-                     published_at = excluded.published_at,
-                     updated_at = excluded.updated_at,
-                     tombstoned = excluded.tombstoned",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     record.publication_id,
                     record.identity_id,
@@ -849,6 +877,13 @@ impl Store {
                     if record.tombstoned { 1_i64 } else { 0_i64 }
                 ],
             )?;
+            transaction.execute(
+                "UPDATE publications SET tombstoned = 1
+                 WHERE publication_id = ?1
+                   AND EXISTS (SELECT 1 FROM tombstones WHERE publication_id = ?1)",
+                [&record.publication_id],
+            )?;
+            transaction.commit()?;
             Ok(())
         })
     }
@@ -880,31 +915,72 @@ impl Store {
         })
     }
 
-    /// Adds or replaces a tombstone record.
+    /// Stores a signed tombstone with monotonic revision handling.
+    ///
+    /// A tombstone is independent of the publication row: it may arrive first.
+    /// The uploader identity and content ID are immutable attribution. Lower
+    /// revisions are ignored, higher revisions replace the stored record, and
+    /// equal revisions must be byte-identical. An equal-revision byte conflict
+    /// or an attribution change preserves the original row.
     pub fn upsert_tombstone(&self, record: &TombstoneRecord) -> StoreResult<()> {
         validate_entity_id(&record.publication_id, "publication ID")?;
+        validate_entity_id(&record.identity_id, "identity ID")?;
+        validate_content_id(&record.content_id)?;
         let record = record.clone();
-        let publication_id = record.publication_id.clone();
-        let updated_at = record.created_at;
         self.db.write(move |connection| {
             let transaction = connection.transaction()?;
-            transaction.execute(
-                "INSERT INTO tombstones (publication_id, revision, record_bytes, created_at)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(publication_id) DO UPDATE SET
-                     revision = excluded.revision,
-                     record_bytes = excluded.record_bytes,
-                     created_at = excluded.created_at",
-                params![
-                    record.publication_id,
-                    i64::try_from(record.revision).unwrap_or(i64::MAX),
-                    record.record_bytes,
-                    record.created_at
-                ],
-            )?;
+            let existing = transaction
+                .query_row(
+                    "SELECT identity_id, content_id, revision, record_bytes
+                     FROM tombstones WHERE publication_id = ?1",
+                    [&record.publication_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, Vec<u8>>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+
+            let incoming_revision = i64::try_from(record.revision).unwrap_or(i64::MAX);
+            if let Some((identity_id, content_id, revision, record_bytes)) = existing {
+                if identity_id != record.identity_id || content_id != record.content_id {
+                    return Err(StoreError::RecordConflict(record.publication_id));
+                }
+                if incoming_revision < revision {
+                    // A stale revision must not downgrade the stored verdict.
+                } else if incoming_revision == revision {
+                    if record_bytes != record.record_bytes {
+                        return Err(StoreError::RecordConflict(record.publication_id));
+                    }
+                } else {
+                    transaction.execute(
+                        "UPDATE tombstones SET revision = ?2, record_bytes = ?3 WHERE publication_id = ?1",
+                        params![record.publication_id, incoming_revision, record.record_bytes],
+                    )?;
+                }
+            } else {
+                transaction.execute(
+                    "INSERT INTO tombstones
+                     (publication_id, identity_id, content_id, revision, record_bytes, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        record.publication_id,
+                        record.identity_id,
+                        record.content_id,
+                        incoming_revision,
+                        record.record_bytes,
+                        record.created_at
+                    ],
+                )?;
+            }
+
             transaction.execute(
                 "UPDATE publications SET tombstoned = 1, updated_at = ?2 WHERE publication_id = ?1",
-                params![publication_id, updated_at],
+                params![record.publication_id, record.created_at],
             )?;
             transaction.commit()?;
             Ok(())
@@ -915,19 +991,59 @@ impl Store {
     pub fn tombstones(&self) -> StoreResult<Vec<TombstoneRecord>> {
         self.db.read(|connection| {
             let mut statement = connection.prepare(
-                "SELECT publication_id, revision, record_bytes, created_at
+                "SELECT publication_id, identity_id, content_id, revision, record_bytes, created_at
                  FROM tombstones ORDER BY created_at ASC",
             )?;
             let rows = statement.query_map([], |row| {
                 Ok(TombstoneRecord {
                     publication_id: row.get(0)?,
-                    revision: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
-                    record_bytes: row.get(2)?,
-                    created_at: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+                    identity_id: row.get(1)?,
+                    content_id: row.get(2)?,
+                    revision: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+                    record_bytes: row.get(4)?,
+                    created_at: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
                 })
             })?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
+    }
+
+    /// Stores exact canonical manifest bytes under their trusted root.
+    pub fn put_manifest(&self, root: &str, bytes: &[u8]) -> StoreResult<()> {
+        self.managed.write_manifest(root, bytes)
+    }
+
+    /// Reads and verifies exact manifest bytes by their trusted root.
+    pub fn manifest(&self, root: &str) -> StoreResult<Vec<u8>> {
+        let bytes = self.managed.read_manifest(root)?;
+        ManifestV1::parse_body(&bytes).map_err(|error| StoreError::InvalidRecord(error.to_string()))?;
+        Ok(bytes)
+    }
+
+    /// Loads and verifies the manifest referenced by a stored signed publication.
+    pub fn manifest_for_publication(&self, publication_id: &str) -> StoreResult<Vec<u8>> {
+        validate_entity_id(publication_id, "publication ID")?;
+        let record_bytes = self
+            .db
+            .read(|connection| {
+                Ok(connection
+                    .query_row(
+                        "SELECT record_bytes FROM publications WHERE publication_id = ?1",
+                        [publication_id],
+                        |row| row.get::<_, Vec<u8>>(0),
+                    )
+                    .optional()?)
+            })?
+            .ok_or_else(|| StoreError::RecordNotFound(publication_id.to_owned()))?;
+        let signed =
+            SignedPublication::parse(&record_bytes).map_err(|error| StoreError::InvalidRecord(error.to_string()))?;
+        let root = hex_lower(&signed.publication().manifest_root);
+        let bytes = self.managed.read_manifest(&root)?;
+        let manifest = ManifestV1::parse_body(&bytes).map_err(|error| StoreError::InvalidRecord(error.to_string()))?;
+        manifest
+            .validate_for_publication(signed.publication())
+            .map_err(|error| StoreError::InvalidManifest(error.to_string()))?;
+        Ok(bytes)
     }
 
     /// Adds or replaces a hosted replica record.
@@ -1360,9 +1476,18 @@ impl Store {
         }
 
         for entry in self.managed.scan_manifests()? {
-            if entry.content_id.is_none() {
+            let Some(root) = entry.content_id else {
                 self.managed.quarantine_file(&entry.path, "unexpected-manifest")?;
                 report.quarantined_files += 1;
+                continue;
+            };
+            match self.managed.verify_manifest_file(&entry.path, &root) {
+                Ok(()) => report.verified_manifests += 1,
+                Err(StoreError::InvalidManifest(_) | StoreError::ManifestMissing(_)) => {
+                    self.managed.quarantine_file(&entry.path, &root)?;
+                    report.quarantined_files += 1;
+                }
+                Err(error) => return Err(error),
             }
         }
 

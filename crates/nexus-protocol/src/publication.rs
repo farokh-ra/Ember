@@ -7,6 +7,7 @@ use nexus_crypto::{
 use crate::envelope::{MAX_SIGNED_BODY_BYTES, SignedRecord};
 use crate::error::ProtocolError;
 use crate::fields::{array, bytes32, nonnegative_keys, nullable_bytes32, text, unsigned};
+use crate::manifest::ManifestV1;
 
 /// Publication schema major version.
 pub const PUBLICATION_SCHEMA_VERSION: u64 = 1;
@@ -187,6 +188,9 @@ impl PublicationV1 {
         if self.revision == 0 {
             return Err(ProtocolError::InvalidField(12));
         }
+        if (self.revision == 1 && self.supersedes.is_some()) || (self.revision > 1 && self.supersedes.is_none()) {
+            return Err(ProtocolError::InvalidField(13));
+        }
         let display_filename = normalize_required_bytes(&self.display_filename, 5, MAX_DISPLAY_FILENAME_BYTES)?;
         let description = normalize_optional_bytes(&self.description, 6, MAX_DESCRIPTION_BYTES)?;
         if self.tags.len() > MAX_TAGS {
@@ -268,6 +272,9 @@ impl PublicationV1 {
             return Err(ProtocolError::InvalidField(12));
         }
         let supersedes = nullable_bytes32(&value, 13)?;
+        if (revision == 1 && supersedes.is_some()) || (revision > 1 && supersedes.is_none()) {
+            return Err(ProtocolError::InvalidField(13));
+        }
         let parent_content_id = nullable_bytes32(&value, 14)?;
         let parent_publication_id = nullable_bytes32(&value, 15)?;
         let app_version = parse_required_bytes(&value, 16, MAX_APP_VERSION_BYTES)?;
@@ -298,6 +305,37 @@ impl PublicationV1 {
             app_version,
             unknown_fields,
         })
+    }
+
+    /// Verifies that this publication is a metadata-only successor of
+    /// `previous`.
+    ///
+    /// A revision keeps the same uploader, content ID, size, chunk size, and
+    /// manifest root. It must increase the revision by exactly one and name the
+    /// previous publication ID in `supersedes`.
+    pub fn validate_successor_of(&self, previous: &SignedPublication) -> Result<(), ProtocolError> {
+        let prior = previous.publication();
+        let expected_revision = prior
+            .revision
+            .checked_add(1)
+            .ok_or(ProtocolError::RevisionChainMismatch)?;
+        if self.identity_id != prior.identity_id
+            || self.content_id != prior.content_id
+            || self.size != prior.size
+            || self.manifest_root != prior.manifest_root
+            || self.chunk_size != prior.chunk_size
+            || self.revision != expected_revision
+            || self.supersedes != Some(previous.publication_id())
+        {
+            return Err(ProtocolError::RevisionChainMismatch);
+        }
+        Ok(())
+    }
+
+    /// Verifies that a parsed manifest matches this publication's signed
+    /// content ID, size, chunk size, and manifest root.
+    pub fn validate_manifest(&self, manifest: &ManifestV1) -> Result<(), ProtocolError> {
+        manifest.validate_for_publication(self)
     }
 
     /// Signs this publication and returns the exact-byte record.

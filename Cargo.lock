@@ -482,6 +482,9 @@ version = "0.1.0"
 dependencies = [
  "ciborium",
  "fs2",
+ "nexus-crypto",
+ "nexus-protocol",
+ "nexus-transfer",
  "nexus-types",
  "rusqlite",
  "serde",
@@ -497,7 +500,10 @@ version = "0.1.0"
 name = "nexus-transfer"
 version = "0.1.0"
 dependencies = [
- "nexus-types",
+ "nexus-crypto",
+ "nexus-protocol",
+ "sha2",
+ "thiserror",
 ]
 
 [[package]]
