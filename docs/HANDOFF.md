@@ -129,10 +129,11 @@ Both pass.
 
 ### Clean checkout
 
-After commit `STAGE07_COMMIT` (`feat(publish): add manifests, revisions, and
+After commit `c85f9b4` (`feat(publish): add manifests, revisions, and
 tombstones`), `scripts/verify-clean-checkout.ps1` cloned `HEAD` into
-`CLEAN_CHECKOUT_PATH` and ran the build, tests, and hygiene gate. Result:
-CLEAN_CHECKOUT_RESULT. The clone was removed afterwards.
+`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-914ef07c` and ran the build, tests,
+and hygiene gate. Result: PASS, exit 0, `All requested local checks passed.` The
+clone was removed afterwards.
 
 The clean-checkout script does not run `-WithDependencyScan`; `cargo deny` and
 `cargo audit` were verified separately in the full local gate against the same
