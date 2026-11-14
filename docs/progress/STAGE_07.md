@@ -2,6 +2,7 @@
 
 **Status:** Complete
 **Completed:** 2026-11-14
+**Rechecked:** 2026-11-14
 **Progress guide:** 31-37%
 **Next stage:** 08 - Kotlin/FFI integration and Android runtime verification (requires user permission)
 
@@ -286,6 +287,24 @@ The Stage 07 store tests are:
 | `manifests_round_trip_by_trusted_root_and_bind_to_signed_publications` | Manifest put/get, bounds, corrupt repair, publication binding. |
 | `reconciliation_verifies_named_manifests_and_quarantines_corrupt_files` | Verified count and quarantine. |
 
+### JVM tests
+
+A forced rerun of all five `jvmTest` tasks produced 70 tests, 0 failures, and 0
+skipped:
+
+| Suite | Tests |
+|---|---:|
+| `shared:core-api` | 1 |
+| `shared:core-client` | 1 |
+| `shared:model` | 3 |
+| `shared:presentation` | 44 |
+| `shared:ui` | 21 |
+| **Total** | **70** |
+
+Earlier stage records reported 65 because they summed only the presentation (44)
+and UI (21) suites. The five tests in `core-api`, `core-client`, and `model` also
+run in the gate, so the correct total is 70.
+
 ### Full local gate
 
 ```text
@@ -297,7 +316,7 @@ Result: PASS, exit 0, `All requested local checks passed.`
 
 - Gradle `BUILD SUCCESSFUL`; Spotless and detekt passed.
 - Android `assembleDebug` and desktop `createDistributable` passed.
-- All 65 JVM tests passed.
+- All 70 JVM tests passed.
 - `cargo fmt --all -- --check` passed.
 - `cargo clippy --workspace --all-targets -- -D warnings` passed.
 - `cargo test --workspace` passed with 131 Rust tests.
@@ -305,6 +324,11 @@ Result: PASS, exit 0, `All requested local checks passed.`
 - `cargo audit` reported no vulnerability.
 - Repository hygiene scanned the working tree with no forbidden file or secret
   pattern.
+
+A recheck on 2026-11-14 ran the same gate at `3bfd594` with exit 0 and 131 Rust
+tests. The five `jvmTest` tasks were then forced with `--rerun-tasks`; all 70 JVM
+tests passed with 0 failures and 0 skipped. The clean-checkout recheck is
+recorded below.
 
 ### Clean checkout
 
@@ -323,16 +347,31 @@ and ran:
 
 Result: PASS, exit 0, `All requested local checks passed.`
 
-The clone built the Android debug APK and Windows app image, passed all 65 JVM
+The clone built the Android debug APK and Windows app image, passed all 70 JVM
 tests, passed Rust formatting and Clippy, and passed all 131 Rust tests.
 `verify-clean-checkout.ps1` runs `build.ps1` without `-WithDependencyScan`, so the
 clean-checkout run does not repeat `cargo deny` or `cargo audit`. Those policies
 were verified separately in the full local gate against the same committed
 dependency graph.
 
+A recheck after commit `3bfd594` cloned `HEAD` into
+`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-27fbdb98` and passed again with
+exit 0, 131 Rust tests, and 70 JVM tests. The clone was removed afterwards.
+
+### Independent vector recomputation
+
+A standalone Python script rebuilt the 2.5 MB fixture from `(i * 31 + 7) % 251`,
+hand-encoded canonical CBOR, and reproduced the committed content ID, all three
+chunk hashes, the exact manifest body and root, and the one-byte-change content
+ID. It also rebuilt the tombstone body, reproduced the envelope SHA-256, and
+verified the tombstone Ed25519 signature over `NEXUS-TOMBSTONE-v1 || body` with a
+self-contained RFC 8032 verifier. The specification document's hex blocks match
+the recomputed bytes exactly.
+
 ### Kotlin boundary check
 
-The Kotlin/JVM tests remain at 65 passing. No Kotlin source links
+The Kotlin/JVM tests total 70 passing, confirmed by a forced `--rerun-tasks` run
+with 0 failures and 0 skipped. No Kotlin source links
 `nexus-protocol`, `nexus-transfer`, or `nexus-store`, and no publishing or
 tombstone path exists in the shared UI. The Stage 04 screens continue to use demo
 data.

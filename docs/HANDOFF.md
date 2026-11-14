@@ -90,7 +90,7 @@ Result: PASS, exit 0, `All requested local checks passed.`
 
 - Gradle `BUILD SUCCESSFUL`; Spotless and detekt passed.
 - Android debug APK and Windows desktop app image built.
-- All 65 JVM tests passed.
+- All 70 JVM tests passed.
 - `cargo fmt --all -- --check` passed.
 - `cargo clippy --workspace --all-targets -- -D warnings` passed.
 - `cargo test --workspace` passed with 131 Rust tests.
@@ -116,7 +116,16 @@ Result: PASS, exit 0, `All requested local checks passed.`
 | `nexus-transfer` integration tests | 7 | 0 |
 | Other Rust workspace tests | 6 | 0 |
 | **Rust total** | **131** | **0** |
-| **JVM total** | **65** | **0** |
+| `shared:core-api` JVM tests | 1 | 0 |
+| `shared:core-client` JVM tests | 1 | 0 |
+| `shared:model` JVM tests | 3 | 0 |
+| `shared:presentation` JVM tests | 44 | 0 |
+| `shared:ui` JVM tests | 21 | 0 |
+| **JVM total** | **70** | **0** |
+
+Earlier stage records reported 65 JVM tests because they counted only the
+presentation and UI suites. The five `core-api`, `core-client`, and `model` tests
+also run; 70 is the correct total.
 
 ### Validators
 
@@ -134,6 +143,12 @@ tombstones`), `scripts/verify-clean-checkout.ps1` cloned `HEAD` into
 `C:\Users\Elsa\AppData\Local\Temp\nexus-clean-914ef07c` and ran the build, tests,
 and hygiene gate. Result: PASS, exit 0, `All requested local checks passed.` The
 clone was removed afterwards.
+
+A recheck after commit `3bfd594` cloned `HEAD` into
+`C:\Users\Elsa\AppData\Local\Temp\nexus-clean-27fbdb98` and passed again with
+exit 0, 131 Rust tests, and 70 JVM tests. The clone was removed afterwards. A
+separate Python recomputation reproduced every committed manifest and tombstone
+vector, including the Ed25519 tombstone signature.
 
 The clean-checkout script does not run `-WithDependencyScan`; `cargo deny` and
 `cargo audit` were verified separately in the full local gate against the same
