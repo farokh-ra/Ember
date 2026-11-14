@@ -122,7 +122,7 @@ All notable changes to NEXUS are recorded here. The format follows
 - Rust now owns local identity keys, canonical signed records, encrypted
   identity storage, and encrypted backups; no private key enters Kotlin.
 - The committed `Cargo.lock` now resolves 109 packages, and the dependency and
-  license inventory is at version 1.3.0.
+  license inventory is at version 1.4.0.
 - The SQLite schema is now version 3; tombstones are independent signed records
   and publications are immutable.
 

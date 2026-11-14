@@ -308,10 +308,11 @@ Result: PASS, exit 0, `All requested local checks passed.`
 
 ### Clean checkout
 
-After commit `STAGE07_COMMIT`, the clean-checkout gate cloned `HEAD` into:
+After commit `c85f9b4` (`feat(publish): add manifests, revisions, and
+tombstones`), the clean-checkout gate cloned `HEAD` into:
 
 ```text
-CLEAN_CHECKOUT_PATH
+C:\Users\Elsa\AppData\Local\Temp\nexus-clean-914ef07c
 ```
 
 and ran:
@@ -351,9 +352,9 @@ data.
   expected the unrelated signed publication to be marked. The test now uses the
   actual signed publication ID and checks that attribution and exact bytes are
   preserved.
-- The manifest and tombstone vector tests initially encoded the tombstone body
-  with incorrect line wrapping. They now assert the exact bytes produced by the
-  encoder and the independently generated manifest fixture.
+- The committed tombstone body constant initially had incorrect line wrapping.
+  The test now asserts the exact bytes produced by the encoder and the
+  independently generated manifest fixture.
 - `cargo fmt --all` rewrapped several long expressions in the new protocol,
   transfer, and store code. Formatting and Clippy now pass workspace-wide.
 
