@@ -1,4 +1,4 @@
--- NEXUS metadata schema, version 1.
+-- Ember metadata schema, version 1.
 --
 -- File bytes never live in this database. See ADR-0004 and ARCHITECTURE.md
 -- section 7 for the managed-store rules. Timestamps are Unix seconds.

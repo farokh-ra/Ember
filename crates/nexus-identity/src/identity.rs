@@ -8,7 +8,7 @@ use nexus_crypto::{DomainTag, IdentityId, KeyPair, PublicKey, SECRET_KEY_LENGTH,
 use crate::error::IdentityError;
 
 /// User-facing warning that key loss means identity loss.
-pub const KEY_LOSS_WARNING: &str = "Losing this identity key loses the identity. NEXUS has no central account, password reset, or recovery service. Keep an encrypted backup and its passphrase somewhere safe.";
+pub const KEY_LOSS_WARNING: &str = "Losing this identity key loses the identity. Ember has no central account, password reset, or recovery service. Keep an encrypted backup and its passphrase somewhere safe.";
 
 /// Status label that never claims real-world identity verification.
 pub const SIGNATURE_STATUS_LABEL: &str = "Signed record verified";

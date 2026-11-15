@@ -1,4 +1,4 @@
-# NEXUS Development Workflow
+# Ember Development Workflow
 
 This document defines how work moves from an issue to `main` and from `main` to a
 release. It is the operational companion to
@@ -248,8 +248,8 @@ have a reasonable opportunity to update.
 
 ## 10. Stage discipline
 
-NEXUS is built stage by stage from
-`NEXUS_COMPLETE_DEVELOPMENT_ROADMAP.md`. A stage is complete only when:
+Ember is built stage by stage from
+`EMBER_COMPLETE_DEVELOPMENT_ROADMAP.md`. A stage is complete only when:
 
 - Its deliverables exist and build.
 - Its exit criteria have recorded evidence.

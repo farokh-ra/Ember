@@ -33,7 +33,7 @@ import io.nexus.ui.theme.NexusSizes
 import io.nexus.ui.theme.NexusSpacing
 
 /**
- * Standard NEXUS content card.
+ * Standard Ember content card.
  *
  * When clickable, the whole card is a single button target with a visible focus
  * ring. Inner actions should instead use their own 48 dp controls.

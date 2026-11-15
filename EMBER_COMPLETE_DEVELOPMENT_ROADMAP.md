@@ -1,4 +1,4 @@
-# NEXUS --- Complete Development Roadmap
+# Ember --- Complete Development Roadmap
 
 ## From 0% to a production-ready, global, decentralized file-discovery and sharing network
 
@@ -15,7 +15,7 @@ Windows applications and a shared Rust networking core.
 
 # 1. Project vision
 
-NEXUS is a decentralized application for discovering people and publicly
+Ember is a decentralized application for discovering people and publicly
 shared files, publishing files from a user's own device, and downloading
 files directly from other participating devices.
 
@@ -30,7 +30,7 @@ transfer utility.
 
 A user should be able to:
 
--   Create and control a NEXUS identity.
+-   Create and control an Ember identity.
 -   Set up one public profile containing their published files.
 -   Browse other users' profiles.
 -   Publish public files with descriptions, categories and tags.
@@ -45,7 +45,7 @@ A user should be able to:
 -   Preserve original-uploader attribution when a file is replicated.
 -   Publish a modified file as a distinct file or version linked to its
     source.
--   Use the same NEXUS network from Android and Windows.
+-   Use the same Ember network from Android and Windows.
 
 ## 1.2 Product rules already decided
 
@@ -80,7 +80,7 @@ These are product requirements, not optional implementation suggestions:
 -   Decentralized does not mean that peers are always online. A file
     with no online source cannot be downloaded at that moment.
 -   A network with no reachable bootstrap peers, relays or other known
-    peers can be difficult for a new installation to join. NEXUS should
+    peers can be difficult for a new installation to join. Ember should
     support multiple independently operated community bootstrap options,
     not rely on one company endpoint.
 -   NAT traversal is not guaranteed on every network. Some connections
@@ -166,7 +166,7 @@ functions. Expose stable operations such as `startNode`, `connect`,
 ## 2.2 Application architecture
 
 ``` text
-                    NEXUS APPLICATION
+                    Ember APPLICATION
              ┌─────────────────────────────┐
              │       Compose UI            │
              │  Android / Windows screens  │
@@ -178,7 +178,7 @@ functions. Expose stable operations such as `startNode`, `connect`,
              └──────────────┬──────────────┘
                             │ stable FFI API
              ┌──────────────▼──────────────┐
-             │       Rust NEXUS Core       │
+             │       Rust Ember Core       │
              │ identity · DHT · P2P        │
              │ discovery · transfer        │
              │ verification · replication  │
@@ -189,7 +189,7 @@ functions. Expose stable operations such as `startNode`, `connect`,
              │ metadata    │ │ cache/store  │
              └─────────────┘ └──────────────┘
                      │
-             Internet / other NEXUS peers
+             Internet / other Ember peers
 ```
 
 The diagram represents logical components. SQLite and the file store
@@ -389,7 +389,7 @@ time.
 
 ### Work
 
--   Establish NEXUS branding, typography, spacing, colors and icon
+-   Establish Ember branding, typography, spacing, colors and icon
     rules.
 -   Build reusable Compose components.
 -   Create navigation and application state patterns.
@@ -1155,7 +1155,7 @@ architecture.
 
 # 9. Definition of 100% complete
 
-NEXUS is not 100% merely because the screens look finished or because
+Ember is not 100% merely because the screens look finished or because
 two devices can transfer a file.
 
 The project reaches its planned 100% milestone when:
@@ -1278,5 +1278,5 @@ foundation in this exact order:
 7.  Continue through identity, file integrity, peer networking and the
     remaining stages.
 
-**The target is the full NEXUS product. Staging is the implementation
+**The target is the full Ember product. Staging is the implementation
 and verification strategy---not a reduction of the final vision.**

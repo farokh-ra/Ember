@@ -2,13 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-12
-- **Deciders:** NEXUS engineering
+- **Deciders:** Ember engineering
 - **Supersedes:** none
 - **Related:** ADR-0002, ADR-0009, [Architecture](../ARCHITECTURE.md)
 
 ## Context
 
-NEXUS must ship first-class Android and Windows applications with the same product journeys, not a web wrapper and not two unrelated codebases. The roadmap recommends Kotlin + Compose Multiplatform for shared screens, state, workflows, and domain logic, while keeping native platform integration.
+Ember must ship first-class Android and Windows applications with the same product journeys, not a web wrapper and not two unrelated codebases. The roadmap recommends Kotlin + Compose Multiplatform for shared screens, state, workflows, and domain logic, while keeping native platform integration.
 
 The UI must support phone and desktop layouts, dark/light themes, keyboard and screen-reader access, and offline/local-first behaviour. Platform-specific pieces include file pickers, notifications, foreground execution, storage access, window management, and installer integration.
 

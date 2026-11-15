@@ -2,13 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-12
-- **Deciders:** NEXUS engineering
+- **Deciders:** Ember engineering
 - **Supersedes:** none
 - **Related:** ADR-0002, ADR-0006, ADR-0007, ADR-0008, ADR-0010
 
 ## Context
 
-NEXUS must connect Android and Windows peers directly, authenticate peer identities, discover peers and records without a central account service, and remain usable when some sources are offline. The roadmap selects Rust and libp2p. The networking design must be realistic for mobile networks and NAT, must not silently depend on a company endpoint, and must leave room for relay support in a later stage.
+Ember must connect Android and Windows peers directly, authenticate peer identities, discover peers and records without a central account service, and remain usable when some sources are offline. The roadmap selects Rust and libp2p. The networking design must be realistic for mobile networks and NAT, must not silently depend on a company endpoint, and must leave room for relay support in a later stage.
 
 The application also has a user signing identity that must not become a permanent network tracking identifier. A user may restore the same identity on two devices, and each device should be able to appear as a separate peer.
 

@@ -141,8 +141,8 @@ Artifacts:
 | Artifact | Path | Size |
 |---|---|---|
 | Android debug APK | `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk` | 29,635,374 bytes |
-| Windows app image | `apps/desktopApp/build/compose/binaries/main/app/NEXUS` | 130,042,911 bytes total |
-| Windows launcher | `.../app/NEXUS/NEXUS.exe` | 540,672 bytes |
+| Windows app image | `apps/desktopApp/build/compose/binaries/main/app/Ember` | 130,042,911 bytes total |
+| Windows launcher | `.../app/Ember/Ember.exe` | 540,672 bytes |
 
 ### Kotlin tests
 

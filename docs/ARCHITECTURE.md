@@ -1,4 +1,4 @@
-# NEXUS Architecture
+# Ember Architecture
 
 | Field | Value |
 |---|---|
@@ -14,7 +14,7 @@
 
 ## 1. Scope and status
 
-This document defines the first-release architecture for NEXUS: a local-first, peer-to-peer file publishing and discovery application for Android and Windows. It covers the application shells, the shared Kotlin/Compose layer, the Rust core, storage, networking, transfer, replication, search, security boundaries, lifecycle, packaging, and verification strategy.
+This document defines the first-release architecture for Ember: a local-first, peer-to-peer file publishing and discovery application for Android and Windows. It covers the application shells, the shared Kotlin/Compose layer, the Rust core, storage, networking, transfer, replication, search, security boundaries, lifecycle, packaging, and verification strategy.
 
 Stage 02 is a design stage. No application, Rust, or network code exists yet. Build and runtime evidence begins in Stage 03 and continues through Stage 19. Statements in this document are design commitments unless they explicitly cite completed evidence.
 
@@ -57,7 +57,7 @@ The three criteria are addressed in sections 4, 6, and 3 respectively, and are v
 
 ## 3. System context
 
-NEXUS is a peer-to-peer application. There is no NEXUS-operated account service, file host, search database, or telemetry endpoint. Community bootstrap nodes help peers join the network but are not identity, ownership, or content authorities.
+Ember is a peer-to-peer application. There is no Ember-operated account service, file host, search database, or telemetry endpoint. Community bootstrap nodes help peers join the network but are not identity, ownership, or content authorities.
 
 ```mermaid
 flowchart LR
@@ -65,7 +65,7 @@ flowchart LR
     User --> Windows[Windows application]
     Android --> CoreA[Rust core in Android process]
     Windows --> CoreW[Rust core in Windows process]
-    CoreA <-->|libp2p QUIC or TCP| Peers[Other NEXUS peers]
+    CoreA <-->|libp2p QUIC or TCP| Peers[Other Ember peers]
     CoreW <-->|libp2p QUIC or TCP| Peers
     CoreA -.->|optional entry points| Bootstrap[Community bootstrap nodes]
     CoreW -.->|optional entry points| Bootstrap
@@ -106,8 +106,8 @@ flowchart LR
 | `shared/core-client` | FFI bridge, CBOR envelope codec, event pump, ABI/version check, memory copying. | Render UI or enforce product policy. |
 | `shared/presentation` | View models, navigation, state reduction, input validation, formatting, screen models. | Open the database, managed store, or network sockets. |
 | `shared/ui` | Compose screens, components, theme, strings, accessibility semantics, responsive layouts. | Call native code directly or make durability decisions. |
-| `apps/androidApp` | Android shell and platform integrations. | Duplicate core logic or write durable NEXUS state. |
-| `apps/desktopApp` | Windows shell and platform integrations. | Duplicate core logic or write durable NEXUS state. |
+| `apps/androidApp` | Android shell and platform integrations. | Duplicate core logic or write durable Ember state. |
+| `apps/desktopApp` | Windows shell and platform integrations. | Duplicate core logic or write durable Ember state. |
 
 ### 4.3 Rust crates
 
@@ -149,7 +149,7 @@ nexus-observability -> nexus-types
 3. `nexus-store` is the only crate that opens SQLite or writes the managed store.
 4. `nexus-transfer` is the only crate that promotes bytes into a verified content blob.
 5. `nexus-search` indexes only records that `nexus-protocol` and `nexus-store` have verified.
-6. Kotlin never writes durable NEXUS state and never parses a signed record as authoritative.
+6. Kotlin never writes durable Ember state and never parses a signed record as authoritative.
 7. Platform shells own platform APIs; shared code depends on narrow interfaces.
 
 ## 5. Runtime, process, and threading model
@@ -216,7 +216,7 @@ Shutdown:
 
 The full contract is in [FFI_INTERFACE.md](architecture/FFI_INTERFACE.md) and [nexus_core.h](architecture/nexus_core.h).
 
-- NEXUS exposes one versioned C ABI that serves both platforms.
+- Ember exposes one versioned C ABI that serves both platforms.
 - Android uses JNI through the `jni` crate; Windows uses JNA.
 - The Kotlin `NexusCore` interface is common; platform `actual` implementations only translate memory and exceptions.
 - Structured data uses bounded CBOR. File bytes use dedicated streaming import/export calls.
@@ -260,7 +260,7 @@ Rust owns all durable state. Kotlin receives app-private paths from the platform
   diagnostics/
 ```
 
-Android uses the app-private files directory. Windows uses `%LOCALAPPDATA%\NEXUS\data`. The database and store must be on the same volume. Exports go to a user-selected destination outside the managed store.
+Android uses the app-private files directory. Windows uses `%LOCALAPPDATA%\Ember\data`. The database and store must be on the same volume. Exports go to a user-selected destination outside the managed store.
 
 ### 7.3 Commit ordering and crash safety
 

@@ -1,4 +1,4 @@
-# NEXUS Architecture Decision Records
+# Ember Architecture Decision Records
 
 | Field | Value |
 |---|---|

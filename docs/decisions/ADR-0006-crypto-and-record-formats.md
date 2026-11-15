@@ -2,13 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-12
-- **Deciders:** NEXUS engineering
+- **Deciders:** Ember engineering
 - **Supersedes:** none
 - **Related:** ADR-0002, ADR-0004, ADR-0005, ADR-0007, [Architecture](../ARCHITECTURE.md)
 
 ## Context
 
-NEXUS must prove that a publication was created by a specific identity, that downloaded bytes are exactly the published bytes, and that two platforms compute identical identifiers and signatures. The product already fixes two primitives: **Ed25519** for signatures and **SHA-256** for content identity. It leaves the record encoding, chunk structure, identity ID format, key protection, and backup format to architecture.
+Ember must prove that a publication was created by a specific identity, that downloaded bytes are exactly the published bytes, and that two platforms compute identical identifiers and signatures. The product already fixes two primitives: **Ed25519** for signatures and **SHA-256** for content identity. It leaves the record encoding, chunk structure, identity ID format, key protection, and backup format to architecture.
 
 The design must be unambiguous across Kotlin and Rust, avoid signature malleability and cross-protocol reuse, keep a 4 GiB file within bounded memory, fit a publication record under 64 KiB, and allow replicas to serve the original signed record byte-for-byte.
 

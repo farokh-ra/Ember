@@ -1,4 +1,4 @@
-//! NEXUS lifecycle orchestration, method dispatch, event queue, and streaming.
+//! Ember lifecycle orchestration, method dispatch, event queue, and streaming.
 //!
 //! This crate owns the real core behind the C ABI: configuration validation,
 //! handle lifecycle, bounded asynchronous operations, the coalescing event

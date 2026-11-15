@@ -26,7 +26,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Decorative NEXUS node mark. The adjacent wordmark carries the accessible
+ * Decorative Ember node mark. The adjacent wordmark carries the accessible
  * name, so the mark itself is intentionally silent.
  */
 @Composable

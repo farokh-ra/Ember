@@ -1,6 +1,6 @@
-# Contributing to NEXUS
+# Contributing to Ember
 
-NEXUS is built in reviewed stages. Contributions must respect the architecture
+Ember is built in reviewed stages. Contributions must respect the architecture
 boundaries, the pinned toolchain, the license policy, and the local-first
 privacy model.
 

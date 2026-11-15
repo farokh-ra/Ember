@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Builds the native NEXUS core library and C ABI harness.
+    Builds the native Ember core library and C ABI harness.
 
 .DESCRIPTION
     Builds `nexus-ffi` for Windows and/or Android, copies each artifact under

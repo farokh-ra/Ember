@@ -1,4 +1,4 @@
-# NEXUS Developer Setup
+# Ember Developer Setup
 
 This guide makes a clean Windows checkout build with the pinned toolchain. The
 setup is portable, per-user, and does not require administrator rights. The same
@@ -194,7 +194,7 @@ cargo install cargo-audit --version 0.23.0 --locked
 | Artifact | Path |
 |---|---|
 | Android debug APK | `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk` |
-| Windows app image | `apps/desktopApp/build/compose/binaries/main/app/NEXUS` |
+| Windows app image | `apps/desktopApp/build/compose/binaries/main/app/Ember` |
 | detekt reports | `build/reports/detekt/` |
 | Kotlin test reports | `shared/*/build/reports/tests/jvmTest/` |
 | Rust test output | Console, or `cargo test --workspace` |
@@ -268,7 +268,7 @@ Do not commit `local.properties`; it is machine-specific and ignored.
 | `linker 'link.exe' not found` | The MSVC C++ workload is missing. Re-run `setup-windows.ps1` for the MinGW fallback, or install the Visual Studio C++ workload and Windows SDK and use `-UseMsvc`. |
 | `linker 'gcc.exe' not found` | MinGW is not on `PATH`. Dot-source `dev-env.ps1` and confirm `%LOCALAPPDATA%\NEXUS\toolchain\mingw\mingw64\bin\gcc.exe` exists. |
 | `sdkmanager` reports deprecation | Expected. Use `android sdk install`, or the fallback in `setup-windows.ps1`. |
-| Native tool output appears as a PowerShell error record | Windows PowerShell 5.1 renders native stderr as `NativeCommandError` even when the tool succeeds. The NEXUS scripts check the process exit code and fail only on a non-zero result. Treat exit code 0 as success. |
+| Native tool output appears as a PowerShell error record | Windows PowerShell 5.1 renders native stderr as `NativeCommandError` even when the tool succeeds. The Ember scripts check the process exit code and fail only on a non-zero result. Treat exit code 0 as success. |
 | `Package ndk not found` with old syntax | Use `android sdk install "ndk/29.0.14206865"`; the semicolon form is from the deprecated CLI. |
 | Spotless configuration-cache failure | Configuration cache is intentionally disabled in `gradle.properties` because Spotless 8.11.0 cannot serialize its line-ending policy under Gradle 9.9.1. Do not re-enable it until the formatter supports the combination. |
 | Gradle runs out of memory | The root build sets `-Xmx4g`. Close other Gradle daemons with `.\gradlew.bat --stop`. |

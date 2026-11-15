@@ -12,7 +12,7 @@ use bech32::{Bech32m, Hrp};
 use crate::error::CryptoError;
 use crate::key::{PUBLIC_KEY_LENGTH, PublicKey};
 
-/// Human-readable prefix for NEXUS identity IDs.
+/// Human-readable prefix for Ember identity IDs.
 pub const IDENTITY_ID_HRP: &str = "nx";
 /// Multicodec varint for an Ed25519 public key.
 pub const ED25519_PUBLIC_KEY_MULTICODEC: [u8; 2] = [0xed, 0x01];

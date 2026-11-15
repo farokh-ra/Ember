@@ -1,6 +1,6 @@
 //! SQLite metadata and managed blob storage.
 //!
-//! Rust is the only reader and writer of durable NEXUS state. This crate owns
+//! Rust is the only reader and writer of durable Ember state. This crate owns
 //! the embedded schema and migrations, the content-addressed managed store,
 //! quota accounting, reference-counted deletion, startup reconciliation, and
 //! metadata export/restore. Kotlin shells receive app-private roots but never

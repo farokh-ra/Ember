@@ -3,7 +3,7 @@ name = "nexus-types"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Shared NEXUS identifiers, limits, and value types"
+description = "Shared Ember identifiers, limits, and value types"
 publish = false
 
 [lints]

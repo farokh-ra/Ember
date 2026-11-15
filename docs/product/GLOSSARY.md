@@ -1,4 +1,4 @@
-# NEXUS Glossary
+# Ember Glossary
 
 | Field | Value |
 |---|---|
@@ -52,7 +52,7 @@ Terms are listed alphabetically. Definitions are normative for product copy, tes
 
 | Term | Definition | Not to be confused with |
 |---|---|---|
-| **Ed25519** | The public-key signature algorithm used for identity and signed records. | Encryption of file content; NEXUS identity signatures are for authenticity. |
+| **Ed25519** | The public-key signature algorithm used for identity and signed records. | Encryption of file content; Ember identity signatures are for authenticity. |
 | **Explore** | Browsing categories, recent records, and random records from available verified metadata. | A popularity feed, likes, comments, or follows. |
 
 ## F
@@ -95,7 +95,7 @@ Terms are listed alphabetically. Definitions are normative for product copy, tes
 
 | Term | Definition | Not to be confused with |
 |---|---|---|
-| **Managed file store** | NEXUS-controlled storage for originals, replicas, completed downloads, and resumable partials, with quotas and generated safe names. | The user's entire disk, arbitrary folders, or SQLite BLOBs. |
+| **Managed file store** | Ember-controlled storage for originals, replicas, completed downloads, and resumable partials, with quotas and generated safe names. | The user's entire disk, arbitrary folders, or SQLite BLOBs. |
 | **Modified version** | A distinct file with a different content ID, its own publication record, and an optional parent/source reference. | An edit that preserves the original content ID or original uploader attribution. |
 | **Multi-peer download** | Simultaneous chunk scheduling across multiple sources. Later scope; v1 uses one verified source at a time with sequential failover. | Sequential retry from a different source. |
 
@@ -103,7 +103,7 @@ Terms are listed alphabetically. Definitions are normative for product copy, tes
 
 | Term | Definition | Not to be confused with |
 |---|---|---|
-| **Node** | A running NEXUS installation participating in the peer network. **Node online** means the local core is running with at least one usable network path; peer count is separate. | A user account, a central server, or a guarantee that peers/files are reachable. |
+| **Node** | A running Ember installation participating in the peer network. **Node online** means the local core is running with at least one usable network path; peer count is separate. | A user account, a central server, or a guarantee that peers/files are reachable. |
 
 ## O
 
@@ -118,7 +118,7 @@ Terms are listed alphabetically. Definitions are normative for product copy, tes
 | Term | Definition | Not to be confused with |
 |---|---|---|
 | **Parent / source reference** | An optional pointer from a modified publication to another content/publication. Informational in v1; it does not prove endorsement. | A signed endorsement by the parent uploader, which v1 does not implement. |
-| **Peer** | A running NEXUS installation that can connect to other installations. | A user account, contact, or follower. |
+| **Peer** | A running Ember installation that can connect to other installations. | A user account, contact, or follower. |
 | **Profile** | A signed public record with display name, optional username label, bio, optional avatar, identity ID, and publication references. | A private account, contact card, or social graph. |
 | **Protocol version** | A version number in messages and records that allows compatible evolution and safe rejection of unknown formats. | App marketing version. |
 | **Publication record** | A signed statement by an identity that it published a specific content ID with metadata, timestamp, and protocol version. | The file bytes, a local database row without a signature, or a replica's claim. |

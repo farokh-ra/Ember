@@ -2,13 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-12
-- **Deciders:** NEXUS engineering
+- **Deciders:** Ember engineering
 - **Supersedes:** none
 - **Related:** ADR-0002, ADR-0004, ADR-0005, ADR-0007, ADR-0008
 
 ## Context
 
-NEXUS users need to find profiles and files by username/display name, filename, category, and tags. Distributed hash tables support exact key lookup, not arbitrary full-text search. A central search service would be simple but violates the product's no-central-backend rule and creates a moderation and availability authority. A global distributed full-text index is expensive, privacy-sensitive, and cannot promise complete results.
+Ember users need to find profiles and files by username/display name, filename, category, and tags. Distributed hash tables support exact key lookup, not arbitrary full-text search. A central search service would be simple but violates the product's no-central-backend rule and creates a moderation and availability authority. A global distributed full-text index is expensive, privacy-sensitive, and cannot promise complete results.
 
 The product requires honest partial results within a bounded time (target 10 seconds), coverage/freshness labels, cached offline results, deduplication, and conflict visibility. Explore must show categories, recent records, and random discovery without likes, follows, or popularity ranking.
 

@@ -9,7 +9,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 
 /**
- * NEXUS light palette.
+ * Ember light palette.
  *
  * Contrast ratios for the primary text and status pairs are checked by
  * `ThemeContrastTest` in `jvmTest`.
@@ -54,7 +54,7 @@ public val NexusLightColors: ColorScheme =
         surfaceContainerLowest = Color(0xFFFFFFFF),
     )
 
-/** NEXUS dark palette. */
+/** Ember dark palette. */
 public val NexusDarkColors: ColorScheme =
     darkColorScheme(
         primary = Color(0xFF52D6DF),

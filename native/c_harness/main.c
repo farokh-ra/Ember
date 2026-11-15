@@ -1,5 +1,5 @@
 /*
- * NEXUS C ABI harness.
+ * Ember C ABI harness.
  *
  * Exercises the same lifecycle, invoke, event, streaming, panic, error, and
  * ABI-mismatch contract as the Kotlin JNI and JNA adapters. Every function is
@@ -724,7 +724,7 @@ static void lifecycle_cycles(const uint8_t *config, size_t config_len, const uin
 }
 
 int main(void) {
-    printf("NEXUS C ABI harness\n");
+    printf("Ember C ABI harness\n");
     uint32_t abi = nexus_core_abi_version();
     printf("  ABI version: %" PRIu32 "\n", abi);
     CHECK(abi == NEXUS_ABI_VERSION, "ABI version mismatch");

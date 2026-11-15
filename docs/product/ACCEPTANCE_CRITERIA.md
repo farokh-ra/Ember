@@ -1,4 +1,4 @@
-# NEXUS Acceptance Criteria
+# Ember Acceptance Criteria
 
 | Field | Value |
 |---|---|
@@ -238,7 +238,7 @@ Each criterion is a pass/fail statement. A criterion is satisfied only when the 
 
 **DL-011 — Final verification failure** *(I)* — Given a completed transfer whose full content ID or chunk structure does not match, when verification fails, then the file is not marked complete, is not presented as usable, and the user is offered retry or delete.
 
-**DL-012 — Managed library and explicit export** *(M, I)* — Given a completed download, when the user wants it outside NEXUS, then the file remains in the managed library until an explicit export/share action uses a platform picker and never auto-opens the file or silently overwrites an existing one.
+**DL-012 — Managed library and explicit export** *(M, I)* — Given a completed download, when the user wants it outside Ember, then the file remains in the managed library until an explicit export/share action uses a platform picker and never auto-opens the file or silently overwrites an existing one.
 
 **DL-013 — Background lifecycle and concurrency** *(M, I)* — Given active transfers, backgrounding, process death, and the configured concurrent limit, when these conditions occur, then platform-supported foreground mechanisms are used where available, transfers pause resumably otherwise, the queue respects the limit, and no completion is falsely reported.
 
@@ -334,7 +334,7 @@ Each criterion is a pass/fail statement. A criterion is satisfied only when the 
 
 **SEC-007 — Dependency and static analysis** *(S)* — Given the dependency and static-analysis reports, when a release candidate is evaluated, then there are no unresolved high-severity findings unless explicitly blocked from release with an owner and mitigation.
 
-**SEC-008 — Public visibility and anonymity disclosure** *(M)* — Given first publish/profile use, when the user proceeds, then the UI discloses that profiles/files are public, peers may observe network addresses, and NEXUS does not guarantee anonymity.
+**SEC-008 — Public visibility and anonymity disclosure** *(M)* — Given first publish/profile use, when the user proceeds, then the UI discloses that profiles/files are public, peers may observe network addresses, and Ember does not guarantee anonymity.
 
 **SEC-009 — No default telemetry or crash reporting** *(S, M)* — Given a default installation, when network traffic and settings are inspected, then no telemetry or crash reporting is enabled; any collection is opt-in, documented, minimised, and excludes secrets and local paths.
 

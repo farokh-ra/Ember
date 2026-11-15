@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Runs the local NEXUS build, test, formatting, lint, and hygiene gates.
+    Runs the local Ember build, test, formatting, lint, and hygiene gates.
 #>
 [CmdletBinding()]
 param(

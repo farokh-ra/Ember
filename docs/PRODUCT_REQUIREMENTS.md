@@ -1,4 +1,4 @@
-# NEXUS — Product Requirements Document
+# Ember — Product Requirements Document
 
 | Field | Value |
 |---|---|
@@ -6,11 +6,11 @@
 | Version | 1.0.0 |
 | Status | Approved — Stage 01 complete |
 | Date | 2026-11-12 |
-| Owner | NEXUS product and engineering |
+| Owner | Ember product and engineering |
 | Scope | First public release (v1) and product-wide rules |
 | Normative language | **MUST**, **MUST NOT**, **SHOULD**, **MAY** as defined in RFC 2119 |
 
-This document turns the NEXUS roadmap vision into a formal, testable product definition. It is the authority for product behaviour. Technical choices that do not change product behaviour are recorded in the architecture decision records produced in Stage 02.
+This document turns the Ember roadmap vision into a formal, testable product definition. It is the authority for product behaviour. Technical choices that do not change product behaviour are recorded in the architecture decision records produced in Stage 02.
 
 Related documents:
 
@@ -24,7 +24,7 @@ Related documents:
 
 ## 1. Purpose
 
-NEXUS is a decentralized application for discovering people and publicly shared files, publishing files from a user's own device, and downloading files directly from other participating devices.
+Ember is a decentralized application for discovering people and publicly shared files, publishing files from a user's own device, and downloading files directly from other participating devices.
 
 There is no company-owned central server, central cloud storage, or mandatory cloud account. Devices participate as peers. Users may voluntarily keep verified copies of public files so those files remain available to others.
 
@@ -38,7 +38,7 @@ The first release is a real Android and Windows product, not a prototype, web wr
 
 A user can:
 
-1. Create and control a NEXUS cryptographic identity.
+1. Create and control an Ember cryptographic identity.
 2. Create one public profile containing their published files.
 3. Browse other users' public profiles.
 4. Publish public files with a description, category, and tags.
@@ -51,7 +51,7 @@ A user can:
 11. See which files they currently host.
 12. Preserve original-uploader attribution while hosting a replica.
 13. Publish a modified file as a distinct file with an optional source reference.
-14. Use the same NEXUS network from Android and Windows.
+14. Use the same Ember network from Android and Windows.
 
 ### 2.2 Product principles
 
@@ -76,8 +76,8 @@ These rules override any conflicting feature request. A change requires an expli
 
 | Rule | Statement |
 |---|---|
-| PR-01 | All published files and profiles are public. NEXUS has no private or secret file-sharing mode. |
-| PR-02 | NEXUS must not require a company-owned central server, central database, central file host, or mandatory cloud account. |
+| PR-01 | All published files and profiles are public. Ember has no private or secret file-sharing mode. |
+| PR-02 | Ember must not require a company-owned central server, central database, central file host, or mandatory cloud account. |
 | PR-03 | Replication is never mandatory or automatic. The user chooses every hosted file. |
 | PR-04 | Replication does not transfer authorship. A replica always serves the original signed publication record. |
 | PR-05 | Original publication records are signed by the publishing identity. Originator attribution is verifiable, not editable text. |
@@ -85,8 +85,8 @@ These rules override any conflicting feature request. A change requires an expli
 | PR-07 | Downloaded content is verified against its published content identity. Corrupt content is never presented as complete or valid. |
 | PR-08 | There are no likes, comments, follows, or social graph features. Discovery is by profile, file record, category, tags, and search. |
 | PR-09 | Android and Windows are first-class platforms. Neither is a reduced web wrapper. Core journeys have platform parity. |
-| PR-10 | NEXUS must not promise remote deletion. Unpublishing stops the user's service and publishes a tombstone; copies held by others may remain. |
-| PR-11 | NEXUS never automatically executes or opens downloaded files. Previews are limited to safe formats and safe platform handlers. |
+| PR-10 | Ember must not promise remote deletion. Unpublishing stops the user's service and publishes a tombstone; copies held by others may remain. |
+| PR-11 | Ember never automatically executes or opens downloaded files. Previews are limited to safe formats and safe platform handlers. |
 | PR-12 | The architecture is designed for a global network. Two-device convenience must not become a protocol limitation. |
 
 ---
@@ -180,7 +180,7 @@ The full definitions are in the [Glossary](product/GLOSSARY.md). The following t
 
 | Term | Normative meaning |
 |---|---|
-| Peer / node | A running NEXUS installation participating in the network. |
+| Peer / node | A running Ember installation participating in the network. |
 | Identity | An Ed25519 keypair controlled by the user. The public identity ID is derived from the public key. |
 | Profile | A signed public record containing a display name, optional username label, bio, optional avatar, and references to the identity's publications. |
 | Publication record | A signed statement by an identity that it published a specific content hash with specific metadata, timestamp, and protocol version. |
@@ -225,7 +225,7 @@ These distinctions are release-blocking. The UI and API must never collapse them
 
 ## 7. Users and jobs
 
-NEXUS has no account roles. One person may act in all roles at different times.
+Ember has no account roles. One person may act in all roles at different times.
 
 | Role | Job to be done |
 |---|---|
@@ -301,7 +301,7 @@ All requirements in this section are required for v1. Each requirement reference
 |---|---|---|
 | FR-DATA-01 | The app MUST persist identity references, profiles, publication records, file metadata, downloads, replicas, peer observations, and settings in SQLite with a documented schema and migration history. | DATA-001 |
 | FR-DATA-02 | Migrations MUST work from a clean database and from every previously shipped schema version. Failed migrations MUST roll back and report an actionable error without losing existing data. | DATA-002 |
-| FR-DATA-03 | File bytes MUST be stored in a managed file store, not as large SQLite BLOBs. Stored names MUST be generated safely from content identity; user filenames are display metadata only. Publishing MUST import a managed copy; NEXUS MUST NOT serve arbitrary external paths, and the external original MUST NOT be modified or deleted. | DATA-003, DATA-004 |
+| FR-DATA-03 | File bytes MUST be stored in a managed file store, not as large SQLite BLOBs. Stored names MUST be generated safely from content identity; user filenames are display metadata only. Publishing MUST import a managed copy; Ember MUST NOT serve arbitrary external paths, and the external original MUST NOT be modified or deleted. | DATA-003, DATA-004 |
 | FR-DATA-04 | The managed store MUST enforce the storage quota, minimum free-space reserve, and file-size limits from section 10. Partial downloads MUST count toward the managed quota. | DATA-005 |
 | FR-DATA-05 | Cleanup and deletion MUST be reference-counted: bytes still referenced by a published original or active replica MUST NOT be deleted when a download record is removed. User-published originals and active replicas MUST NOT be deleted without explicit user confirmation. Incomplete downloads may be cleaned only according to a user-visible retention policy. | DATA-006 |
 | FR-DATA-06 | The app MUST provide a metadata backup/export and restore path for recoverable local data. Corrupt or incompatible archives MUST be rejected without overwriting current data. | DATA-007 |
@@ -406,7 +406,7 @@ All requirements in this section are required for v1. Each requirement reference
 
 | ID | Requirement | Acceptance |
 |---|---|---|
-| FR-REP-01 | Hosting MUST require an explicit user action for each file. NEXUS MUST NOT silently replicate or seed content the user did not publish or explicitly choose to host. | REP-001 |
+| FR-REP-01 | Hosting MUST require an explicit user action for each file. Ember MUST NOT silently replicate or seed content the user did not publish or explicitly choose to host. | REP-001 |
 | FR-REP-02 | Before advertising a replica, the app MUST download or verify the complete file against its content ID and chunk structure. Incomplete or corrupt content MUST NOT be advertised. | REP-002 |
 | FR-REP-03 | The user MUST be able to set storage and bandwidth limits. The app MUST enforce them and explain when a quota blocks hosting. | REP-004 |
 | FR-REP-04 | The user MUST be able to pause or remove a replica. Removing MUST stop serving, require confirmation, and delete local bytes only after confirmation. | REP-005 |
@@ -460,7 +460,7 @@ All requirements in this section are required for v1. Each requirement reference
 | FR-SEC-04 | Downloaded files MUST never be auto-executed. Previews MUST be sandboxed or delegated to safe platform handlers. | SEC-005 |
 | FR-SEC-05 | The app MUST warn about key loss, backup responsibility, public visibility, and the lack of central recovery. | SEC-006 |
 | FR-SEC-06 | Dependencies MUST be scanned for vulnerabilities and static analysis MUST be part of CI. High-severity findings MUST be fixed or explicitly release-blocked. | SEC-007 |
-| FR-SEC-07 | The app MUST disclose that published profiles/files are public, that peers may see network addresses, and that NEXUS does not guarantee anonymity. | SEC-008 |
+| FR-SEC-07 | The app MUST disclose that published profiles/files are public, that peers may see network addresses, and that Ember does not guarantee anonymity. | SEC-008 |
 | FR-SEC-08 | No telemetry or crash reporting is enabled by default. Any collection MUST be opt-in, minimised, documented, and separable from core functionality. | SEC-009 |
 | FR-SEC-09 | Protocol and record versions MUST be checked. Unknown or downgrade attempts MUST be rejected or quarantined safely. | SEC-010 |
 | FR-SEC-10 | Signed records MUST be verified before storage or display as valid. A malicious record MUST NOT overwrite a valid record or impersonate another identity. | SEC-010 |
@@ -600,11 +600,11 @@ These values are normative and testable. Technical encoding details are decided 
 - All peer messages and records are validated, bounded, and rate-limited before use.
 - The app never auto-executes downloads and never silently opens files.
 - Public visibility is disclosed before publishing; profile and published files are public.
-- Peers can observe network addresses of peers they connect to. NEXUS does not promise anonymity.
+- Peers can observe network addresses of peers they connect to. Ember does not promise anonymity.
 - No telemetry by default; no central analytics dependency; crash reporting optional and redacted.
 - Dependency scanning, static analysis, and a threat model are required before release.
 - Local blocking/community reporting are later scope, but the protocol must not assume a central moderation authority.
-- Legal and copyright obligations remain the responsibility of users and operators; NEXUS does not implement central enforcement.
+- Legal and copyright obligations remain the responsibility of users and operators; Ember does not implement central enforcement.
 
 ---
 

@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible defect in NEXUS.
+description: Report a reproducible defect in Ember.
 title: "fix: "
 labels:
   - bug

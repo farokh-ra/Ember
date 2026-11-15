@@ -1,4 +1,4 @@
-//! Stable C ABI surface for the NEXUS core.
+//! Stable C ABI surface for the Ember core.
 //!
 //! Every exported function validates arguments, catches Rust panics, and
 //! returns a defined [`NexusStatus`]. Domain failures for method invocations

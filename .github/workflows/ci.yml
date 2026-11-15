@@ -150,7 +150,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: nexus-android-debug
+          name: ember-android-debug
           path: apps/androidApp/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -176,6 +176,6 @@ jobs:
       - name: Upload desktop distributable
         uses: actions/upload-artifact@v4
         with:
-          name: nexus-desktop-windows
+          name: ember-desktop-windows
           path: apps/desktopApp/build/compose/binaries/main/app
           if-no-files-found: error

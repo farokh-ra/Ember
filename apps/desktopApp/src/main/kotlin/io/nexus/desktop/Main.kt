@@ -27,7 +27,7 @@ fun main() =
 
         Window(
             onCloseRequest = ::exitApplication,
-            title = "NEXUS",
+            title = "Ember",
             state =
                 rememberWindowState(
                     width = INITIAL_WINDOW_WIDTH_DP.dp,
