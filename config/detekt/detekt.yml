@@ -1,0 +1,22 @@
+complexity:
+  LongMethod:
+    # Compose layout functions are declarative trees; length is not a reliable
+    # complexity signal. Non-composable functions keep the default threshold.
+    ignoreAnnotated:
+      - Composable
+  LongParameterList:
+    # Screen and component composables intentionally take state plus callbacks.
+    ignoreAnnotated:
+      - Composable
+  TooManyFunctions:
+    # Shared component and settings files group small, related composables.
+    thresholdInFiles: 15
+    thresholdInClasses: 15
+    thresholdInInterfaces: 15
+    thresholdInObjects: 15
+    thresholdInEnums: 15
+
+naming:
+  FunctionNaming:
+    ignoreAnnotated:
+      - Composable

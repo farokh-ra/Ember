@@ -1,0 +1,13 @@
+[package]
+name = "nexus-net"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "libp2p networking and peer discovery"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-types.workspace = true

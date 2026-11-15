@@ -1,0 +1,22 @@
+[package]
+name = "nexus-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "C ABI surface for the Ember core"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+jni = "0.21"
+nexus-core.workspace = true
+nexus-identity.workspace = true
+
+[dev-dependencies]
+nexus-crypto.workspace = true
+nexus-store.workspace = true

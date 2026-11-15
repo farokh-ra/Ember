@@ -1,0 +1,12 @@
+[package]
+name = "nexus-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Deterministic test harnesses and fixtures"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]

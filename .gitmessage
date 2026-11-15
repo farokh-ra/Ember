@@ -1,0 +1,9 @@
+# <type>(<scope>): <summary>
+#
+# Types: feat, fix, docs, test, refactor, perf, build, ci, chore, revert
+# Scope examples: android, desktop, shared, core, ffi, net, store, transfer, docs, build
+#
+# Explain why the change is needed. Describe user-visible impact and any
+# migration, security, or compatibility consequences.
+#
+# Refs: #<issue>

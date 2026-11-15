@@ -1,0 +1,1683 @@
+//! Public storage facade used by the core and later feature crates.
+
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use rusqlite::types::Type;
+use rusqlite::{OptionalExtension, Row, params};
+
+use nexus_protocol::{ManifestV1, SignedPublication};
+
+use crate::backup::{self, ExportReport, RestoreReport};
+use crate::db::Database;
+use crate::error::{StoreError, StoreResult};
+use crate::managed_store::ManagedStore;
+use crate::model::{
+    ContentRecord, ContentReference, ContentState, DownloadRecord, DownloadState, IdentityReference, ImportedContent,
+    PeerObservation, ProfileRecord, PublicationRecord, ReferenceType, ReleaseOutcome, ReplicaRecord, ReplicaState,
+    TombstoneRecord,
+};
+use crate::paths::{safe_display_name, unique_export_path, validate_store_component};
+use crate::quota::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage};
+use crate::util::{hex_lower, is_content_id, is_safe_id, now_secs};
+
+const CONTENT_COLUMNS: &str = "content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at";
+const DOWNLOAD_COLUMNS: &str = "download_id, content_id, display_name, expected_size, verified_prefix, state, partial_file, created_at, updated_at, last_error";
+
+/// Tunable storage limits.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StoreConfig {
+    /// Managed quota and free-space reserve.
+    pub quota: QuotaPolicy,
+    /// Maximum single file size.
+    pub max_file_size: u64,
+    /// SQLite busy timeout.
+    pub busy_timeout: Duration,
+    /// SQLite page cache in KiB.
+    pub cache_size_kib: i64,
+}
+
+impl Default for StoreConfig {
+    fn default() -> Self {
+        Self {
+            quota: QuotaPolicy::default(),
+            max_file_size: MAX_FILE_SIZE,
+            busy_timeout: Duration::from_secs(5),
+            cache_size_kib: 4 * 1024,
+        }
+    }
+}
+
+/// A managed file exported to a host-selected directory.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExportedContent {
+    /// Collision-free destination path.
+    pub path: PathBuf,
+    /// Bytes written.
+    pub size_bytes: u64,
+}
+
+/// Summary of startup reconciliation.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ReconciliationReport {
+    /// Blobs whose size and hash verified.
+    pub verified_blobs: usize,
+    /// Named manifests whose root and canonical encoding verified.
+    pub verified_manifests: usize,
+    /// Completed-download crashes adopted into content records.
+    pub adopted_downloads: usize,
+    /// Unexpected or invalid files moved to quarantine.
+    pub quarantined_files: usize,
+    /// Generated blobs with no matching record removed.
+    pub deleted_orphan_blobs: usize,
+    /// Content rows with no remaining reference removed.
+    pub removed_unreferenced_contents: usize,
+    /// Content rows whose bytes are absent.
+    pub missing_contents: usize,
+    /// Partials truncated to their verified prefix.
+    pub truncated_partials: usize,
+    /// Downloads marked failed because their partial was absent.
+    pub failed_downloads: usize,
+    /// Unreferenced partial files left for the retention policy.
+    pub orphan_partials: usize,
+    /// Temporary import files removed.
+    pub removed_temp_files: usize,
+    /// Bytes reclaimed by cleanup.
+    pub bytes_reclaimed: u64,
+}
+
+/// SQLite metadata plus the managed content store.
+pub struct Store {
+    root: PathBuf,
+    db: Database,
+    managed: ManagedStore,
+    config: StoreConfig,
+    reconciliation: ReconciliationReport,
+}
+
+impl Store {
+    /// Opens the layout, runs migrations, and reconciles startup state.
+    pub fn open(root: impl AsRef<Path>) -> StoreResult<Self> {
+        Self::open_with_config(root, StoreConfig::default())
+    }
+
+    /// Opens with explicit limits and runtime settings.
+    pub fn open_with_config(root: impl AsRef<Path>, config: StoreConfig) -> StoreResult<Self> {
+        let root = root.as_ref();
+        if !root.is_absolute() {
+            return Err(StoreError::UnsafePath("store root must be absolute".to_owned()));
+        }
+        if config.max_file_size == 0 || config.max_file_size > MAX_FILE_SIZE {
+            return Err(StoreError::InvalidConfig(format!(
+                "maximum file size must be between 1 and {MAX_FILE_SIZE} bytes"
+            )));
+        }
+        if config.cache_size_kib < 256 {
+            return Err(StoreError::InvalidConfig(
+                "SQLite cache must be at least 256 KiB".to_owned(),
+            ));
+        }
+
+        fs::create_dir_all(root)?;
+        let managed = ManagedStore::open(&root.join("store"), config.max_file_size)?;
+        let database_path = root.join("db").join("nexus.sqlite3");
+        let db = Database::open(&database_path, config.busy_timeout, config.cache_size_kib)?;
+
+        let mut store = Self {
+            root: root.to_path_buf(),
+            db,
+            managed,
+            config,
+            reconciliation: ReconciliationReport::default(),
+        };
+        store.reconciliation = store.reconcile_internal()?;
+        Ok(store)
+    }
+
+    /// App-private root supplied by the platform shell.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Absolute SQLite path.
+    #[must_use]
+    pub fn database_path(&self) -> &Path {
+        self.db.path()
+    }
+
+    /// Absolute managed-store path.
+    #[must_use]
+    pub fn store_path(&self) -> &Path {
+        self.managed.root()
+    }
+
+    /// Absolute temporary directory used by streaming imports.
+    #[must_use]
+    pub fn temporary_directory(&self) -> &Path {
+        self.managed.temporary_directory()
+    }
+
+    /// Active limits.
+    #[must_use]
+    pub const fn config(&self) -> StoreConfig {
+        self.config
+    }
+
+    /// Reconciliation result from the most recent open or explicit call.
+    #[must_use]
+    pub const fn last_reconciliation(&self) -> &ReconciliationReport {
+        &self.reconciliation
+    }
+
+    /// Current database file size.
+    pub fn database_size_bytes(&self) -> StoreResult<u64> {
+        Ok(fs::metadata(self.db.path())?.len())
+    }
+
+    /// Current schema version.
+    pub fn schema_version(&self) -> StoreResult<i64> {
+        self.db
+            .read(|connection| Ok(connection.pragma_query_value(None, "user_version", |row| row.get(0))?))
+    }
+
+    /// Bytes available on the store volume.
+    pub fn available_space(&self) -> StoreResult<u64> {
+        self.managed.available_space()
+    }
+
+    /// Current quota accounting.
+    pub fn usage(&self) -> StoreResult<QuotaUsage> {
+        self.db.read(|connection| {
+            let managed: i64 = connection.query_row(
+                "SELECT COALESCE(SUM(size_bytes), 0) FROM contents WHERE state IN ('pending', 'verified')",
+                [],
+                |row| row.get(0),
+            )?;
+            let partial: i64 = connection.query_row(
+                "SELECT COALESCE(SUM(verified_prefix), 0) FROM downloads WHERE state IN ('pending', 'downloading', 'paused', 'failed')",
+                [],
+                |row| row.get(0),
+            )?;
+            Ok(QuotaUsage {
+                managed_bytes: u64::try_from(managed).unwrap_or(0),
+                partial_bytes: u64::try_from(partial).unwrap_or(0),
+            })
+        })
+    }
+
+    /// Verifies that `incoming` more bytes fit the quota and reserve.
+    pub fn ensure_capacity(&self, incoming: u64) -> StoreResult<()> {
+        self.config.quota.check_file_size(incoming, self.config.max_file_size)?;
+        let usage = self.usage()?;
+        let available = self.managed.available_space()?;
+        self.config.quota.check(usage, incoming, available)
+    }
+
+    /// Verifies that `incoming` more bytes fit the managed quota.
+    ///
+    /// This is used after bytes are already staged on the same volume, where
+    /// charging the free-space reserve a second time would double-count them.
+    pub fn ensure_quota(&self, incoming: u64) -> StoreResult<()> {
+        self.config.quota.check_file_size(incoming, self.config.max_file_size)?;
+        let usage = self.usage()?;
+        self.config.quota.check(usage, incoming, u64::MAX)
+    }
+
+    /// Imports a source file as a publication original.
+    pub fn import_publication_original(&self, source: &Path, publication_id: &str) -> StoreResult<ImportedContent> {
+        self.import_with_reference(source, ReferenceType::PublicationOriginal, publication_id)
+    }
+
+    /// Imports a source file as an actively hosted replica.
+    pub fn import_replica(&self, source: &Path, replica_id: &str) -> StoreResult<ImportedContent> {
+        self.import_with_reference(source, ReferenceType::ActiveReplica, replica_id)
+    }
+
+    /// Imports a source file as a retained download.
+    pub fn import_retained_download(&self, source: &Path, download_id: &str) -> StoreResult<ImportedContent> {
+        self.import_with_reference(source, ReferenceType::RetainedDownload, download_id)
+    }
+
+    /// Promotes a fully written streaming import without copying it again.
+    ///
+    /// The source must be inside the managed temporary directory. The store
+    /// re-verifies the exact bytes and retains them with a `local_import`
+    /// reference until a later publication or download takes ownership.
+    pub fn import_local_staged(
+        &self,
+        source: &Path,
+        content_id: &str,
+        size_bytes: u64,
+        owner_id: &str,
+    ) -> StoreResult<ImportedContent> {
+        validate_content_id(content_id)?;
+        validate_entity_id(owner_id, "owner ID")?;
+        self.config
+            .quota
+            .check_file_size(size_bytes, self.config.max_file_size)?;
+
+        let already_present = self.content_exists(content_id)?;
+        if already_present && self.content(content_id)?.size_bytes != size_bytes {
+            return Err(StoreError::IntegrityMismatch(content_id.to_owned()));
+        }
+        // A database row alone is not enough: the blob may be missing or
+        // corrupt. Reuse only a blob that passes the verified-path check.
+        let already_verified = already_present && self.content_path(content_id).is_ok();
+        let charge = if already_verified { 0 } else { size_bytes };
+        if charge > 0 {
+            self.ensure_quota(charge)?;
+        }
+
+        if already_verified {
+            // The bytes are already stored and verified. The staged copy is
+            // ours to discard; the reference below keeps the existing blob.
+            match fs::remove_file(source) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(StoreError::Io(error)),
+            }
+        } else {
+            self.managed.adopt_staged_file(source, content_id, size_bytes)?;
+        }
+
+        let blob_path = ManagedStore::blob_relative_path(content_id)?;
+        let owner = owner_id.to_owned();
+        let row_content_id = content_id.to_owned();
+        let ref_content_id = content_id.to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "INSERT INTO contents (content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at)
+                 VALUES (?1, ?2, 'verified', ?3, ?4, ?4, ?4)
+                 ON CONFLICT(content_id) DO UPDATE SET
+                     size_bytes = excluded.size_bytes,
+                     state = 'verified',
+                     blob_path = excluded.blob_path,
+                     verified_at = excluded.verified_at,
+                     updated_at = excluded.updated_at",
+                params![row_content_id, size_bytes, blob_path, now],
+            )?;
+            transaction.execute(
+                "INSERT INTO content_refs (content_id, ref_type, owner_id, created_at)
+                 VALUES (?1, 'local_import', ?2, ?3)
+                 ON CONFLICT(content_id, ref_type, owner_id) DO NOTHING",
+                params![ref_content_id, owner, now],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })?;
+
+        Ok(ImportedContent {
+            content_id: content_id.to_owned(),
+            size_bytes,
+            already_present,
+        })
+    }
+
+    /// Returns the absolute path of a locally verified content blob.
+    ///
+    /// The record must be verified and the file size must match the metadata.
+    /// The caller owns only a read handle; it must never modify or move the
+    /// managed file.
+    pub fn content_path(&self, content_id: &str) -> StoreResult<PathBuf> {
+        let record = self.content(content_id)?;
+        if record.state != ContentState::Verified {
+            return Err(StoreError::ContentMissing(content_id.to_owned()));
+        }
+        let path = self.managed.blob_path(content_id)?;
+        let metadata = fs::metadata(&path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                StoreError::ContentMissing(content_id.to_owned())
+            } else {
+                StoreError::Io(error)
+            }
+        })?;
+        if metadata.len() != record.size_bytes {
+            return Err(StoreError::IntegrityMismatch(content_id.to_owned()));
+        }
+        Ok(path)
+    }
+
+    /// Flushes the SQLite write-ahead log to durable storage.
+    pub fn checkpoint(&self) -> StoreResult<()> {
+        self.db.write(|connection| {
+            connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+            Ok(())
+        })
+    }
+
+    fn import_with_reference(
+        &self,
+        source: &Path,
+        ref_type: ReferenceType,
+        owner_id: &str,
+    ) -> StoreResult<ImportedContent> {
+        validate_entity_id(owner_id, "owner ID")?;
+        let source_size = fs::metadata(source)?.len();
+        self.config
+            .quota
+            .check_file_size(source_size, self.config.max_file_size)?;
+
+        // If the quota is already full, the source may still be bytes we
+        // already hold. Stage and hash it before refusing so identical bytes
+        // are not charged twice. Free space is checked before that copy.
+        let preflight = self.ensure_capacity(source_size);
+        if let Err(error) = &preflight {
+            if !matches!(error, StoreError::QuotaExceeded { .. }) {
+                return Err(preflight.expect_err("checked failure"));
+            }
+            let available = self.managed.available_space()?;
+            if available.saturating_sub(source_size) < self.config.quota.reserve_bytes() {
+                return Err(StoreError::FreeSpaceReserve {
+                    available,
+                    incoming: source_size,
+                    reserve: self.config.quota.reserve_bytes(),
+                });
+            }
+        }
+
+        let staged = self.managed.stage_file(source)?;
+        let content_id = staged.content_id.clone();
+        let size_bytes = staged.size_bytes;
+        let already_present = self.content_exists(&content_id)?;
+        let charge = if already_present { 0 } else { size_bytes };
+        if let Err(error) = self.ensure_capacity(charge) {
+            let _ = fs::remove_file(&staged.path);
+            return Err(error);
+        }
+
+        self.managed.promote(staged)?;
+        let blob_path = ManagedStore::blob_relative_path(&content_id)?;
+        let owner = owner_id.to_owned();
+        let reference_type = ref_type.as_str().to_owned();
+        let row_content_id = content_id.clone();
+        let ref_content_id = content_id.clone();
+        let now = now_secs();
+
+        self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "INSERT INTO contents (content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at)
+                 VALUES (?1, ?2, 'verified', ?3, ?4, ?4, ?4)
+                 ON CONFLICT(content_id) DO UPDATE SET
+                     size_bytes = excluded.size_bytes,
+                     state = 'verified',
+                     blob_path = excluded.blob_path,
+                     verified_at = excluded.verified_at,
+                     updated_at = excluded.updated_at",
+                params![row_content_id, size_bytes, blob_path, now],
+            )?;
+            transaction.execute(
+                "INSERT INTO content_refs (content_id, ref_type, owner_id, created_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(content_id, ref_type, owner_id) DO NOTHING",
+                params![ref_content_id, reference_type, owner, now],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })?;
+
+        Ok(ImportedContent {
+            content_id,
+            size_bytes,
+            already_present,
+        })
+    }
+
+    /// Returns a content record or a missing-content error.
+    pub fn content(&self, content_id: &str) -> StoreResult<ContentRecord> {
+        validate_content_id(content_id)?;
+        let content_id = content_id.to_owned();
+        self.db.read(move |connection| {
+            connection
+                .query_row(
+                    &format!("SELECT {CONTENT_COLUMNS} FROM contents WHERE content_id = ?1"),
+                    [&content_id],
+                    content_from_row,
+                )
+                .optional()?
+                .ok_or(StoreError::ContentMissing(content_id))
+        })
+    }
+
+    /// Returns whether a content record exists.
+    pub fn content_exists(&self, content_id: &str) -> StoreResult<bool> {
+        validate_content_id(content_id)?;
+        let content_id = content_id.to_owned();
+        self.db.read(move |connection| {
+            let count: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM contents WHERE content_id = ?1",
+                [content_id],
+                |row| row.get(0),
+            )?;
+            Ok(count > 0)
+        })
+    }
+
+    /// Lists all content records.
+    pub fn contents(&self) -> StoreResult<Vec<ContentRecord>> {
+        self.db.read(|connection| {
+            let mut statement = connection.prepare(&format!("SELECT {CONTENT_COLUMNS} FROM contents"))?;
+            let rows = statement.query_map([], content_from_row)?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Re-verifies a content blob against its recorded size.
+    pub fn verify_content(&self, content_id: &str) -> StoreResult<()> {
+        let record = self.content(content_id)?;
+        self.managed.verify_blob(content_id, record.size_bytes)?;
+        if record.state != ContentState::Verified {
+            self.update_content_state(content_id, ContentState::Verified)?;
+        }
+        Ok(())
+    }
+
+    /// Exports a content blob under a safe, non-overwriting display name.
+    pub fn export_content(
+        &self,
+        content_id: &str,
+        destination_directory: &Path,
+        display_name: &str,
+    ) -> StoreResult<ExportedContent> {
+        validate_content_id(content_id)?;
+        let store_root = self.managed.root().canonicalize()?;
+        let destination_directory = destination_directory.canonicalize()?;
+        if destination_directory.starts_with(&store_root) {
+            return Err(StoreError::UnsafePath(
+                "exports must be written outside the managed store".to_owned(),
+            ));
+        }
+        if !destination_directory.is_dir() {
+            return Err(StoreError::UnsafePath(
+                "export destination must be a directory".to_owned(),
+            ));
+        }
+        let path = unique_export_path(&destination_directory, display_name)?;
+        let size_bytes = self.managed.copy_blob_to(content_id, &path)?;
+        Ok(ExportedContent { path, size_bytes })
+    }
+
+    /// Adds a reference to an existing content record. Re-adding the same
+    /// reference is idempotent.
+    pub fn add_reference(&self, content_id: &str, ref_type: ReferenceType, owner_id: &str) -> StoreResult<()> {
+        validate_content_id(content_id)?;
+        validate_entity_id(owner_id, "owner ID")?;
+        if !self.content_exists(content_id)? {
+            return Err(StoreError::ContentMissing(content_id.to_owned()));
+        }
+        let content_id = content_id.to_owned();
+        let owner_id = owner_id.to_owned();
+        let reference_type = ref_type.as_str().to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            connection.execute(
+                "INSERT INTO content_refs (content_id, ref_type, owner_id, created_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(content_id, ref_type, owner_id) DO NOTHING",
+                params![content_id, reference_type, owner_id, now],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Number of references retaining a content blob.
+    pub fn reference_count(&self, content_id: &str) -> StoreResult<usize> {
+        validate_content_id(content_id)?;
+        let content_id = content_id.to_owned();
+        self.db.read(move |connection| {
+            let count: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM content_refs WHERE content_id = ?1",
+                [content_id],
+                |row| row.get(0),
+            )?;
+            Ok(usize::try_from(count).unwrap_or(usize::MAX))
+        })
+    }
+
+    /// Removes a reference. Bytes are deleted only when no reference remains.
+    ///
+    /// Removing the last publication-original or active-replica reference
+    /// requires `confirmed = true`; otherwise the reference is left intact.
+    pub fn release_reference(
+        &self,
+        content_id: &str,
+        ref_type: ReferenceType,
+        owner_id: &str,
+        confirmed: bool,
+    ) -> StoreResult<ReleaseOutcome> {
+        validate_content_id(content_id)?;
+        validate_entity_id(owner_id, "owner ID")?;
+        let content = content_id.to_owned();
+        let owner = owner_id.to_owned();
+        let reference_type = ref_type.as_str().to_owned();
+
+        let outcome = self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            let matching: i64 = transaction.query_row(
+                "SELECT COUNT(*) FROM content_refs
+                 WHERE content_id = ?1 AND ref_type = ?2 AND owner_id = ?3",
+                params![&content, &reference_type, &owner],
+                |row| row.get(0),
+            )?;
+            if matching == 0 {
+                return Ok(ReleaseOutcome::NotFound);
+            }
+
+            let total: i64 = transaction.query_row(
+                "SELECT COUNT(*) FROM content_refs WHERE content_id = ?1",
+                [&content],
+                |row| row.get(0),
+            )?;
+            if total == 1 && ref_type.requires_confirmation() && !confirmed {
+                return Err(StoreError::ConfirmationRequired(ref_type.label()));
+            }
+
+            transaction.execute(
+                "DELETE FROM content_refs
+                 WHERE content_id = ?1 AND ref_type = ?2 AND owner_id = ?3",
+                params![&content, &reference_type, &owner],
+            )?;
+
+            let remaining = total.saturating_sub(1);
+            if remaining > 0 {
+                transaction.commit()?;
+                return Ok(ReleaseOutcome::Retained {
+                    remaining: usize::try_from(remaining).unwrap_or(usize::MAX),
+                });
+            }
+
+            transaction.execute("DELETE FROM contents WHERE content_id = ?1", [&content])?;
+            transaction.commit()?;
+            Ok(ReleaseOutcome::BytesDeleted)
+        })?;
+
+        if outcome == ReleaseOutcome::BytesDeleted {
+            return match self.managed.remove_blob(content_id) {
+                Ok(()) => Ok(ReleaseOutcome::BytesDeleted),
+                Err(_) => Ok(ReleaseOutcome::BytesPendingCleanup),
+            };
+        }
+        Ok(outcome)
+    }
+
+    /// Lists all content references.
+    pub fn references(&self) -> StoreResult<Vec<ContentReference>> {
+        self.db.read(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT content_id, ref_type, owner_id, created_at
+                 FROM content_refs ORDER BY ref_id ASC",
+            )?;
+            let rows = statement.query_map([], |row| {
+                let ref_type: String = row.get(1)?;
+                Ok(ContentReference {
+                    content_id: row.get(0)?,
+                    ref_type: ReferenceType::parse(&ref_type)
+                        .ok_or_else(|| invalid_enum(1, "reference type", &ref_type))?,
+                    owner_id: row.get(2)?,
+                    created_at: row.get(3)?,
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Registers a resumable download and creates its empty partial file.
+    pub fn begin_download(
+        &self,
+        download_id: &str,
+        content_id: &str,
+        expected_size: u64,
+        display_name: &str,
+    ) -> StoreResult<DownloadRecord> {
+        validate_store_component(download_id, "download ID")?;
+        validate_content_id(content_id)?;
+        self.config
+            .quota
+            .check_file_size(expected_size, self.config.max_file_size)?;
+        self.ensure_capacity(expected_size)?;
+
+        let download_id_owned = download_id.to_owned();
+        let content_id_owned = content_id.to_owned();
+        let display_name = safe_display_name(display_name);
+        let partial_file = ManagedStore::partial_relative_path(download_id)?;
+        let now = now_secs();
+        self.db.write(move |connection| {
+            connection.execute(
+                "INSERT INTO downloads
+                 (download_id, content_id, display_name, expected_size, verified_prefix, state,
+                  partial_file, created_at, updated_at, last_error)
+                 VALUES (?1, ?2, ?3, ?4, 0, 'downloading', ?5, ?6, ?6, NULL)",
+                params![
+                    download_id_owned,
+                    content_id_owned,
+                    display_name,
+                    expected_size,
+                    partial_file,
+                    now
+                ],
+            )?;
+            Ok(())
+        })?;
+
+        if let Err(error) = self.managed.reset_partial(download_id) {
+            let _ = self.delete_download_row(download_id);
+            return Err(error);
+        }
+        self.download(download_id)
+    }
+
+    /// Returns one download record.
+    pub fn download(&self, download_id: &str) -> StoreResult<DownloadRecord> {
+        validate_store_component(download_id, "download ID")?;
+        let download_id = download_id.to_owned();
+        self.db.read(move |connection| {
+            connection
+                .query_row(
+                    &format!("SELECT {DOWNLOAD_COLUMNS} FROM downloads WHERE download_id = ?1"),
+                    [&download_id],
+                    download_from_row,
+                )
+                .optional()?
+                .ok_or_else(|| StoreError::InvalidId(format!("unknown download {download_id}")))
+        })
+    }
+
+    /// Lists all downloads, including terminal records retained for history.
+    pub fn downloads(&self) -> StoreResult<Vec<DownloadRecord>> {
+        self.db.read(|connection| {
+            let mut statement = connection.prepare(&format!(
+                "SELECT {DOWNLOAD_COLUMNS} FROM downloads ORDER BY created_at ASC"
+            ))?;
+            let rows = statement.query_map([], download_from_row)?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Generated partial path for a download, for the transfer layer.
+    pub fn partial_path(&self, download_id: &str) -> StoreResult<PathBuf> {
+        self.managed.partial_path(download_id)
+    }
+
+    /// Records a verified contiguous prefix.
+    ///
+    /// Bytes beyond the verified prefix are unverified and are truncated. The
+    /// prefix counts toward the managed quota from the first allocated byte.
+    pub fn checkpoint_partial(&self, download_id: &str, verified_prefix: u64) -> StoreResult<DownloadRecord> {
+        let record = self.download(download_id)?;
+        if matches!(record.state, DownloadState::Completed | DownloadState::Cancelled) {
+            return Err(StoreError::Unsupported(
+                "cannot checkpoint a terminal download".to_owned(),
+            ));
+        }
+        if verified_prefix < record.verified_prefix || verified_prefix > record.expected_size {
+            return Err(StoreError::Unsupported(
+                "verified prefix must be monotonic and no larger than the expected size".to_owned(),
+            ));
+        }
+
+        let file_length = self.managed.partial_length(download_id)?;
+        if file_length < verified_prefix {
+            return Err(StoreError::IntegrityMismatch(record.content_id));
+        }
+        if file_length > verified_prefix {
+            self.managed.truncate_partial(download_id, verified_prefix)?;
+        }
+
+        let delta = verified_prefix.saturating_sub(record.verified_prefix);
+        if delta > 0 {
+            self.ensure_capacity(delta)?;
+        }
+
+        let download_id_owned = download_id.to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE downloads
+                 SET verified_prefix = ?2, state = 'downloading', updated_at = ?3, last_error = NULL
+                 WHERE download_id = ?1",
+                params![download_id_owned, verified_prefix, now],
+            )?;
+            Ok(())
+        })?;
+        self.download(download_id)
+    }
+
+    /// Verifies and promotes a complete partial into the managed store.
+    pub fn complete_download(&self, download_id: &str) -> StoreResult<ImportedContent> {
+        let record = self.download(download_id)?;
+        if matches!(record.state, DownloadState::Completed | DownloadState::Cancelled) {
+            return Err(StoreError::Unsupported("download is already terminal".to_owned()));
+        }
+        let already_present = self.content_exists(&record.content_id)?;
+        let promoted = self
+            .managed
+            .promote_partial(download_id, &record.content_id, record.expected_size)?;
+
+        let content_id = promoted.content_id;
+        let size_bytes = promoted.size_bytes;
+        let download_id_owned = download_id.to_owned();
+        let owner_id = download_id.to_owned();
+        let blob_path = ManagedStore::blob_relative_path(&content_id)?;
+        let row_content_id = content_id.clone();
+        let ref_content_id = content_id.clone();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "INSERT INTO contents (content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at)
+                 VALUES (?1, ?2, 'verified', ?3, ?4, ?4, ?4)
+                 ON CONFLICT(content_id) DO UPDATE SET
+                     size_bytes = excluded.size_bytes,
+                     state = 'verified',
+                     blob_path = excluded.blob_path,
+                     verified_at = excluded.verified_at,
+                     updated_at = excluded.updated_at",
+                params![row_content_id, size_bytes, blob_path, now],
+            )?;
+            transaction.execute(
+                "INSERT INTO content_refs (content_id, ref_type, owner_id, created_at)
+                 VALUES (?1, 'retained_download', ?2, ?3)
+                 ON CONFLICT(content_id, ref_type, owner_id) DO NOTHING",
+                params![ref_content_id, owner_id, now],
+            )?;
+            transaction.execute("DELETE FROM downloads WHERE download_id = ?1", [download_id_owned])?;
+            transaction.commit()?;
+            Ok(())
+        })?;
+
+        let _ = self.managed.remove_partial(download_id);
+        Ok(ImportedContent {
+            content_id,
+            size_bytes,
+            already_present,
+        })
+    }
+
+    /// Cancels a download and removes its partial bytes.
+    pub fn cancel_download(&self, download_id: &str) -> StoreResult<bool> {
+        let removed = self.delete_download_row(download_id)?;
+        if removed {
+            let _ = self.managed.remove_partial(download_id);
+        }
+        Ok(removed)
+    }
+
+    /// Removes incomplete downloads older than `older_than_secs`.
+    ///
+    /// This is a user-visible retention action and requires confirmation.
+    pub fn cleanup_partials(&self, older_than_secs: u64, confirmed: bool) -> StoreResult<usize> {
+        if !confirmed {
+            return Err(StoreError::ConfirmationRequired("incomplete downloads cleanup"));
+        }
+        let cutoff = now_secs().saturating_sub(older_than_secs);
+        let ids = self.db.read(move |connection| {
+            let mut statement = connection.prepare(
+                "SELECT download_id FROM downloads
+                 WHERE state IN ('pending', 'downloading', 'paused', 'failed')
+                   AND updated_at <= ?1",
+            )?;
+            let rows = statement.query_map([cutoff], |row| row.get::<_, String>(0))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })?;
+        let mut removed = 0_usize;
+        for download_id in ids {
+            if self.cancel_download(&download_id)? {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
+    /// Adds or replaces a local identity reference.
+    pub fn upsert_identity_ref(&self, record: &IdentityReference) -> StoreResult<()> {
+        validate_entity_id(&record.identity_id, "identity ID")?;
+        if record.public_key.len() != 32 {
+            return Err(StoreError::InvalidId("identity public key must be 32 bytes".to_owned()));
+        }
+        let record = record.clone();
+        self.db.write(move |connection| {
+            connection.execute(
+                "INSERT INTO identity_refs (identity_id, public_key, key_file, label, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(identity_id) DO UPDATE SET
+                     public_key = excluded.public_key,
+                     key_file = excluded.key_file,
+                     label = excluded.label",
+                params![
+                    record.identity_id,
+                    record.public_key,
+                    record.key_file,
+                    record.label,
+                    record.created_at
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Lists local identity references.
+    pub fn identity_refs(&self) -> StoreResult<Vec<IdentityReference>> {
+        self.db.read(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT identity_id, public_key, key_file, label, created_at
+                 FROM identity_refs ORDER BY created_at ASC",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok(IdentityReference {
+                    identity_id: row.get(0)?,
+                    public_key: row.get(1)?,
+                    key_file: row.get(2)?,
+                    label: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Adds or replaces a verified profile record.
+    pub fn upsert_profile(&self, record: &ProfileRecord) -> StoreResult<()> {
+        validate_entity_id(&record.identity_id, "identity ID")?;
+        if let Some(content_id) = &record.avatar_content_id {
+            validate_content_id(content_id)?;
+        }
+        let record = record.clone();
+        self.db.write(move |connection| {
+            connection.execute(
+                "INSERT INTO profiles
+                 (identity_id, revision, record_bytes, display_name, username, bio,
+                  avatar_content_id, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(identity_id) DO UPDATE SET
+                     revision = excluded.revision,
+                     record_bytes = excluded.record_bytes,
+                     display_name = excluded.display_name,
+                     username = excluded.username,
+                     bio = excluded.bio,
+                     avatar_content_id = excluded.avatar_content_id,
+                     updated_at = excluded.updated_at",
+                params![
+                    record.identity_id,
+                    i64::try_from(record.revision).unwrap_or(i64::MAX),
+                    record.record_bytes,
+                    record.display_name,
+                    record.username,
+                    record.bio,
+                    record.avatar_content_id,
+                    record.updated_at
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Lists stored profiles.
+    pub fn profiles(&self) -> StoreResult<Vec<ProfileRecord>> {
+        self.db.read(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT identity_id, revision, record_bytes, display_name, username, bio,
+                        avatar_content_id, updated_at
+                 FROM profiles ORDER BY identity_id ASC",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok(ProfileRecord {
+                    identity_id: row.get(0)?,
+                    revision: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+                    record_bytes: row.get(2)?,
+                    display_name: row.get(3)?,
+                    username: row.get(4)?,
+                    bio: row.get(5)?,
+                    avatar_content_id: row.get(6)?,
+                    updated_at: u64::try_from(row.get::<_, i64>(7)?).unwrap_or(0),
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Stores a verified publication record exactly once.
+    ///
+    /// The signed identity, content ID, revision, and exact record bytes are
+    /// immutable. Repeating the same record is an idempotent no-op; any
+    /// difference for an existing publication ID is a conflict that preserves
+    /// the original row.
+    pub fn upsert_publication(&self, record: &PublicationRecord) -> StoreResult<()> {
+        validate_entity_id(&record.publication_id, "publication ID")?;
+        validate_entity_id(&record.identity_id, "identity ID")?;
+        validate_content_id(&record.content_id)?;
+        let record = record.clone();
+        let filename = safe_display_name(&record.filename);
+        self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            let existing = transaction
+                .query_row(
+                    "SELECT identity_id, content_id, revision, record_bytes
+                     FROM publications WHERE publication_id = ?1",
+                    [&record.publication_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, Vec<u8>>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+
+            if let Some((identity_id, content_id, revision, record_bytes)) = existing {
+                let incoming_revision = i64::try_from(record.revision).unwrap_or(i64::MAX);
+                if identity_id != record.identity_id
+                    || content_id != record.content_id
+                    || revision != incoming_revision
+                    || record_bytes != record.record_bytes
+                {
+                    return Err(StoreError::RecordConflict(record.publication_id));
+                }
+                transaction.commit()?;
+                return Ok(());
+            }
+
+            transaction.execute(
+                "INSERT INTO publications
+                 (publication_id, identity_id, content_id, revision, record_bytes, title, description,
+                  filename, published_at, updated_at, tombstoned)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    record.publication_id,
+                    record.identity_id,
+                    record.content_id,
+                    i64::try_from(record.revision).unwrap_or(i64::MAX),
+                    record.record_bytes,
+                    record.title,
+                    record.description,
+                    filename,
+                    record.published_at,
+                    record.updated_at,
+                    if record.tombstoned { 1_i64 } else { 0_i64 }
+                ],
+            )?;
+            transaction.execute(
+                "UPDATE publications SET tombstoned = 1
+                 WHERE publication_id = ?1
+                   AND EXISTS (SELECT 1 FROM tombstones WHERE publication_id = ?1)",
+                [&record.publication_id],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Lists publication records.
+    pub fn publications(&self) -> StoreResult<Vec<PublicationRecord>> {
+        self.db.read(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT publication_id, identity_id, content_id, revision, record_bytes, title,
+                        description, filename, published_at, updated_at, tombstoned
+                 FROM publications ORDER BY published_at DESC",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok(PublicationRecord {
+                    publication_id: row.get(0)?,
+                    identity_id: row.get(1)?,
+                    content_id: row.get(2)?,
+                    revision: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+                    record_bytes: row.get(4)?,
+                    title: row.get(5)?,
+                    description: row.get(6)?,
+                    filename: row.get(7)?,
+                    published_at: u64::try_from(row.get::<_, i64>(8)?).unwrap_or(0),
+                    updated_at: u64::try_from(row.get::<_, i64>(9)?).unwrap_or(0),
+                    tombstoned: row.get::<_, i64>(10)? != 0,
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Stores a signed tombstone with monotonic revision handling.
+    ///
+    /// A tombstone is independent of the publication row: it may arrive first.
+    /// The uploader identity and content ID are immutable attribution. Lower
+    /// revisions are ignored, higher revisions replace the stored record, and
+    /// equal revisions must be byte-identical. An equal-revision byte conflict
+    /// or an attribution change preserves the original row.
+    pub fn upsert_tombstone(&self, record: &TombstoneRecord) -> StoreResult<()> {
+        validate_entity_id(&record.publication_id, "publication ID")?;
+        validate_entity_id(&record.identity_id, "identity ID")?;
+        validate_content_id(&record.content_id)?;
+        let record = record.clone();
+        self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            let existing = transaction
+                .query_row(
+                    "SELECT identity_id, content_id, revision, record_bytes
+                     FROM tombstones WHERE publication_id = ?1",
+                    [&record.publication_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, Vec<u8>>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+
+            let incoming_revision = i64::try_from(record.revision).unwrap_or(i64::MAX);
+            if let Some((identity_id, content_id, revision, record_bytes)) = existing {
+                if identity_id != record.identity_id || content_id != record.content_id {
+                    return Err(StoreError::RecordConflict(record.publication_id));
+                }
+                if incoming_revision < revision {
+                    // A stale revision must not downgrade the stored verdict.
+                } else if incoming_revision == revision {
+                    if record_bytes != record.record_bytes {
+                        return Err(StoreError::RecordConflict(record.publication_id));
+                    }
+                } else {
+                    transaction.execute(
+                        "UPDATE tombstones SET revision = ?2, record_bytes = ?3 WHERE publication_id = ?1",
+                        params![record.publication_id, incoming_revision, record.record_bytes],
+                    )?;
+                }
+            } else {
+                transaction.execute(
+                    "INSERT INTO tombstones
+                     (publication_id, identity_id, content_id, revision, record_bytes, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        record.publication_id,
+                        record.identity_id,
+                        record.content_id,
+                        incoming_revision,
+                        record.record_bytes,
+                        record.created_at
+                    ],
+                )?;
+            }
+
+            transaction.execute(
+                "UPDATE publications SET tombstoned = 1, updated_at = ?2 WHERE publication_id = ?1",
+                params![record.publication_id, record.created_at],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Lists tombstone records.
+    pub fn tombstones(&self) -> StoreResult<Vec<TombstoneRecord>> {
+        self.db.read(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT publication_id, identity_id, content_id, revision, record_bytes, created_at
+                 FROM tombstones ORDER BY created_at ASC",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok(TombstoneRecord {
+                    publication_id: row.get(0)?,
+                    identity_id: row.get(1)?,
+                    content_id: row.get(2)?,
+                    revision: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+                    record_bytes: row.get(4)?,
+                    created_at: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Stores exact canonical manifest bytes under their trusted root.
+    pub fn put_manifest(&self, root: &str, bytes: &[u8]) -> StoreResult<()> {
+        self.managed.write_manifest(root, bytes)
+    }
+
+    /// Reads and verifies exact manifest bytes by their trusted root.
+    pub fn manifest(&self, root: &str) -> StoreResult<Vec<u8>> {
+        let bytes = self.managed.read_manifest(root)?;
+        ManifestV1::parse_body(&bytes).map_err(|error| StoreError::InvalidRecord(error.to_string()))?;
+        Ok(bytes)
+    }
+
+    /// Loads and verifies the manifest referenced by a stored signed publication.
+    pub fn manifest_for_publication(&self, publication_id: &str) -> StoreResult<Vec<u8>> {
+        validate_entity_id(publication_id, "publication ID")?;
+        let record_bytes = self
+            .db
+            .read(|connection| {
+                Ok(connection
+                    .query_row(
+                        "SELECT record_bytes FROM publications WHERE publication_id = ?1",
+                        [publication_id],
+                        |row| row.get::<_, Vec<u8>>(0),
+                    )
+                    .optional()?)
+            })?
+            .ok_or_else(|| StoreError::RecordNotFound(publication_id.to_owned()))?;
+        let signed =
+            SignedPublication::parse(&record_bytes).map_err(|error| StoreError::InvalidRecord(error.to_string()))?;
+        let root = hex_lower(&signed.publication().manifest_root);
+        let bytes = self.managed.read_manifest(&root)?;
+        let manifest = ManifestV1::parse_body(&bytes).map_err(|error| StoreError::InvalidRecord(error.to_string()))?;
+        manifest
+            .validate_for_publication(signed.publication())
+            .map_err(|error| StoreError::InvalidManifest(error.to_string()))?;
+        Ok(bytes)
+    }
+
+    /// Adds or replaces a hosted replica record.
+    pub fn upsert_replica(&self, record: &ReplicaRecord) -> StoreResult<()> {
+        validate_entity_id(&record.replica_id, "replica ID")?;
+        validate_content_id(&record.content_id)?;
+        if let Some(publication_id) = &record.publication_id {
+            validate_entity_id(publication_id, "publication ID")?;
+        }
+        let record = record.clone();
+        self.db.write(move |connection| {
+            connection.execute(
+                "INSERT INTO replicas
+                 (replica_id, content_id, publication_id, state, last_verified_at, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(replica_id) DO UPDATE SET
+                     content_id = excluded.content_id,
+                     publication_id = excluded.publication_id,
+                     state = excluded.state,
+                     last_verified_at = excluded.last_verified_at,
+                     updated_at = excluded.updated_at",
+                params![
+                    record.replica_id,
+                    record.content_id,
+                    record.publication_id,
+                    record.state.as_str(),
+                    record.last_verified_at,
+                    record.created_at,
+                    record.updated_at
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Lists hosted replicas.
+    pub fn replicas(&self) -> StoreResult<Vec<ReplicaRecord>> {
+        self.db.read(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT replica_id, content_id, publication_id, state, last_verified_at,
+                        created_at, updated_at
+                 FROM replicas ORDER BY created_at ASC",
+            )?;
+            let rows = statement.query_map([], |row| {
+                let state: String = row.get(3)?;
+                Ok(ReplicaRecord {
+                    replica_id: row.get(0)?,
+                    content_id: row.get(1)?,
+                    publication_id: row.get(2)?,
+                    state: ReplicaState::parse(&state).ok_or_else(|| invalid_enum(3, "replica state", &state))?,
+                    last_verified_at: row.get(4)?,
+                    created_at: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
+                    updated_at: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Merges a peer observation.
+    pub fn record_peer_observation(&self, observation: &PeerObservation) -> StoreResult<()> {
+        validate_entity_id(&observation.peer_id, "peer ID")?;
+        let observation = observation.clone();
+        self.db.write(move |connection| {
+            connection.execute(
+                "INSERT INTO peers (peer_id, address, last_seen_at, last_error, observation_count)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(peer_id) DO UPDATE SET
+                     address = excluded.address,
+                     last_seen_at = excluded.last_seen_at,
+                     last_error = excluded.last_error,
+                     observation_count = peers.observation_count + 1",
+                params![
+                    observation.peer_id,
+                    observation.address,
+                    observation.last_seen_at,
+                    observation.last_error,
+                    i64::try_from(observation.observation_count).unwrap_or(i64::MAX)
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Lists bounded peer observations.
+    pub fn peers(&self) -> StoreResult<Vec<PeerObservation>> {
+        self.db.read(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT peer_id, address, last_seen_at, last_error, observation_count
+                 FROM peers ORDER BY last_seen_at DESC",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok(PeerObservation {
+                    peer_id: row.get(0)?,
+                    address: row.get(1)?,
+                    last_seen_at: u64::try_from(row.get::<_, i64>(2)?).unwrap_or(0),
+                    last_error: row.get(3)?,
+                    observation_count: u64::try_from(row.get::<_, i64>(4)?).unwrap_or(0),
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Stores a settings value.
+    pub fn set_setting(&self, key: &str, value: &str) -> StoreResult<()> {
+        validate_entity_id(key, "setting key")?;
+        let key = key.to_owned();
+        let value = value.to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            connection.execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                params![key, value, now],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Reads a settings value.
+    pub fn get_setting(&self, key: &str) -> StoreResult<Option<String>> {
+        validate_entity_id(key, "setting key")?;
+        let key = key.to_owned();
+        self.db.read(move |connection| {
+            Ok(connection
+                .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0))
+                .optional()?)
+        })
+    }
+
+    /// Lists settings pairs.
+    pub fn settings(&self) -> StoreResult<Vec<(String, String)>> {
+        self.db.read(|connection| {
+            let mut statement = connection.prepare("SELECT key, value FROM settings ORDER BY key ASC")?;
+            let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Exports metadata to a host-selected archive outside the managed store.
+    pub fn export_metadata(&self, destination: &Path) -> StoreResult<ExportReport> {
+        self.validate_external_path(destination, "metadata export destination")?;
+        backup::export(&self.db, destination)
+    }
+
+    /// Restores metadata from a validated archive.
+    ///
+    /// The archive is fully staged and integrity-checked before the current
+    /// database is replaced. File bytes are not part of the archive.
+    pub fn restore_metadata(&mut self, archive: &Path) -> StoreResult<RestoreReport> {
+        self.validate_external_path(archive, "metadata archive")?;
+        let report = backup::restore(&mut self.db, archive)?;
+        self.reconciliation = self.reconcile_internal()?;
+        Ok(report)
+    }
+
+    /// Reconciles database state and generated directories.
+    pub fn reconcile(&mut self) -> StoreResult<&ReconciliationReport> {
+        self.reconciliation = self.reconcile_internal()?;
+        Ok(&self.reconciliation)
+    }
+
+    fn validate_external_path(&self, path: &Path, label: &str) -> StoreResult<()> {
+        if !path.is_absolute() {
+            return Err(StoreError::UnsafePath(format!("{label} must be absolute")));
+        }
+        let parent = path
+            .parent()
+            .ok_or_else(|| StoreError::UnsafePath(format!("{label} has no parent directory")))?;
+        let parent = parent.canonicalize()?;
+        let store_root = self.managed.root().canonicalize()?;
+        if parent.starts_with(&store_root) {
+            return Err(StoreError::UnsafePath(format!(
+                "{label} must be outside the managed store"
+            )));
+        }
+        Ok(())
+    }
+
+    fn content_is_referenced(&self, content_id: &str) -> StoreResult<bool> {
+        let content_id = content_id.to_owned();
+        self.db.read(move |connection| {
+            let count: i64 = connection.query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM content_refs WHERE content_id = ?1)
+                  + (SELECT COUNT(*) FROM publications WHERE content_id = ?1)
+                  + (SELECT COUNT(*) FROM profiles WHERE avatar_content_id = ?1)
+                  + (SELECT COUNT(*) FROM replicas WHERE content_id = ?1 AND state != 'removed')",
+                [content_id],
+                |row| row.get(0),
+            )?;
+            Ok(count > 0)
+        })
+    }
+
+    fn update_content_state(&self, content_id: &str, state: ContentState) -> StoreResult<()> {
+        let content_id = content_id.to_owned();
+        let state = state.as_str().to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE contents SET state = ?2, updated_at = ?3 WHERE content_id = ?1",
+                params![content_id, state, now],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn refresh_content(&self, content_id: &str, size_bytes: u64, state: ContentState) -> StoreResult<()> {
+        let content_id = content_id.to_owned();
+        let state = state.as_str().to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE contents SET size_bytes = ?2, state = ?3, verified_at = ?4, updated_at = ?4
+                 WHERE content_id = ?1",
+                params![content_id, size_bytes, state, now],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn delete_download_row(&self, download_id: &str) -> StoreResult<bool> {
+        validate_store_component(download_id, "download ID")?;
+        let download_id = download_id.to_owned();
+        self.db.write(move |connection| {
+            let removed = connection.execute("DELETE FROM downloads WHERE download_id = ?1", [download_id])?;
+            Ok(removed > 0)
+        })
+    }
+
+    fn mark_download_failed(&self, download_id: &str, verified_prefix: u64, message: &str) -> StoreResult<()> {
+        let download_id = download_id.to_owned();
+        let message = message.to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE downloads
+                 SET state = 'failed', verified_prefix = ?2, last_error = ?3, updated_at = ?4
+                 WHERE download_id = ?1",
+                params![download_id, verified_prefix, message, now],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn adopt_download_blob(&self, download: &DownloadRecord) -> StoreResult<()> {
+        let content_id = download.content_id.clone();
+        let size_bytes = download.expected_size;
+        let owner_id = download.download_id.clone();
+        let download_id = download.download_id.clone();
+        let blob_path = ManagedStore::blob_relative_path(&content_id)?;
+        let now = now_secs();
+        self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "INSERT INTO contents (content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at)
+                 VALUES (?1, ?2, 'verified', ?3, ?4, ?4, ?4)
+                 ON CONFLICT(content_id) DO UPDATE SET
+                     size_bytes = excluded.size_bytes,
+                     state = 'verified',
+                     blob_path = excluded.blob_path,
+                     verified_at = excluded.verified_at,
+                     updated_at = excluded.updated_at",
+                params![&content_id, size_bytes, blob_path, now],
+            )?;
+            transaction.execute(
+                "INSERT INTO content_refs (content_id, ref_type, owner_id, created_at)
+                 VALUES (?1, 'retained_download', ?2, ?3)
+                 ON CONFLICT(content_id, ref_type, owner_id) DO NOTHING",
+                params![&content_id, owner_id, now],
+            )?;
+            transaction.execute("DELETE FROM downloads WHERE download_id = ?1", [download_id])?;
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    fn reconcile_internal(&self) -> StoreResult<ReconciliationReport> {
+        let mut report = ReconciliationReport::default();
+        let contents = self.contents()?;
+        let downloads = self.downloads()?;
+        let content_by_id: HashMap<String, ContentRecord> = contents
+            .iter()
+            .cloned()
+            .map(|record| (record.content_id.clone(), record))
+            .collect();
+        let mut observed: HashSet<String> = HashSet::new();
+        let mut quarantined: HashSet<String> = HashSet::new();
+        let blob_entries = self.managed.scan_blobs()?;
+
+        for entry in blob_entries {
+            let Some(content_id) = entry.content_id else {
+                self.managed.quarantine_file(&entry.path, "unexpected-blob")?;
+                report.quarantined_files += 1;
+                continue;
+            };
+
+            if let Some(record) = content_by_id.get(&content_id).cloned() {
+                let actual_size = fs::metadata(&entry.path)?.len();
+                match self.managed.verify_blob(&content_id, actual_size) {
+                    Ok(()) => {
+                        observed.insert(content_id.clone());
+                        report.verified_blobs += 1;
+                        if record.size_bytes != actual_size || record.state != ContentState::Verified {
+                            self.refresh_content(&content_id, actual_size, ContentState::Verified)?;
+                        }
+                    }
+                    Err(StoreError::ContentMissing(_) | StoreError::IntegrityMismatch(_)) => {
+                        self.managed.quarantine_file(&entry.path, &content_id)?;
+                        self.refresh_content(&content_id, actual_size, ContentState::Quarantined)?;
+                        quarantined.insert(content_id.clone());
+                        report.quarantined_files += 1;
+                    }
+                    Err(error) => return Err(error),
+                }
+                continue;
+            }
+
+            if let Some(download) = downloads.iter().find(|download| download.content_id == content_id) {
+                match self.managed.verify_blob(&content_id, download.expected_size) {
+                    Ok(()) => {
+                        self.adopt_download_blob(download)?;
+                        let _ = self.managed.remove_partial(&download.download_id);
+                        observed.insert(content_id.clone());
+                        report.adopted_downloads += 1;
+                    }
+                    Err(StoreError::ContentMissing(_) | StoreError::IntegrityMismatch(_)) => {
+                        self.managed.quarantine_file(&entry.path, &content_id)?;
+                        report.quarantined_files += 1;
+                    }
+                    Err(error) => return Err(error),
+                }
+                continue;
+            }
+
+            let size = fs::metadata(&entry.path)?.len();
+            self.managed.remove_file(&entry.path)?;
+            report.deleted_orphan_blobs += 1;
+            report.bytes_reclaimed = report.bytes_reclaimed.saturating_add(size);
+        }
+
+        for record in &contents {
+            if observed.contains(&record.content_id) || quarantined.contains(&record.content_id) {
+                continue;
+            }
+            if record.state == ContentState::Quarantined {
+                continue;
+            }
+            self.update_content_state(&record.content_id, ContentState::Missing)?;
+            report.missing_contents += 1;
+        }
+
+        for record in contents {
+            if self.content_is_referenced(&record.content_id)? {
+                continue;
+            }
+            if let Ok(path) = self.managed.blob_path(&record.content_id)
+                && let Ok(metadata) = fs::metadata(&path)
+            {
+                report.bytes_reclaimed = report.bytes_reclaimed.saturating_add(metadata.len());
+                let _ = self.managed.remove_file(&path);
+            }
+            let content_id = record.content_id.clone();
+            self.db.write(move |connection| {
+                connection.execute("DELETE FROM contents WHERE content_id = ?1", [content_id])?;
+                Ok(())
+            })?;
+            report.removed_unreferenced_contents += 1;
+        }
+
+        let download_by_id: HashMap<String, DownloadRecord> = downloads
+            .iter()
+            .cloned()
+            .map(|download| (download.download_id.clone(), download))
+            .collect();
+        let mut partial_ids = HashSet::new();
+        for path in self.managed.scan_partials()? {
+            if fs::symlink_metadata(&path)?.file_type().is_symlink() {
+                self.managed.quarantine_file(&path, "unexpected-partial")?;
+                report.orphan_partials += 1;
+                report.quarantined_files += 1;
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                self.managed.quarantine_file(&path, "unexpected-partial")?;
+                report.orphan_partials += 1;
+                report.quarantined_files += 1;
+                continue;
+            };
+            let Some(download_id) = name.strip_suffix(".part") else {
+                self.managed.quarantine_file(&path, "unexpected-partial")?;
+                report.orphan_partials += 1;
+                report.quarantined_files += 1;
+                continue;
+            };
+            let Some(download) = download_by_id.get(download_id) else {
+                self.managed.quarantine_file(&path, "unexpected-partial")?;
+                report.orphan_partials += 1;
+                report.quarantined_files += 1;
+                continue;
+            };
+            partial_ids.insert(download_id.to_owned());
+            let file_length = fs::metadata(&path)?.len();
+            if file_length > download.verified_prefix {
+                self.managed.truncate_partial(download_id, download.verified_prefix)?;
+                report.truncated_partials += 1;
+            } else if file_length < download.verified_prefix {
+                self.mark_download_failed(
+                    download_id,
+                    file_length,
+                    "partial file was shorter than its verified prefix",
+                )?;
+                report.failed_downloads += 1;
+            }
+        }
+
+        for download in &downloads {
+            if !matches!(
+                download.state,
+                DownloadState::Pending | DownloadState::Downloading | DownloadState::Paused
+            ) {
+                continue;
+            }
+            if !partial_ids.contains(&download.download_id) {
+                self.mark_download_failed(&download.download_id, 0, "partial file is missing")?;
+                report.failed_downloads += 1;
+            }
+        }
+
+        for entry in self.managed.scan_manifests()? {
+            let Some(root) = entry.content_id else {
+                self.managed.quarantine_file(&entry.path, "unexpected-manifest")?;
+                report.quarantined_files += 1;
+                continue;
+            };
+            match self.managed.verify_manifest_file(&entry.path, &root) {
+                Ok(()) => report.verified_manifests += 1,
+                Err(StoreError::InvalidManifest(_) | StoreError::ManifestMissing(_)) => {
+                    self.managed.quarantine_file(&entry.path, &root)?;
+                    report.quarantined_files += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        let (removed_temp, temp_bytes) = self.managed.clear_temporary()?;
+        report.removed_temp_files += removed_temp;
+        report.bytes_reclaimed = report.bytes_reclaimed.saturating_add(temp_bytes);
+
+        Ok(report)
+    }
+}
+
+fn validate_content_id(content_id: &str) -> StoreResult<()> {
+    if is_content_id(content_id) {
+        Ok(())
+    } else {
+        Err(StoreError::InvalidContentId(content_id.to_owned()))
+    }
+}
+
+fn validate_entity_id(value: &str, label: &str) -> StoreResult<()> {
+    if is_safe_id(value) {
+        Ok(())
+    } else {
+        Err(StoreError::InvalidId(format!("{label} is malformed")))
+    }
+}
+
+fn invalid_enum(index: usize, label: &str, value: &str) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        index,
+        Type::Text,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("unknown {label}: {value}"),
+        )),
+    )
+}
+
+fn content_from_row(row: &Row<'_>) -> rusqlite::Result<ContentRecord> {
+    let state: String = row.get(2)?;
+    Ok(ContentRecord {
+        content_id: row.get(0)?,
+        size_bytes: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+        state: ContentState::parse(&state).ok_or_else(|| invalid_enum(2, "content state", &state))?,
+        blob_path: row.get(3)?,
+        verified_at: row
+            .get::<_, Option<i64>>(4)?
+            .map(|value| u64::try_from(value).unwrap_or(0)),
+        created_at: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
+        updated_at: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
+    })
+}
+
+fn download_from_row(row: &Row<'_>) -> rusqlite::Result<DownloadRecord> {
+    let state: String = row.get(5)?;
+    Ok(DownloadRecord {
+        download_id: row.get(0)?,
+        content_id: row.get(1)?,
+        display_name: row.get(2)?,
+        expected_size: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+        verified_prefix: u64::try_from(row.get::<_, i64>(4)?).unwrap_or(0),
+        state: DownloadState::parse(&state).ok_or_else(|| invalid_enum(5, "download state", &state))?,
+        partial_file: row.get(6)?,
+        created_at: u64::try_from(row.get::<_, i64>(7)?).unwrap_or(0),
+        updated_at: u64::try_from(row.get::<_, i64>(8)?).unwrap_or(0),
+        last_error: row.get(9)?,
+    })
+}
