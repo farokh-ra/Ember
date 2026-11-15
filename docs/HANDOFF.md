@@ -205,6 +205,13 @@ tasks, passed all 166 Rust tests, and passed hygiene with 248 files scanned.
 The script does not run the dependency scan; that was covered by the full gate
 above.
 
+### Recheck
+
+The full gate and clean-checkout replay were repeated on 2026-11-15 at commit
+`cab521a`; both passed with the same test totals, dependency results, and
+hygiene result. A forced rerun of all five JVM test tasks also passed with 76
+tests, 0 failures, and 0 skipped.
+
 ## Errors and failed attempts
 
 1. The JNI dependency was conditional on Android, preventing a Windows JVM JNI
