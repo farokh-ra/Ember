@@ -1,0 +1,21 @@
+[package]
+name = "nexus-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Ember lifecycle orchestration and command/event bus"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-crypto.workspace = true
+nexus-identity.workspace = true
+nexus-observability.workspace = true
+nexus-protocol.workspace = true
+nexus-store.workspace = true
+nexus-transfer.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true

@@ -1,0 +1,38 @@
+name: Feature request
+description: Propose a scoped product or engineering change.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or engineering problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest useful change and its boundaries.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: impact
+    attributes:
+      label: Architecture impact
+      description: Note effects on protocol, storage, ABI, security, accessibility, or packaging.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This request is compatible with the local-first, no-central-backend architecture.
+          required: true
+        - label: This request does not require committing secrets or signing material.
+          required: true

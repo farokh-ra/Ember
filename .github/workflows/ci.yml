@@ -1,0 +1,181 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: "1"
+
+jobs:
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Scan for secrets and forbidden files
+        run: python3 scripts/check_repo_hygiene.py
+
+  commit-convention:
+    name: Pull request title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate Conventional Commits title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python3 scripts/check_commit_message.py "$PR_TITLE"
+
+  rust:
+    name: Rust format, lint, test and policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.99.1
+        uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check lints
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Install test and policy tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.151,cargo-deny@0.20.2,cargo-audit@0.23.0
+
+      - name: Run tests
+        run: cargo nextest run --workspace --all-targets
+
+      - name: Run documentation tests
+        run: cargo test --workspace --doc
+
+      - name: Enforce dependency, license and advisory policy
+        run: cargo deny check
+
+      - name: Scan Rust dependencies for advisories
+        run: cargo audit
+
+  rust-windows:
+    name: Rust Windows MSVC build and tests
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.99.1
+        uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build workspace for Windows
+        run: cargo build --workspace --all-targets
+
+      - name: Run workspace tests on Windows
+        run: cargo test --workspace
+
+  android:
+    name: Android build, tests and static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install pinned Android SDK packages
+        run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Check formatting and static analysis
+        run: ./gradlew --no-daemon --console=plain spotlessCheck detekt
+
+      - name: Build debug APK
+        run: ./gradlew --no-daemon --console=plain :apps:androidApp:assembleDebug
+
+      - name: Run shared JVM tests
+        run: >-
+          ./gradlew --no-daemon --console=plain
+          :shared:model:jvmTest
+          :shared:core-api:jvmTest
+          :shared:core-client:jvmTest
+          :shared:presentation:jvmTest
+          :shared:ui:jvmTest
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ember-android-debug
+          path: apps/androidApp/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  desktop:
+    name: Windows desktop build
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build desktop distributable
+        run: ./gradlew.bat --no-daemon --console=plain :apps:desktopApp:createDistributable
+
+      - name: Upload desktop distributable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ember-desktop-windows
+          path: apps/desktopApp/build/compose/binaries/main/app
+          if-no-files-found: error
