@@ -1,7 +1,7 @@
 # Stage 08 - C ABI, JNI/JNA Adapters, Lifecycle, and Streaming
 
 **Status:** Complete
-**Completed:** 2026-11-14
+**Completed:** 2026-11-15
 **Progress guide:** 38-42%
 **Next stage:** 09 - Networking foundation (requires user permission)
 
@@ -421,6 +421,25 @@ Result: PASS.
 - Repository hygiene passed with 249 files scanned.
 
 The clean-checkout replay is recorded after the Stage 08 commit.
+
+### 10.6 Clean checkout
+
+`scripts/verify-clean-checkout.ps1` cloned the repository at Stage 08 commit
+`6903384` into a temporary directory and ran `scripts/build.ps1` using only the
+committed tree.
+
+Result: PASS on 2026-11-15.
+
+- Windows DLL and both Android libraries built from a clean tree.
+- The C harness passed.
+- Android debug APK and desktop image built.
+- Spotless, detekt, and all five JVM test tasks passed.
+- All 166 Rust tests passed.
+- Repository hygiene passed with 248 files scanned (the unrelated untracked
+  `LICENSE.md` is not part of the committed tree).
+
+The clean-checkout script does not run `-WithDependencyScan`; dependency policy
+is covered by the full gate in section 10.5.
 
 ## 11. Deferred Android runtime evidence
 
