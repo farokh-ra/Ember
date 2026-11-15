@@ -441,6 +441,20 @@ Result: PASS on 2026-11-15.
 The clean-checkout script does not run `-WithDependencyScan`; dependency policy
 is covered by the full gate in section 10.5.
 
+### 10.7 Recheck
+
+The full gate and clean-checkout replay were repeated on 2026-11-15 at commit
+`cab521a`:
+
+- `scripts/build.ps1 -WithDependencyScan` passed with 166 Rust tests, all five
+  JVM test tasks, `cargo deny`, `cargo audit`, and hygiene.
+- A forced `--rerun-tasks` execution of all JVM test tasks passed with 76 tests,
+  0 failures, and 0 skipped, including both native adapter contracts.
+- The Windows and both Android libraries still export 34 checked symbols each.
+- `scripts/verify-clean-checkout.ps1` passed with 248 files scanned.
+
+No implementation changed during the recheck.
+
 ## 11. Deferred Android runtime evidence
 
 No Android emulator or physical device is available in this environment.
