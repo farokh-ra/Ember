@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-FFI-001 |
-| Version | 1.0.0 (ABI 1) |
-| Status | Draft accepted for Stage 02; implemented in Stage 08 |
-| Date | 2026-11-12 |
+| Version | 1.1.0 (ABI 1) |
+| Status | Implemented in Stage 08; Android runtime verification deferred |
+| Date | 2026-11-14 |
 | Header | [nexus_core.h](nexus_core.h) |
 | Related | [ADR-0003](../decisions/ADR-0003-ffi-c-abi-jni-jna.md), [Architecture](../ARCHITECTURE.md) |
 
@@ -85,12 +85,29 @@ Streaming functions are defined in section 8.
 ### 4.1 Lifecycle
 
 - `nexus_core_create` validates the config, copies the local secret into zeroizing memory, opens the database and store, runs migrations, and returns a handle. It does not start networking.
-- The config is CBOR and contains app-private paths, locale, network settings, quota, and log level. It never contains the local secret.
+- The config is CBOR and contains app-private paths, locale, network settings, quota, and log level. It never contains the local secret. The required `abi_version` is checked before any directory, database, or network work, so a mismatch cannot create the data root.
 - The local secret is exactly 32 bytes. A different length returns `NEXUS_STATUS_INVALID_ARGUMENT`. The host zeroes its copy after the call.
-- `start` loads the identity, starts networking if enabled, recovers download state, and schedules replica verification. It is idempotent.
-- `stop` is idempotent and safe to call from the event-pump shutdown path. It does not destroy the handle.
-- `destroy` stops if needed, stops the event queue, and removes the handle. Double destroy returns `NEXUS_STATUS_INVALID_HANDLE`.
+- `start` loads the identity, starts networking if enabled, recovers download state, and schedules replica verification. It is idempotent. Stage 08 starts the local lifecycle only; transport and replica work arrive in later stages.
+- `stop` is idempotent and safe to call from the event-pump shutdown path. It closes the event queue after flushing durable state and does not destroy the handle.
+- `destroy` stops if needed, stops the event queue, and removes the handle. Double destroy returns `NEXUS_STATUS_INVALID_HANDLE`; an unknown handle is rejected by every call helper before dispatch.
 - A handle is valid until `destroy` returns. No concurrent operation may use a handle after destroy begins.
+
+### 4.1.1 Config map
+
+The create-time config is a canonical CBOR text-keyed map with a maximum of 64 KiB and 256 entries. Unknown keys are ignored so a newer host can talk to an older library.
+
+| Key | Type | Required | Rule |
+|---|---|---|---|
+| `abi_version` | uint | Yes | Must equal `NEXUS_ABI_VERSION` (1). A mismatch returns `NEXUS_STATUS_ABI_MISMATCH` before storage work. |
+| `data_root` | text | Yes | Absolute path with no `.` or `..` components; the core creates and locks it. |
+| `app_version` | text | No | 1-64 bytes; defaults to `0.0.0`. |
+| `locale` | text | No | 1-35 bytes; defaults to `en`. |
+| `log_level` | text | No | `trace`, `debug`, `info`, `warn`, or `error`; defaults to `info`. |
+| `network_enabled` | bool | No | Recorded for `system.health` and future stages; Stage 08 starts no transport. Defaults to `false`. |
+| `quota_bytes` | uint | No | 1-500 GiB; defaults to 10 GiB. |
+| `enable_test_methods` | bool | No | Exposes `test.*`; defaults to `false`. Release callers must leave this false. |
+
+`NativeConfig.encode()` in `shared/core-client` emits exactly these keys.
 
 ### 4.2 Handle and memory ownership
 
@@ -175,6 +192,7 @@ Envelope fields and string keys are fixed. `details` is optional and bounded. Me
 | Event queue | 1,024 events, with progress coalescing |
 | CBOR nesting | 16 levels |
 | CBOR map entries | 256 |
+| CBOR items | 8,192 |
 
 Oversized input returns `NEXUS_STATUS_BUFFER_TOO_LARGE` or a domain `invalid_argument`; it is never partially parsed.
 
@@ -233,12 +251,15 @@ All production methods are available on both Android and Windows. Method IDs are
 
 Method IDs are grouped by domain. A future minor ABI may add methods in unused IDs; a released ID is never renumbered. Unknown IDs return `NEXUS_STATUS_UNSUPPORTED` with a domain error.
 
+Stage 08 implements `system.info`, `system.health`, `system.snapshot`, `store.usage`, `test.echo`, and `test.fault`. These six IDs are the whole callable surface of ABI 1 in this build; every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
+
 ### 6.1 Async operation semantics
 
 - `invoke` for an async method validates the request and returns a success response containing `op_id` and any immediately known IDs, such as `download_id`.
-- The operation then runs on the core runtime. It emits zero or more progress events and exactly one terminal event: `*.completed`, `*.failed`, or `*.cancelled`.
-- Cancellation is cooperative. `nexus_core_cancel` is idempotent; cancellation of an already terminal operation returns a domain `not_found` or `conflict` according to the operation state.
-- If the event queue is full, progress events are coalesced by operation. Terminal events apply backpressure and are never dropped.
+- The operation then runs on a fixed pool of four worker threads. It emits zero or more progress events and exactly one terminal event: `*.completed`, `*.failed`, or `*.cancelled`.
+- Cancellation is cooperative and idempotent. `nexus_core_cancel` returns `NEXUS_STATUS_OK` for a known running, completed, failed, or cancelled operation; an unknown `op_id` returns a domain `not_found` or `conflict` according to the operation state.
+- If the event queue is full, progress events are coalesced per operation. Terminal events apply backpressure and are never dropped. Lifecycle and identity events use a non-blocking push; if the queue is saturated, they are counted as dropped rather than blocking the core.
+- `test.fault` accepts `fault` = `async`, `async_progress`, `async_fail`, `not_found`, `invalid_argument`, `conflict`, `quota_exceeded`, `verification_failed`, `unsupported_version`, `network_unavailable`, `timeout`, `cancelled`, `io_error`, `permission_denied`, `locked`, or `panic`, plus optional `steps` (1-100), `delay_ms` (0-60,000), and `fail_code`. Domain faults return a normal response envelope with `ok=false`; `panic` is caught at the ABI boundary and returns `NEXUS_STATUS_INTERNAL`.
 - The UI reconciles from `system.snapshot` after suspension, so missing progress events do not corrupt state.
 
 ## 7. Domain error codes
@@ -289,11 +310,12 @@ NexusStatus nexus_core_import_abort(
     uint64_t import_id);
 ```
 
-- `import_begin` validates size, quota, and free space before accepting bytes. `expected_size` is required and bounded to 4 GiB.
-- `import_write` accepts at most 1 MiB per call and must be called sequentially for one import ID.
-- The core writes to `store/tmp`, updates SHA-256 and chunk hashes, and never buffers the whole file.
-- `import_finish` verifies the declared size, finalizes the manifest, promotes the blob, and returns a summary with `content_id`, `size`, `manifest_root`, and `chunk_size`.
-- `import_abort` deletes the temporary file. Abandoned imports are cleaned on startup.
+- `import_begin` validates size, quota, and free space before accepting bytes. `expected_size` is required, non-zero, and bounded to 4 GiB.
+- `import_write` accepts at most 1 MiB per call and must be called sequentially for one import ID. The core writes to `store/tmp`, updates the raw SHA-256 and per-chunk SHA-256 state incrementally, and never buffers the whole file.
+- `import_finish` verifies the declared size, builds the canonical flat 1 MiB manifest, stores it under its trusted root, and adopts the staged file into the blob tree without a second copy. The returned summary contains `content_id`, `size`, `manifest_root`, `chunk_size`, and `display_name`.
+- A completed import is retained by a `local_import` content reference until a publication, download, or replica takes ownership. Importing identical bytes again discards the new staged copy and keeps the existing verified blob.
+- `import_abort` deletes the temporary file. Abandoned imports and staging files are cleaned on startup.
+- Empty imports, a final size that differs from `expected_size`, more than `expected_size` bytes, writes above 1 MiB, and I/O failures are rejected without publishing partial content.
 - The display name is metadata only; it never becomes a path.
 
 ### 8.2 Export
@@ -317,10 +339,10 @@ NexusStatus nexus_core_export_close(
 ```
 
 - `export_open` verifies that the content is locally available and verified.
-- `export_read` returns at most 1 MiB. A zero-length buffer indicates end of file.
+- `export_read` returns at most 1 MiB through a bounded read cursor. A zero-length buffer indicates end of file.
 - The host writes to a user-selected destination and must not overwrite silently.
 - `export_close` releases the read cursor. The core never writes to the user's destination directly.
-- Export is read-only and does not change reference counts.
+- Export is read-only and does not change reference counts. A closed or unknown export ID returns `NEXUS_STATUS_INVALID_HANDLE`.
 
 ### 8.3 Streaming thread rules
 
@@ -332,6 +354,8 @@ NexusStatus nexus_core_export_close(
 ## 9. Event catalog
 
 Events use the envelope in section 5.4.
+
+Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
 
 | Event | Meaning | Data |
 |---|---|---|
@@ -355,59 +379,63 @@ Events use the envelope in section 5.4.
 | `search.completed` | Search terminal result. | `op_id`, `coverage`, `conflicts` |
 | `diagnostics.ready` | Redacted diagnostics archive ready. | `archive_bytes`, `sections` |
 | `core.stopped` | Core stopped. | `reason` |
+| `test.progress` | Debug operation progress; coalescible. | `op_id`, `step`, `total` |
+| `test.completed` | Debug operation completed. | `op_id`, `steps` |
+| `test.failed` | Debug operation failed. | `op_id`, `error` |
+| `test.cancelled` | Debug operation was cancelled. | `op_id`, `steps` |
 
 Terminal naming convention: an async operation emits `*.completed`, `*.failed`, or `*.cancelled` unless its catalog entry names a more specific terminal event. A terminal event always includes `op_id`.
 
 ## 10. JNI and JNA mapping
 
-### 10.1 Common Kotlin interface
+### 10.1 Shared Kotlin client
 
-```kotlin
-interface NexusCore {
-    suspend fun start()
-    suspend fun stop()
-    fun events(): Flow<NexusEvent>
-    suspend fun snapshot(): CoreSnapshot
-    suspend fun createIdentity(): Identity
-    suspend fun importFile(name: String, size: Long, source: FileSource): ContentSummary
-    suspend fun publish(request: PublishRequest): Publication
-    suspend fun startDownload(publicationId: PublicationId): DownloadHandle
-    suspend fun search(query: String): Flow<SearchPage>
-}
-```
+`shared/core-client` exposes `NativeCoreClient`, which implements the common `NexusCore` lifecycle/events contract and adds the generic native surface:
 
-The real implementation maps these methods onto `invoke` and the streaming functions. The fake implementation uses in-memory state for UI tests.
+- `invoke(methodId, params)` encodes `{v, params}`, throws `NexusException.Domain` for `ok=false`, and returns the decoded `result`.
+- `cancel(opId)` requests cooperative cancellation.
+- `importBegin` / `importWrite` / `importFinish` / `importAbort` expose streaming imports.
+- `exportOpen` / `exportRead` / `exportClose` expose bounded exports.
+- `create(bridge, config, localSecret, scope, dispatcher)` checks the ABI before calling `create`, zeroes the caller's secret in a `finally` block, and starts one event-pump coroutine. The pump is the only `next_event` consumer and publishes decoded events into `nativeEvents`.
+
+The fake `NexusCore` remains the in-memory implementation for UI tests.
 
 ### 10.2 Android JNI
 
-- Kotlin object `NexusNative` declares `external` functions for the C ABI.
-- Rust exports `Java_app_nexus_core_NexusNative_nativeAbiVersion`, `nativeCreate`, `nativeInvoke`, `nativeNextEvent`, and the streaming methods.
-- A `JNI_OnLoad` registration table validates the ABI and caches class/method IDs.
-- `jbyteArray` inputs are copied to a Rust slice for the call; outputs are copied to a new `jbyteArray`, then the native buffer is freed.
-- `System.loadLibrary("nexus_core")` loads the packaged `libnexus_core.so`.
-- The JNI shim is thin and calls the same internal C ABI functions as the Windows build.
+- Kotlin `internal object io.nexus.core.client.NexusNative` declares `@JvmStatic external` functions. The JVM emits them as static native methods on class `io.nexus.core.client.NexusNative`.
+- Rust therefore exports static symbols named `Java_io_nexus_core_client_NexusNative_nativeAbiVersion`, `nativeVersion`, `nativeCreate`, `nativeStart`, `nativeStop`, `nativeDestroy`, `nativeInvoke`, `nativeNextEvent`, `nativeCancel`, and the import/export methods. There is no `RegisterNatives` table; the names are checked into the shared library and by `javap`.
+- `JNI_OnLoad` returns `JNI_ERR` when the compiled ABI does not match `nexus_core_abi_version()`. Per-call config validation repeats the check before storage work.
+- `jbyteArray` inputs are copied to a Rust slice; outputs are copied to a new `jbyteArray`. No Rust pointer or native buffer is retained after the call.
+- Result encodings:
+  - `LongArray` of exactly two entries: `[status, value]` for create, import-begin, and export-open.
+  - `ByteArray`: four little-endian status bytes followed by the payload, for invoke, next-event, import-finish, and export-read.
+  - `Int`: status only, for start, stop, destroy, cancel, write, abort, and close.
+- Every entry point is wrapped in `catch_unwind`. The byte-returning fallback is a status-payload array carrying `NEXUS_STATUS_INTERNAL`; no panic payload crosses JNI.
+- `System.loadLibrary("nexus_core")` loads `libnexus_core.so`. The Windows DLL exports the same JNI symbols so the shim can be exercised on a Windows JVM.
 
 ### 10.3 Windows JNA
 
-- Kotlin interface `NexusLibrary : Library` maps the C functions with JNA `Pointer` and `NexusBuffer.ByValue` structures.
-- `Native.load("nexus_core", NexusLibrary::class.java)` loads `nexus_core.dll` from the application directory.
-- The buffer structure uses native `size_t` layout for x64: a pointer followed by a 64-bit length.
-- Output buffers are copied into `ByteArray` via `Pointer.getByteArray`, then freed with `nexus_core_free_buffer`.
-- JNA calls are dispatched on `Dispatchers.IO`; the event pump uses a dedicated thread.
+- JNA 5.14.0. `NexusLibrary : Library` maps the C functions with `Pointer`, `LongByReference`, and a `NexusBuffer` structure.
+- `Native.load("nexus_core", NexusLibrary::class.java)` loads the packaged `nexus_core.dll`; tests load the absolute path from the `nexus.native.path` system property.
+- `NexusBuffer` is `@Structure.FieldOrder("ptr", "len")` with a `Pointer` and a 64-bit `Long`, matching the x64 C layout. `NexusBuffer.ByValue` is used only for `nexus_core_free_buffer`.
+- Output buffers are copied into `ByteArray` with `Pointer.getByteArray`, then freed exactly once in a `finally` block.
+- `NativeCoreClient` runs `next_event` with a 50 ms timeout on the event-pump coroutine. JNA calls are synchronous and must not run on the UI thread.
 
-### 10.4 Adapter parity tests
+### 10.4 Adapter parity and runtime evidence
 
-The same contract tests run against both adapters:
+The same adapter-independent contract runs against Windows JNA and the Windows-hosted JNI proxy:
 
-- ABI version and core version.
-- Create, start, stop, destroy, double stop, double destroy.
-- Invalid handle and invalid method ID.
-- CBOR request and response round-trip.
-- Malformed and oversized CBOR.
-- Event ordering, timeout, queue backpressure, and cancellation.
-- Import/export chunking and end-of-file.
-- Panic containment through `test.fault`.
-- 100 lifecycle cycles with no leaked native memory or threads.
+- ABI version and library version.
+- ABI mismatch rejected before create; the data root is not created.
+- Unknown handles return `INVALID_HANDLE` for start, stop, destroy, and invoke.
+- Create, idempotent start, stop/restart, destroy, and secret zeroing.
+- `test.echo` request/response round-trip and `test.fault` domain error.
+- Panic containment followed by a successful echo.
+- Ordered asynchronous progress, coalesced progress count, terminal completion, and cancellation.
+- 2.5 MB streaming import and export round-trip with 1 MiB bounds and EOF.
+- 100 create/start/stop/destroy cycles in the Rust C ABI suite and the C harness.
+
+The C harness compiles against `nexus_core.h` and covers the same lifecycle, echo, domain error, panic, progress, cancellation, ABI mismatch, and streaming contract on Windows. Android JNI runtime execution remains deferred until an emulator or device is available; the Android arm64-v8a and x86_64 builds are compiled and export-checked but not executed locally.
 
 ## 11. Versioning and compatibility
 
@@ -422,11 +450,11 @@ The same contract tests run against both adapters:
 | Change CBOR envelope shape | No | New ABI. |
 | Change event terminal semantics | No | New ABI. |
 
-- `nexus_core_abi_version()` must equal the Kotlin `EXPECTED_ABI`.
+- `nexus_core_abi_version()` must equal `NativeCoreClient.ABI_VERSION`.
 - The app checks the ABI before opening the database or starting the network.
 - Protocol and database versions are independent of the ABI.
 - The core reports its version and capabilities in `system.info`; the About and diagnostics screens display them.
-- A debug build may expose `test.*` methods. Release builds return `NEXUS_STATUS_UNSUPPORTED` for them.
+- `test.*` methods are available only when the host sets `enable_test_methods`. Otherwise they return `NEXUS_STATUS_UNSUPPORTED`; a release host must never enable them.
 
 ## 12. Security requirements
 
@@ -436,18 +464,22 @@ The same contract tests run against both adapters:
 - Backup bytes are returned only to the requesting operation and are not logged or cached.
 - Error details and logs redact local paths, keys, and unnecessary peer identifiers.
 - The FFI validates every pointer, length, handle, method ID, and CBOR limit before use.
-- Unsafe code is confined to `nexus-ffi` and the JNI shim, with documented invariants and fuzz coverage.
+- Unsafe code is confined to `nexus-ffi` and the JNI shim, with documented invariants; fuzzing is scheduled for Stage 19.
 - Panic payloads are not exposed to the UI; only a redacted internal error and diagnostics marker are returned.
 - The handle registry prevents use-after-free; stale handles return `NEXUS_STATUS_INVALID_HANDLE`.
 
 ## 13. Verification plan
 
-| Stage | Check |
-|---|---|
-| 08 | C harness compiles against the header and exercises lifecycle, invoke, events, streaming, and errors. |
-| 08 | Android JNI and Windows JNA pass the same contract suite. |
-| 08 | ABI mismatch is rejected before database or network work. |
-| 08 | 100 start/stop cycles show no leaked memory, threads, or handles. |
-| 08 | A forced panic returns an internal error without unwinding into the JVM. |
-| 12 | Import/export streaming handles a 4 GiB file with bounded memory. |
-| 19 | Fuzzing covers malformed CBOR, oversized buffers, invalid handles, and cancellation races. |
+| Stage | Check | Stage 08 status |
+|---|---|---|
+| 08 | C harness compiles against the header and exercises lifecycle, invoke, events, streaming, and errors. | Passed on Windows. |
+| 08 | Android JNI and Windows JNA pass the same contract suite. | Windows JNA passed. The JNI shim passed through a Windows-hosted JVM proxy. Android runtime execution is deferred. |
+| 08 | ABI mismatch is rejected before database or network work. | Passed in the Rust C ABI test, C harness, and both Kotlin adapters. |
+| 08 | 100 start/stop cycles show no leaked memory, threads, or handles. | Passed in the Rust C ABI test and C harness. |
+| 08 | A forced panic returns an internal error without unwinding into the JVM. | Passed through the C ABI, JNI proxy, and JNA. |
+| 08 | Streaming import/export round-trips with 1 MiB bounds. | Passed at 2.5 MB in Rust, C, JNI proxy, and JNA. |
+| 12 | Import/export streaming handles a 4 GiB file with bounded memory. | Not yet exercised at that size. |
+| 19 | Fuzzing covers malformed CBOR, oversized buffers, invalid handles, and cancellation races. | Not yet implemented. |
+
+The detailed evidence, commands, and test counts are in
+[STAGE_08.md](../progress/STAGE_08.md).

@@ -110,6 +110,12 @@ impl ManagedStore {
         &self.quarantine
     }
 
+    /// Temporary directory used for staging and streaming imports.
+    #[must_use]
+    pub fn temporary_directory(&self) -> &Path {
+        &self.temporary
+    }
+
     /// Bytes currently available on the store volume.
     pub fn available_space(&self) -> StoreResult<u64> {
         fs2::available_space(&self.root).map_err(StoreError::Io)
@@ -333,6 +339,47 @@ impl ManagedStore {
         Ok(BlobInfo {
             content_id: staged.content_id,
             size_bytes: staged.size_bytes,
+        })
+    }
+
+    /// Verifies a caller-written temporary file and promotes it without
+    /// copying it again.
+    ///
+    /// The source must be a regular file directly inside the managed
+    /// temporary directory. Its exact bytes are re-hashed before promotion so
+    /// a corrupted streaming import can never become a verified blob.
+    pub(crate) fn adopt_staged_file(
+        &self,
+        source: &Path,
+        content_id: &str,
+        expected_size: u64,
+    ) -> StoreResult<BlobInfo> {
+        if !is_content_id(content_id) {
+            return Err(StoreError::InvalidContentId(content_id.to_owned()));
+        }
+        let temporary_root = self.temporary.canonicalize()?;
+        let source = source.canonicalize()?;
+        if !source.starts_with(&temporary_root) {
+            return Err(StoreError::UnsafePath(
+                "streaming import must live in the managed temporary directory".to_owned(),
+            ));
+        }
+        let metadata = fs::symlink_metadata(&source)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(StoreError::UnsafePath(
+                "streaming import must be a regular file".to_owned(),
+            ));
+        }
+        if metadata.len() != expected_size {
+            return Err(StoreError::IntegrityMismatch(content_id.to_owned()));
+        }
+        if !self.hash_matches(&source, content_id, expected_size)? {
+            return Err(StoreError::IntegrityMismatch(content_id.to_owned()));
+        }
+        self.promote(StagedBlob {
+            path: source,
+            content_id: content_id.to_owned(),
+            size_bytes: expected_size,
         })
     }
 

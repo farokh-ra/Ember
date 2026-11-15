@@ -105,6 +105,33 @@ All notable changes to NEXUS are recorded here. The format follows
 - 33 Stage 07 Rust tests plus committed 2.5 MB content, chunk, manifest, root,
   tombstone, and rejection vectors.
 - Stage 07 evidence record.
+- A 17-function C ABI with opaque handles, panic containment, length-delimited
+  buffers, and versioned CBOR envelopes.
+- Create-time configuration with an ABI check that runs before the database or
+  data root is opened.
+- Idempotent create/start/stop/destroy behavior, unknown-handle rejection, and
+  100-cycle lifecycle evidence.
+- `system.info`, `system.health`, `system.snapshot`, `store.usage`, `test.echo`,
+  and `test.fault` dispatch with stable domain errors.
+- A 1,024-entry coalescing event queue and four-worker asynchronous operations
+  with progress, terminal, and cancellation events.
+- Forced-panic containment at the C and JNI boundaries.
+- Streaming import to `store/tmp` with incremental SHA-256 and chunk hashing,
+  canonical manifests, no-copy adoption, and bounded export with EOF.
+- Schema version 4 and a `local_import` reference type that retains verified
+  staged imports until another owner takes the bytes.
+- Android JNI symbols, `JNI_OnLoad` ABI rejection, static result encodings, and a
+  Windows-hosted JNI proxy test.
+- Windows JNA adapter with the native `NexusBuffer` layout.
+- Shared Kotlin `NativeCoreClient`, CBOR codec, typed `NexusException`, event
+  pump, cancel, and streaming APIs.
+- A C harness compiled against the shipped header and DLL, plus six Rust C ABI
+  tests and a shared Kotlin adapter contract.
+- `scripts/build-native.ps1` for Windows and Android artifacts, export checks,
+  and the C harness; the full build gate runs it before Gradle.
+- 35 new Stage 08 Rust tests and six new JVM tests, for 166 Rust and 76 JVM
+  tests total.
+- Stage 08 evidence record.
 
 ### Changed
 
@@ -117,14 +144,16 @@ All notable changes to NEXUS are recorded here. The format follows
 - Toolchain pins are recorded for JDK 21.0.13+9, Gradle 9.9.1, Kotlin 2.4.21,
   Compose Multiplatform 1.12.2, Material3 1.9.0, AGP 9.5.1, Rust 1.99.1, and
   Android NDK 29.0.14206865.
-- Rust now owns durable local storage; Kotlin remains a demo UI until the FFI
-  bridge is added in Stage 08.
+- Rust now owns durable local storage and the native lifecycle; Kotlin reaches it
+  only through the versioned C ABI.
 - Rust now owns local identity keys, canonical signed records, encrypted
   identity storage, and encrypted backups; no private key enters Kotlin.
-- The committed `Cargo.lock` now resolves 109 packages, and the dependency and
-  license inventory is at version 1.4.0.
-- The SQLite schema is now version 3; tombstones are independent signed records
-  and publications are immutable.
+- The committed `Cargo.lock` now resolves 131 packages, and the dependency and
+  license inventory is at version 1.5.0.
+- The SQLite schema is now version 4; tombstones are independent signed records,
+  publications are immutable, and verified staged imports can be retained.
+- The full local gate now builds Windows and Android native artifacts and runs
+  the C harness before Gradle.
 
 ### Fixed
 
@@ -166,18 +195,19 @@ All notable changes to NEXUS are recorded here. The format follows
 ### Known limitations
 
 - Identity, publication, download, hosting, search, and network data in the UI
-  are visibly labelled mock content. The storage foundation is real, but the UI
-  is not connected to it until the FFI bridge.
-- Publishing, transfer, hosting, and networking behavior is not implemented yet.
-  Stage 06 provides identity, canonical signed records, and encrypted backup only.
-- Android and Windows runtime cross-verification of the committed crypto vectors
-  is deferred to Stage 08 because the Kotlin shells do not link the Rust core and
-  no Android device or emulator is available locally.
+  are visibly labelled mock content. The native core and Kotlin client exist, but
+  the product screens are not connected to them yet.
+- Networking, publishing, transfer, hosting, and search behavior are not
+  implemented yet. Stage 08 provides the native boundary, lifecycle, events,
+  streaming, and test methods only.
+- Android JNI runtime execution is deferred because no emulator or device is
+  available locally. The Android arm64-v8a and x86_64 libraries are compiled and
+  export-checked, and the JNI shim is exercised through a Windows-hosted JVM
+  proxy; this is not on-device evidence.
 - Key loss is permanent. v1 has no automatic rotation, central revocation, or
   recovery service; compromise recovery requires a new identity and republish.
-- Android SQLite cross-compilation and runtime storage behavior are not locally
-  exercised because no emulator or device is available and the Kotlin shells do
-  not link `nexus-store` yet.
+- Android SQLite runtime storage is not locally exercised because no emulator or
+  device is available and the Android application does not yet host the core.
 - The storage-management screen remains a prototype; the settings and quota
   model exist in the data layer.
 - FTS5 search is schema-only and is populated in Stage 16.

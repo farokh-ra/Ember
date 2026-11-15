@@ -13,4 +13,10 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 workspace = true
 
 [dependencies]
+jni = "0.21"
 nexus-core.workspace = true
+nexus-identity.workspace = true
+
+[dev-dependencies]
+nexus-crypto.workspace = true
+nexus-store.workspace = true
