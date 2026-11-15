@@ -10,7 +10,7 @@ private val Sans: FontFamily = FontFamily.SansSerif
 private val Mono: FontFamily = FontFamily.Monospace
 
 /**
- * NEXUS type scale.
+ * Ember type scale.
  *
  * The platform sans-serif is used in Stage 04 so no font asset or licence is
  * introduced. Sizes and weights are fixed here; screens must use these styles

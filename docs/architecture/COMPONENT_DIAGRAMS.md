@@ -1,4 +1,4 @@
-# NEXUS Component Diagrams
+# Ember Component Diagrams
 
 | Field | Value |
 |---|---|
@@ -32,7 +32,7 @@ flowchart LR
     CoreW --> StoreW[(SQLite and managed store)]
 ```
 
-There is no NEXUS-operated account, file host, search database, or telemetry service. Bootstrap, index, and relay peers are optional infrastructure and never authorities for identity or ownership.
+There is no Ember-operated account, file host, search database, or telemetry service. Bootstrap, index, and relay peers are optional infrastructure and never authorities for identity or ownership.
 
 ## 2. Container and module view
 

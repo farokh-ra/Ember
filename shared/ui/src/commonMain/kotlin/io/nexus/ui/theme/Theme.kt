@@ -24,7 +24,7 @@ public object NexusTheme {
 }
 
 /**
- * Applies the NEXUS palette, typography, shape scale, and accessibility motion
+ * Applies the Ember palette, typography, shape scale, and accessibility motion
  * preference. The chosen light/dark mode is supplied by the caller.
  */
 @Composable

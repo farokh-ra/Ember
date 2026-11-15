@@ -1,6 +1,6 @@
-# NEXUS Logging Policy
+# Ember Logging Policy
 
-NEXUS logs must help diagnose local failures without exposing the user's
+Ember logs must help diagnose local failures without exposing the user's
 identity, credentials, files, or social graph. This policy applies to Kotlin,
 Rust, build scripts, tests, CI output, and bug reports.
 

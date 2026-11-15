@@ -102,7 +102,7 @@ Additional manual checks:
 - v1 is the first public release; P1 capabilities do not block it.
 - v1 downloads from one verified source at a time with sequential failover; simultaneous multi-peer scheduling is later.
 - Originals, replicas, downloads, and partials live in the managed store; export is explicit and user-initiated.
-- Publishing imports a managed copy; NEXUS never serves arbitrary external paths and never modifies the external original.
+- Publishing imports a managed copy; Ember never serves arbitrary external paths and never modifies the external original.
 - v1 has no telemetry or crash reporting by default.
 - v1 has no automatic key rotation or central recovery; limitations are disclosed.
 - Record existence, record verification, and content verification are separate UI states.

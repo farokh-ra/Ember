@@ -37,7 +37,7 @@ public object NexusBreakpoints {
     public val expanded: Dp = 840.dp
 }
 
-/** NEXUS shape scale. */
+/** Ember shape scale. */
 public val NexusShapes: Shapes =
     Shapes(
         extraSmall = RoundedCornerShape(4.dp),

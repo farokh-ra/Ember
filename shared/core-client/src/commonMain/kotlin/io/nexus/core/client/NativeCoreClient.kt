@@ -64,7 +64,7 @@ public class NativeCoreClient private constructor(
     public val nativeVersion: String
         get() = bridge.version
 
-    /** NEXUS ABI version reported by the loaded library. */
+    /** Ember ABI version reported by the loaded library. */
     public val nativeAbiVersion: Int
         get() = bridge.abiVersion
 

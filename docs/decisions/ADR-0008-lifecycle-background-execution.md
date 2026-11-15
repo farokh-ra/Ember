@@ -2,13 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-12
-- **Deciders:** NEXUS engineering
+- **Deciders:** Ember engineering
 - **Supersedes:** none
 - **Related:** ADR-0001, ADR-0002, ADR-0003, ADR-0004, ADR-0005, ADR-0009
 
 ## Context
 
-NEXUS performs long-running network and file work, but it is not a system daemon. Android restricts background execution and can stop a process at any time. Windows users expect a window to close predictably and may not want a background peer running. The lifecycle design must keep the UI responsive, preserve resumable downloads, avoid false completion, protect keys, and tell the truth about whether the node is online.
+Ember performs long-running network and file work, but it is not a system daemon. Android restricts background execution and can stop a process at any time. Windows users expect a window to close predictably and may not want a background peer running. The lifecycle design must keep the UI responsive, preserve resumable downloads, avoid false completion, protect keys, and tell the truth about whether the node is online.
 
 The core is a native library inside the app process in v1. A separate service process would add IPC, packaging, and mobile lifecycle complexity that is not justified for the first release.
 
@@ -61,7 +61,7 @@ No native callback enters the JVM. No database or network work runs on the UI th
 - Closing the window with no active work exits the process and stops the core. "Exit" in the tray always stops the core.
 - The app does not install a login auto-start entry in v1. Background serving is an explicit session choice, not an always-on service.
 - Sleep, resume, network changes, and VPN changes are observed by the core. Connections reconnect or report offline; transfers pause and resume from the verified prefix.
-- A second launch detects the single-instance guard and reports that NEXUS is already running; it does not open a second core against the same data.
+- A second launch detects the single-instance guard and reports that Ember is already running; it does not open a second core against the same data.
 
 ### Network and transfer lifecycle
 
@@ -74,7 +74,7 @@ No native callback enters the JVM. No database or network work runs on the UI th
 ### Updates
 
 - Android updates preserve app-private data and identity. The new core runs migrations on first start.
-- Windows upgrades preserve `%LOCALAPPDATA%\NEXUS\data` and the sealed local secret. The installer stops the running app before replacing binaries.
+- Windows upgrades preserve `%LOCALAPPDATA%\Ember\data` and the sealed local secret. The installer stops the running app before replacing binaries.
 - If a migration or ABI check fails after an update, the app shows a recovery screen with backup/restore and diagnostics. It does not silently reset the identity.
 - Downgrades are not supported. A newer database schema is not opened by an older core.
 

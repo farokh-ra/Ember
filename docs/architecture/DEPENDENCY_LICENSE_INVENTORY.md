@@ -1,4 +1,4 @@
-# NEXUS Dependency and License Inventory
+# Ember Dependency and License Inventory
 
 | Field | Value |
 |---|---|
@@ -11,7 +11,7 @@
 
 ## 1. Purpose and scope
 
-This inventory records the direct runtime, test, and build dependencies planned for NEXUS v1, their pinned compatibility versions, licenses, platform use, purpose, and fallback. Stage 03 realizes the build-baseline dependencies needed by the empty shells and shared foundation. Stage 05 realizes the storage dependencies listed in section 4.1: bundled SQLite through `rusqlite`/`libsqlite3-sys`, CBOR metadata archives, SHA-256 hashing, typed errors, and managed-store locking. Stage 06 realizes the cryptographic primitives, canonical encoding, identity storage, and signed-record validation dependencies: Ed25519, Bech32m, XChaCha20-Poly1305, HKDF, Argon2id, NFC normalization, OS randomness, and secret zeroization. Stage 07 realizes the streaming manifest and verification path through `sha2` plus the existing `nexus-crypto` and `nexus-protocol` crates, and wires both into `nexus-transfer` and `nexus-store`. Stage 08 realizes the FFI boundary through the `jni` crate on both native targets and JNA 5.14.0 on the Windows JVM. Every other row in this table is planned for the stage that implements the owning feature and is not resolved by the current workspace. `Cargo.lock` contains 131 packages, including the twelve workspace crates and the transitive graphs of the realized dependencies.
+This inventory records the direct runtime, test, and build dependencies planned for Ember v1, their pinned compatibility versions, licenses, platform use, purpose, and fallback. Stage 03 realizes the build-baseline dependencies needed by the empty shells and shared foundation. Stage 05 realizes the storage dependencies listed in section 4.1: bundled SQLite through `rusqlite`/`libsqlite3-sys`, CBOR metadata archives, SHA-256 hashing, typed errors, and managed-store locking. Stage 06 realizes the cryptographic primitives, canonical encoding, identity storage, and signed-record validation dependencies: Ed25519, Bech32m, XChaCha20-Poly1305, HKDF, Argon2id, NFC normalization, OS randomness, and secret zeroization. Stage 07 realizes the streaming manifest and verification path through `sha2` plus the existing `nexus-crypto` and `nexus-protocol` crates, and wires both into `nexus-transfer` and `nexus-store`. Stage 08 realizes the FFI boundary through the `jni` crate on both native targets and JNA 5.14.0 on the Windows JVM. Every other row in this table is planned for the stage that implements the owning feature and is not resolved by the current workspace. `Cargo.lock` contains 131 packages, including the twelve workspace crates and the transitive graphs of the realized dependencies.
 
 The inventory covers:
 
@@ -27,7 +27,7 @@ It does not list every transitive crate. `cargo-deny`, Gradle license reporting,
 
 Allowed for distributed code: Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, MPL-2.0 (unmodified, with notice), Unicode-3.0, OFL-1.1, and public domain.
 
-Not allowed for linked or distributed code: GPL, AGPL, SSPL, and any license requiring NEXUS source disclosure or network-service obligations. LGPL is not allowed for linked code unless a future ADR approves dynamic linking and relinking rights. JNA is used under its Apache-2.0 option, not LGPL.
+Not allowed for linked or distributed code: GPL, AGPL, SSPL, and any license requiring Ember source disclosure or network-service obligations. LGPL is not allowed for linked code unless a future ADR approves dynamic linking and relinking rights. JNA is used under its Apache-2.0 option, not LGPL.
 
 Build-only tools may use other licenses because they are not distributed with the application: Git, Inno Setup, MSVC/Windows SDK, Android SDK, and Python. The JDK runtime bundled by `jpackage` is distributed under GPLv2 with the Classpath Exception and requires notices and source availability.
 

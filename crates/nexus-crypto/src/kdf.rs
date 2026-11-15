@@ -7,7 +7,7 @@ use zeroize::Zeroizing;
 
 use crate::error::CryptoError;
 
-/// Default key length produced by the NEXUS KDF helpers.
+/// Default key length produced by the Ember KDF helpers.
 pub const DERIVED_KEY_LENGTH: usize = 32;
 /// Length of an Argon2id backup salt.
 pub const ARGON2_SALT_LENGTH: usize = 16;

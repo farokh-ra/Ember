@@ -1,4 +1,4 @@
-# NEXUS Core FFI Interface Draft
+# Ember Core FFI Interface Draft
 
 | Field | Value |
 |---|---|

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repository hygiene checks for NEXUS.
+"""Repository hygiene checks for Ember.
 
 This script is intentionally dependency-free so it runs on a clean checkout
 with only Python installed. It fails when:
@@ -247,7 +247,7 @@ def main() -> int:
     problems.extend(check_ignore_rules())
     problems.extend(check_secret_patterns(files))
 
-    print("NEXUS REPOSITORY HYGIENE")
+    print("Ember REPOSITORY HYGIENE")
     print(f"  Files scanned: {len(files)}")
     print(f"  Forbidden paths checked: {len(FORBIDDEN_NAMES)} names, {len(FORBIDDEN_SUFFIXES)} suffixes")
     print(f"  Secret patterns checked: {len(SECRET_PATTERNS)}")

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to NEXUS are recorded here. The format follows
+All notable changes to Ember are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -31,7 +31,7 @@ All notable changes to NEXUS are recorded here. The format follows
 - Repository hygiene and commit-message validators.
 - Developer setup, development workflow, logging policy, contributing guide, and
   Stage 03 evidence record.
-- NEXUS design system with light/dark color schemes, semantic status colors,
+- Ember design system with light/dark color schemes, semantic status colors,
   typography, spacing, shape, size, and a custom Compose icon set.
 - Reusable component library for navigation chrome, cards, status labels,
   buttons, selections, dialogs, state panels, avatars, brand art, and prototype
@@ -135,6 +135,9 @@ All notable changes to NEXUS are recorded here. The format follows
 
 ### Changed
 
+- The product and user-facing application surfaces are named Ember. Internal
+  `io.nexus` packages, `nexus-*` crates, native symbols, storage names, and
+  signed record tags are unchanged for compatibility.
 - The Android and Windows shells now host the shared clickable UI prototype
   instead of empty placeholder content.
 - The local gate and CI now run `:shared:ui:jvmTest`.

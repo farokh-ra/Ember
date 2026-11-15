@@ -1,6 +1,6 @@
 package io.nexus.model
 
-/** Lifecycle states reported by the NEXUS core. */
+/** Lifecycle states reported by the Ember core. */
 public enum class CoreState {
     STOPPED,
     STARTING,

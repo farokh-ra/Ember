@@ -2,13 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-12
-- **Deciders:** NEXUS engineering
+- **Deciders:** Ember engineering
 - **Supersedes:** none
 - **Related:** ADR-0001, ADR-0003, ADR-0004, ADR-0005, ADR-0006
 
 ## Context
 
-NEXUS needs one shared P2P implementation on Android and Windows. The roadmap requires a Rust core using libp2p, with identity, storage, transfer, verification, and replication shared across platforms. Kotlin/Compose should own UI and presentation, not duplicate networking or database logic.
+Ember needs one shared P2P implementation on Android and Windows. The roadmap requires a Rust core using libp2p, with identity, storage, transfer, verification, and replication shared across platforms. Kotlin/Compose should own UI and presentation, not duplicate networking or database logic.
 
 Two runtimes create risks: divergent state, duplicate writers, inconsistent crypto, blocking the UI, and unsafe FFI. The boundary must be small, versioned, and testable.
 
@@ -36,7 +36,7 @@ The **Kotlin/Compose layer** owns:
 
 **Rules**
 
-1. Kotlin must not open the NEXUS SQLite database or managed store directly.
+1. Kotlin must not open the Ember SQLite database or managed store directly.
 2. Kotlin must not implement networking, identity, hashing, record parsing, or transfer.
 3. Rust must not render UI or make product-policy decisions that belong to the presentation layer; it enforces invariants and returns structured state/errors.
 4. All durable state changes go through one core instance.

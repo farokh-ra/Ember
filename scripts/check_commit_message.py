@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Validates a NEXUS commit or pull-request title.
+"""Validates an Ember commit or pull-request title.
 
 Usage:
     python scripts/check_commit_message.py "feat(android): add launch screen"
 
-The rule is Conventional Commits 1.0.0 with the NEXUS type set. Bodies and
+The rule is Conventional Commits 1.0.0 with the Ember type set. Bodies and
 footers are allowed when the input is a full commit message; only the first
 line is validated.
 """
@@ -80,7 +80,7 @@ def main() -> int:
     message = sys.argv[1]
     problems = validate(message)
 
-    print("NEXUS COMMIT MESSAGE")
+    print("Ember COMMIT MESSAGE")
     print(f"  Title: {message.strip().splitlines()[0] if message.strip() else ''}")
 
     if problems:

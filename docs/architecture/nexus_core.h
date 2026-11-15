@@ -1,5 +1,5 @@
 /*
- * NEXUS core C ABI — draft for Stage 02, implemented in Stage 08.
+ * Ember core C ABI — draft for Stage 02, implemented in Stage 08.
  *
  * ABI version: 1
  *

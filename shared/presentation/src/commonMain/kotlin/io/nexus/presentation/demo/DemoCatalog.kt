@@ -15,7 +15,7 @@ public object DemoCatalog {
         DemoProfile(
             displayName = "Avery Chen",
             usernameLabel = "avery",
-            bio = "Demo profile for exploring the NEXUS interface. No real identity or key exists.",
+            bio = "Demo profile for exploring the Ember interface. No real identity or key exists.",
             keyFingerprint = "nx1:9F3A 71C2 8B40 D6E5 47A1 2C88",
             publicationCount = 2,
             hostedReplicaCount = 4,
@@ -88,8 +88,8 @@ public object DemoCatalog {
             ),
             DemoPublication(
                 recordId = "nx-demo-protocol-overview",
-                title = "NEXUS Protocol Overview",
-                fileName = "NEXUS Protocol Overview.md",
+                title = "Ember Protocol Overview",
+                fileName = "Ember Protocol Overview.md",
                 description = "Sample protocol notes. The record is known, but no content source is known.",
                 category = DemoCategory.DOCUMENTS,
                 tags = listOf("protocol", "overview", "documentation"),
@@ -295,7 +295,7 @@ public object DemoCatalog {
             ),
             DemoHostedFile(
                 id = "hosted-protocol-overview",
-                title = "NEXUS Protocol Overview",
+                title = "Ember Protocol Overview",
                 originalUploader = "Rowan Vale",
                 sizeLabel = "42 KB",
                 verification = ReplicaVerification.PAUSED,

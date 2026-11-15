@@ -309,7 +309,7 @@ It checks:
 Observed output:
 
 ```text
-NEXUS C ABI harness
+Ember C ABI harness
   ABI version: 1
   library version: 0.1.0
   lifecycle: 100 create/start/stop/destroy cycles

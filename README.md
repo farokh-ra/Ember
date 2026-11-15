@@ -1,9 +1,14 @@
-# NEXUS
+# Ember
 
-NEXUS is a local-first file sharing application for Android and Windows. It uses
+Ember is a local-first file sharing application for Android and Windows. It uses
 a shared Kotlin Multiplatform and Compose Multiplatform interface, a shared Rust
 core, and peer-to-peer networking without a mandatory central account or content
 service.
+
+Ember is the product name. Internal identifiers keep the historical `nexus`
+name for ABI and format stability: Kotlin packages (`io.nexus`), Rust crates
+(`nexus-*`), the native library (`nexus_core`), and signed record tags
+(`NEXUS-*`).
 
 This repository is at the end of **Stage 08: C ABI, JNI/JNA adapters,
 lifecycle, and streaming**. The Android and Windows shells still run the shared,
@@ -141,7 +146,7 @@ cargo audit
 Artifacts:
 
 - Android debug APK: `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk`
-- Windows application image: `apps/desktopApp/build/compose/binaries/main/app/NEXUS`
+- Windows application image: `apps/desktopApp/build/compose/binaries/main/app/Ember`
 - Windows native core: `build/native/windows-x64/nexus_core.dll`
 - Android native cores: `build/native/android-arm64-v8a/libnexus_core.so` and `build/native/android-x86_64/libnexus_core.so`
 

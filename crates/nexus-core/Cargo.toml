@@ -3,7 +3,7 @@ name = "nexus-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "NEXUS lifecycle orchestration and command/event bus"
+description = "Ember lifecycle orchestration and command/event bus"
 publish = false
 
 [lints]

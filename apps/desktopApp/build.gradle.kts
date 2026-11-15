@@ -21,10 +21,10 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Msi)
-            packageName = "NEXUS"
+            packageName = "Ember"
             packageVersion = "0.1.0"
-            description = "NEXUS desktop application"
-            vendor = "NEXUS"
+            description = "Ember desktop application"
+            vendor = "Ember"
         }
     }
 }

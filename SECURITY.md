@@ -1,6 +1,6 @@
 # Security Policy
 
-NEXUS handles local identity keys, peer-to-peer connections, and user files. We
+Ember handles local identity keys, peer-to-peer connections, and user files. We
 take reports seriously and ask that you avoid public disclosure until a fix is
 available.
 
@@ -11,7 +11,7 @@ available.
 | `0.1.x` development builds | Yes |
 | Older development snapshots | No |
 
-NEXUS has not published a production release yet. This table will be updated
+Ember has not published a production release yet. This table will be updated
 when the first signed release is available.
 
 ## Reporting a vulnerability

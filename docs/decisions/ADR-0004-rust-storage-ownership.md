@@ -2,19 +2,19 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-12
-- **Deciders:** NEXUS engineering
+- **Deciders:** Ember engineering
 - **Supersedes:** none
 - **Related:** ADR-0002, ADR-0003, ADR-0006, ADR-0008, [Architecture](../ARCHITECTURE.md)
 
 ## Context
 
-NEXUS must persist identity references, profiles, publication records, file metadata, downloads, replicas, peer observations, settings, and search indexes. File bytes can reach 4 GiB and must never be stored as SQLite BLOBs. The product requires a single verified copy per content ID, reference-counted deletion, quota enforcement, partial-download accounting, restart recovery, and safe export.
+Ember must persist identity references, profiles, publication records, file metadata, downloads, replicas, peer observations, settings, and search indexes. File bytes can reach 4 GiB and must never be stored as SQLite BLOBs. The product requires a single verified copy per content ID, reference-counted deletion, quota enforcement, partial-download accounting, restart recovery, and safe export.
 
-If Kotlin and Rust both write durable state, there are two writers, two migration paths, and races that can delete a blob still referenced by a publication. If SQLite is exposed to the UI layer, the UI can observe half-applied changes or bypass quota and path rules. If the managed store is a user-visible folder, another application can rename, delete, or replace files while NEXUS is serving them.
+If Kotlin and Rust both write durable state, there are two writers, two migration paths, and races that can delete a blob still referenced by a publication. If SQLite is exposed to the UI layer, the UI can observe half-applied changes or bypass quota and path rules. If the managed store is a user-visible folder, another application can rename, delete, or replace files while Ember is serving them.
 
 ## Decision
 
-**The Rust core is the only writer and reader of durable NEXUS state.**
+**The Rust core is the only writer and reader of durable Ember state.**
 
 - Kotlin never opens the SQLite database, never reads or writes the managed store, and never receives a raw store path for ordinary operations.
 - The platform shell supplies two app-private directories at core creation: a database directory and a store directory. The core rejects paths outside the app-private root and creates the layout itself.

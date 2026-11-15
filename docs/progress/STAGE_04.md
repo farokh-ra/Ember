@@ -11,7 +11,7 @@ Stage 04 establishes the shared visual language and every clickable prototype
 screen. It does not connect real storage, identity, publishing, downloads,
 hosting, or networking. The stage covers:
 
-- NEXUS branding, color, typography, spacing, shape, and icon rules.
+- Ember branding, color, typography, spacing, shape, and icon rules.
 - A reusable Compose component library for Android and Windows.
 - Navigation and immutable application-state patterns.
 - Responsive phone and desktop layouts.
@@ -61,7 +61,7 @@ No new third-party UI, icon, or storage dependency was added.
 
 ### Branding and color
 
-- The brand mark is a custom Compose canvas node graphic. The adjacent NEXUS
+- The brand mark is a custom Compose canvas node graphic. The adjacent Ember
   wordmark carries the accessible name; the mark is decorative.
 - `Color.kt` defines light and dark Material 3 schemes plus semantic controlled,
   caution, offline/error, informational, and neutral status colors.
@@ -74,7 +74,7 @@ No new third-party UI, icon, or storage dependency was added.
 
 ### Typography and dimensions
 
-- `Typography.kt` defines one NEXUS type scale used by both platforms.
+- `Typography.kt` defines one Ember type scale used by both platforms.
 - `Dimens.kt` defines the shared spacing scale, shape tokens, minimum 48 dp touch
   target, content widths, side-rail width, and state-panel minimum height.
 - Screens use the shared spacing and size tokens instead of ad hoc dimensions.
@@ -328,14 +328,14 @@ Presentation subtotal: 44. Shared UI subtotal: 21.
 | Artifact | Path | Size |
 |---|---|---|
 | Android debug APK | `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk` | 31,039,671 bytes |
-| Windows app image | `apps/desktopApp/build/compose/binaries/main/app/NEXUS` | 130,622,747 bytes across 200 files |
-| Windows launcher | `.../app/NEXUS/NEXUS.exe` | 540,672 bytes |
+| Windows app image | `apps/desktopApp/build/compose/binaries/main/app/Ember` | 130,622,747 bytes across 200 files |
+| Windows launcher | `.../app/Ember/Ember.exe` | 540,672 bytes |
 
 ### Runtime smoke test
 
 The rebuilt Windows app image was launched from a clean start and exercised
 through the manual desktop test pass above. It rendered the welcome screen in
-the persisted Light theme with the NEXUS wordmark, stage preview label,
+the persisted Light theme with the Ember wordmark, stage preview label,
 persistent preview/network banner, demo data badges, and both onboarding
 actions. It stayed running through the expanded and compact journeys and closed
 normally through the window close request. Screenshots were captured for local
@@ -441,7 +441,7 @@ Focused checks:
 Launch the desktop image:
 
 ```powershell
-.\apps\desktopApp\build\compose\binaries\main\app\NEXUS\NEXUS.exe
+.\apps\desktopApp\build\compose\binaries\main\app\Ember\Ember.exe
 ```
 
 After committing:

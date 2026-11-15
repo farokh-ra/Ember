@@ -1,4 +1,4 @@
-//! Canonical CBOR for signed NEXUS records.
+//! Canonical CBOR for signed Ember records.
 //!
 //! The profile is deliberately smaller than RFC 8949 CBOR:
 //!

@@ -3,13 +3,13 @@
 - **Status:** Accepted
 - **Date:** 2026-11-12
 - **Amended:** 2026-11-13 (Stage 03 toolchain verification and local GNU fallback)
-- **Deciders:** NEXUS engineering
+- **Deciders:** Ember engineering
 - **Supersedes:** none
 - **Related:** ADR-0001, ADR-0003, ADR-0005, ADR-0006, [Dependency inventory](../architecture/DEPENDENCY_LICENSE_INVENTORY.md)
 
 ## Context
 
-NEXUS must produce a signed Android app and a signed per-user Windows application from one repository, with a shared Kotlin/Compose UI and a shared Rust core. The build must be reproducible enough to audit, must not introduce a mandatory service, and must keep third-party licenses compatible with distribution. Stage 03 verified the toolchain on a non-admin Windows machine that has an Android SDK but no complete Visual Studio C++ workload or Windows SDK. The local fallback uses portable MinGW-w64; CI and release builds remain MSVC.
+Ember must produce a signed Android app and a signed per-user Windows application from one repository, with a shared Kotlin/Compose UI and a shared Rust core. The build must be reproducible enough to audit, must not introduce a mandatory service, and must keep third-party licenses compatible with distribution. Stage 03 verified the toolchain on a non-admin Windows machine that has an Android SDK but no complete Visual Studio C++ workload or Windows SDK. The local fallback uses portable MinGW-w64; CI and release builds remain MSVC.
 
 The Windows installer must install per-user without administrator rights, preserve user data on upgrade, and ask what to do with user data on uninstall. jpackage alone produces an app image but its MSI path depends on WiX and does not provide an interactive uninstall data prompt.
 
@@ -75,9 +75,9 @@ host linker choice does not change the exported interface.
 ### Windows packaging
 
 - Gradle builds a Compose Desktop **app image** with `jpackage` and a pinned JDK 21 runtime.
-- Inno Setup wraps the app image in a **per-user EXE installer** under `%LOCALAPPDATA%\Programs\NEXUS`. No administrator rights are required.
-- The installer creates Start Menu and optional desktop shortcuts, registers an uninstaller, and on uninstall asks whether to keep `%LOCALAPPDATA%\NEXUS\data`. Application binaries and user data are separate.
-- Upgrades install in place, close a running NEXUS process, and preserve user data and the sealed local secret.
+- Inno Setup wraps the app image in a **per-user EXE installer** under `%LOCALAPPDATA%\Programs\Ember`. No administrator rights are required.
+- The installer creates Start Menu and optional desktop shortcuts, registers an uninstaller, and on uninstall asks whether to keep `%LOCALAPPDATA%\Ember\data`. Application binaries and user data are separate.
+- Upgrades install in place, close a running Ember process, and preserve user data and the sealed local secret.
 - The installer and main executable are Authenticode-signed in the release pipeline. The certificate is supplied by the release environment.
 - The Rust core is `nexus_core.dll` x64, loaded by JNA from the application directory.
 - The app does not install a login auto-start entry in v1.
@@ -98,7 +98,7 @@ Allowed licenses for distributed code:
 | OFL-1.1 | Allowed for bundled fonts with notice. |
 | Public domain | Allowed (SQLite). |
 
-Disallowed for linked or distributed code: GPL, AGPL, SSPL, and any license that would require NEXUS source disclosure or impose network-service obligations. LGPL is not allowed for linked code unless a future ADR approves dynamic linking and provides relinking rights; JNA is used under its Apache-2.0 option, not LGPL.
+Disallowed for linked or distributed code: GPL, AGPL, SSPL, and any license that would require Ember source disclosure or impose network-service obligations. LGPL is not allowed for linked code unless a future ADR approves dynamic linking and provides relinking rights; JNA is used under its Apache-2.0 option, not LGPL.
 
 Build-only tools may carry other licenses because they are not distributed: Git (GPL-2.0), Inno Setup (custom freeware license), MSVC/Windows SDK (proprietary), Android SDK (proprietary license), Python (PSF). The JDK runtime bundled by jpackage is GPLv2 with the Classpath Exception and is distributed with notices.
 

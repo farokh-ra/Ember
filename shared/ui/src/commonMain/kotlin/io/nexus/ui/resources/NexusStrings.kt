@@ -409,7 +409,7 @@ public interface NexusStrings {
 }
 
 public object EnglishNexusStrings : NexusStrings {
-    override val appName: String = "NEXUS"
+    override val appName: String = "Ember"
     override val appTagline: String = "Local-first file sharing"
     override val previewLabel: String = "Stage 04 UI preview"
     override val demoBadge: String = "DEMO DATA"
@@ -453,7 +453,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val settings: String = "Settings"
     override val networkStatus: String = "Network status"
     override val publish: String = "Publish"
-    override val versionLine: String = "NEXUS 0.1.0 · Stage 04"
+    override val versionLine: String = "Ember 0.1.0 · Stage 04"
     override val sourceCount: (Int) -> String = { count -> "Sources: $count" }
     override val recordsCount: (Int) -> String = { count -> "$count records" }
     override val lastSeen: (String) -> String = { value -> "Last seen: $value" }
@@ -495,7 +495,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val welcomeEyebrow: String = "STAGE 04 · UI PREVIEW"
     override val welcomeTitle: String = "Find files. Keep the network human."
     override val welcomeBody: String =
-        "NEXUS is a local-first way to publish and discover files. Your identity lives on your device, " +
+        "Ember is a local-first way to publish and discover files. Your identity lives on your device, " +
             "and no central account is required."
     override val welcomePrimary: String = "Open the demo"
     override val welcomeSecondary: String = "Set up a demo identity"
@@ -698,7 +698,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val publishPublicTitle: String = "Publishing is public"
     override val publishPublicBody: String =
         "Published profile metadata and file records can be seen by peers. Peers may see network addresses. " +
-            "NEXUS does not guarantee anonymity."
+            "Ember does not guarantee anonymity."
     override val publishNoDeleteTitle: String = "Unpublishing is not a global delete"
     override val publishNoDeleteBody: String =
         "You can stop serving and sign an unpublish statement, but copies held by other peers may remain."
@@ -754,7 +754,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val hostedDemoNotice: String = "Demo replicas. Nothing is being served to peers."
     override val hostedHowTitle: String = "Hosting is an explicit choice"
     override val hostedHowBody: String =
-        "NEXUS never silently seeds content. Downloading a file does not create a hosting obligation. " +
+        "Ember never silently seeds content. Downloading a file does not create a hosting obligation. " +
             "A replica keeps the original uploader's attribution."
     override val hostedStatusVerified: String = "Verified replica"
     override val hostedStatusVerifying: String = "Verifying copy"
@@ -820,7 +820,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val settingsPrivacyBody: String =
         "No telemetry is enabled by default. Demo settings and sample data stay on this device."
     override val settingsAbout: String = "About"
-    override val settingsAboutVersion: String = "NEXUS 0.1.0"
+    override val settingsAboutVersion: String = "Ember 0.1.0"
     override val settingsAboutBuild: String = "Stage 04 UI preview · no core connection"
     override val settingsLicenses: String = "Open-source licenses"
     override val settingsLicensesBody: String =

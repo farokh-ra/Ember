@@ -1,4 +1,4 @@
-//! Shared identifiers and value types used by every NEXUS crate.
+//! Shared identifiers and value types used by every Ember crate.
 
 use std::fmt;
 

@@ -1,4 +1,4 @@
--- NEXUS metadata schema, version 3.
+-- Ember metadata schema, version 3.
 --
 -- Tombstones become independent signed records. A tombstone may arrive before
 -- the publication row, and it must preserve the original uploader and content

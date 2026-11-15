@@ -1,4 +1,4 @@
-# NEXUS Feature Priority Matrix
+# Ember Feature Priority Matrix
 
 | Field | Value |
 |---|---|
@@ -124,7 +124,7 @@ A priority change requires updates to this matrix, the PRD, acceptance criteria,
 | F-903 | Company accounts, cloud storage, mandatory backend | Violates PR-02. |
 | F-904 | Mandatory or automatic replication | Violates PR-03. |
 | F-905 | Guaranteed remote deletion | Violates PR-10; technically impossible across independent peers. |
-| F-906 | Real-world identity verification/KYC | NEXUS provides cryptographic identity only; signatures are not legal identity proof. |
+| F-906 | Real-world identity verification/KYC | Ember provides cryptographic identity only; signatures are not legal identity proof. |
 | F-907 | Guaranteed anonymity | P2P peers can observe network addresses; the product must not promise anonymity. |
 | F-908 | Automatic execution/opening of downloads | Violates PR-11 and security requirements. |
 | F-909 | Centralised search, central moderation authority, central file host | Violates PR-02; community/local mechanisms are the direction. |

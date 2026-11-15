@@ -7,7 +7,7 @@
 
 ## 1. Scope
 
-Stage 02 defines the architecture for the first NEXUS release and records the decisions that are expensive to reverse. It produces design documents only; no application, Rust, or network code is created in this stage.
+Stage 02 defines the architecture for the first Ember release and records the decisions that are expensive to reverse. It produces design documents only; no application, Rust, or network code is created in this stage.
 
 The stage covers:
 

@@ -1,6 +1,6 @@
 package io.nexus.core.client
 
-/** Stable NEXUS exception hierarchy shared by JNI and JNA adapters. */
+/** Stable Ember exception hierarchy shared by JNI and JNA adapters. */
 public sealed class NexusException(
     message: String,
     cause: Throwable? = null,

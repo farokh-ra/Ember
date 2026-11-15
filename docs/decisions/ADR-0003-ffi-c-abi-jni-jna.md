@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-12
-- **Deciders:** NEXUS engineering
+- **Deciders:** Ember engineering
 - **Supersedes:** none
 - **Related:** ADR-0001, ADR-0002, ADR-0004, ADR-0007, [FFI interface draft](../architecture/FFI_INTERFACE.md)
 

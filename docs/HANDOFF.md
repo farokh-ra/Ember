@@ -1,4 +1,4 @@
-# NEXUS Project Handoff
+# Ember Project Handoff
 
 **Current stage:** 08 - C ABI, JNI/JNA adapters, lifecycle, and streaming
 **Stage status:** Complete

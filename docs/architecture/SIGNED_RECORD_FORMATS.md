@@ -1,4 +1,4 @@
-# NEXUS Signed Record and Identity Formats v1
+# Ember Signed Record and Identity Formats v1
 
 | Field | Value |
 |---|---|

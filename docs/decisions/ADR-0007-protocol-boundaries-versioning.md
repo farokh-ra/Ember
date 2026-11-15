@@ -2,13 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-12
-- **Deciders:** NEXUS engineering
+- **Deciders:** Ember engineering
 - **Supersedes:** none
 - **Related:** ADR-0003, ADR-0005, ADR-0006, ADR-0010, [Architecture](../ARCHITECTURE.md)
 
 ## Context
 
-Identity, profiles, discovery, publication, transfer, replication, and search use different records and failure modes. If one layer parses or mutates another layer's data directly, validation is duplicated, signed bytes can be rewritten, and a malformed message in one domain can corrupt state in another. NEXUS also needs explicit compatibility rules because Android and Windows apps will update at different times, peers will run older versions, and cached records can outlive the app that created them.
+Identity, profiles, discovery, publication, transfer, replication, and search use different records and failure modes. If one layer parses or mutates another layer's data directly, validation is duplicated, signed bytes can be rewritten, and a malformed message in one domain can corrupt state in another. Ember also needs explicit compatibility rules because Android and Windows apps will update at different times, peers will run older versions, and cached records can outlive the app that created them.
 
 ## Decision
 

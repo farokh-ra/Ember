@@ -65,7 +65,7 @@ public fun NexusConfirmDialog(
     )
 }
 
-/** Snackbar host styled with the NEXUS surface tokens. */
+/** Snackbar host styled with the Ember surface tokens. */
 @Composable
 public fun NexusSnackbarHost(
     hostState: SnackbarHostState,

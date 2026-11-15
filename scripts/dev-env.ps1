@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Configures the current PowerShell process to use the pinned NEXUS toolchain.
+    Configures the current PowerShell process to use the pinned Ember toolchain.
 
 .DESCRIPTION
     Installs nothing. Run scripts/setup-windows.ps1 first, then dot-source this
@@ -86,7 +86,7 @@ if (Test-Path (Join-Path $AndroidHome "platforms\android-37.0")) {
 
 if (-not $Quiet) {
     $javaVersion = (& (Join-Path $JdkHome "bin\java.exe") -version 2>&1 | Select-Object -First 1)
-    Write-Host "NEXUS developer environment"
+    Write-Host "Ember developer environment"
     Write-Host "  JDK:     $javaVersion"
     Write-Host "  Gradle:  $GradleHome"
     Write-Host "  Rust:    $(& (Join-Path $CargoHome "bin\rustc.exe") --version)"
