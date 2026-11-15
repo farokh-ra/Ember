@@ -154,6 +154,12 @@ impl Store {
         self.managed.root()
     }
 
+    /// Absolute temporary directory used by streaming imports.
+    #[must_use]
+    pub fn temporary_directory(&self) -> &Path {
+        self.managed.temporary_directory()
+    }
+
     /// Active limits.
     #[must_use]
     pub const fn config(&self) -> StoreConfig {
@@ -210,6 +216,16 @@ impl Store {
         self.config.quota.check(usage, incoming, available)
     }
 
+    /// Verifies that `incoming` more bytes fit the managed quota.
+    ///
+    /// This is used after bytes are already staged on the same volume, where
+    /// charging the free-space reserve a second time would double-count them.
+    pub fn ensure_quota(&self, incoming: u64) -> StoreResult<()> {
+        self.config.quota.check_file_size(incoming, self.config.max_file_size)?;
+        let usage = self.usage()?;
+        self.config.quota.check(usage, incoming, u64::MAX)
+    }
+
     /// Imports a source file as a publication original.
     pub fn import_publication_original(&self, source: &Path, publication_id: &str) -> StoreResult<ImportedContent> {
         self.import_with_reference(source, ReferenceType::PublicationOriginal, publication_id)
@@ -223,6 +239,115 @@ impl Store {
     /// Imports a source file as a retained download.
     pub fn import_retained_download(&self, source: &Path, download_id: &str) -> StoreResult<ImportedContent> {
         self.import_with_reference(source, ReferenceType::RetainedDownload, download_id)
+    }
+
+    /// Promotes a fully written streaming import without copying it again.
+    ///
+    /// The source must be inside the managed temporary directory. The store
+    /// re-verifies the exact bytes and retains them with a `local_import`
+    /// reference until a later publication or download takes ownership.
+    pub fn import_local_staged(
+        &self,
+        source: &Path,
+        content_id: &str,
+        size_bytes: u64,
+        owner_id: &str,
+    ) -> StoreResult<ImportedContent> {
+        validate_content_id(content_id)?;
+        validate_entity_id(owner_id, "owner ID")?;
+        self.config
+            .quota
+            .check_file_size(size_bytes, self.config.max_file_size)?;
+
+        let already_present = self.content_exists(content_id)?;
+        if already_present && self.content(content_id)?.size_bytes != size_bytes {
+            return Err(StoreError::IntegrityMismatch(content_id.to_owned()));
+        }
+        // A database row alone is not enough: the blob may be missing or
+        // corrupt. Reuse only a blob that passes the verified-path check.
+        let already_verified = already_present && self.content_path(content_id).is_ok();
+        let charge = if already_verified { 0 } else { size_bytes };
+        if charge > 0 {
+            self.ensure_quota(charge)?;
+        }
+
+        if already_verified {
+            // The bytes are already stored and verified. The staged copy is
+            // ours to discard; the reference below keeps the existing blob.
+            match fs::remove_file(source) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(StoreError::Io(error)),
+            }
+        } else {
+            self.managed.adopt_staged_file(source, content_id, size_bytes)?;
+        }
+
+        let blob_path = ManagedStore::blob_relative_path(content_id)?;
+        let owner = owner_id.to_owned();
+        let row_content_id = content_id.to_owned();
+        let ref_content_id = content_id.to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "INSERT INTO contents (content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at)
+                 VALUES (?1, ?2, 'verified', ?3, ?4, ?4, ?4)
+                 ON CONFLICT(content_id) DO UPDATE SET
+                     size_bytes = excluded.size_bytes,
+                     state = 'verified',
+                     blob_path = excluded.blob_path,
+                     verified_at = excluded.verified_at,
+                     updated_at = excluded.updated_at",
+                params![row_content_id, size_bytes, blob_path, now],
+            )?;
+            transaction.execute(
+                "INSERT INTO content_refs (content_id, ref_type, owner_id, created_at)
+                 VALUES (?1, 'local_import', ?2, ?3)
+                 ON CONFLICT(content_id, ref_type, owner_id) DO NOTHING",
+                params![ref_content_id, owner, now],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })?;
+
+        Ok(ImportedContent {
+            content_id: content_id.to_owned(),
+            size_bytes,
+            already_present,
+        })
+    }
+
+    /// Returns the absolute path of a locally verified content blob.
+    ///
+    /// The record must be verified and the file size must match the metadata.
+    /// The caller owns only a read handle; it must never modify or move the
+    /// managed file.
+    pub fn content_path(&self, content_id: &str) -> StoreResult<PathBuf> {
+        let record = self.content(content_id)?;
+        if record.state != ContentState::Verified {
+            return Err(StoreError::ContentMissing(content_id.to_owned()));
+        }
+        let path = self.managed.blob_path(content_id)?;
+        let metadata = fs::metadata(&path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                StoreError::ContentMissing(content_id.to_owned())
+            } else {
+                StoreError::Io(error)
+            }
+        })?;
+        if metadata.len() != record.size_bytes {
+            return Err(StoreError::IntegrityMismatch(content_id.to_owned()));
+        }
+        Ok(path)
+    }
+
+    /// Flushes the SQLite write-ahead log to durable storage.
+    pub fn checkpoint(&self) -> StoreResult<()> {
+        self.db.write(|connection| {
+            connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+            Ok(())
+        })
     }
 
     fn import_with_reference(

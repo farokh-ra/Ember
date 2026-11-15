@@ -9,6 +9,10 @@ pub enum ReferenceType {
     ActiveReplica,
     /// A completed download the user chose to retain.
     RetainedDownload,
+    /// Content streamed into the store by the local user and not yet
+    /// published. This keeps the bytes alive until a publication, replica,
+    /// or download reference takes ownership.
+    LocalImport,
 }
 
 impl ReferenceType {
@@ -19,6 +23,7 @@ impl ReferenceType {
             Self::PublicationOriginal => "publication_original",
             Self::ActiveReplica => "active_replica",
             Self::RetainedDownload => "retained_download",
+            Self::LocalImport => "local_import",
         }
     }
 
@@ -29,6 +34,7 @@ impl ReferenceType {
             "publication_original" => Some(Self::PublicationOriginal),
             "active_replica" => Some(Self::ActiveReplica),
             "retained_download" => Some(Self::RetainedDownload),
+            "local_import" => Some(Self::LocalImport),
             _ => None,
         }
     }
@@ -47,6 +53,7 @@ impl ReferenceType {
             Self::PublicationOriginal => "a published original",
             Self::ActiveReplica => "an active replica",
             Self::RetainedDownload => "a retained download",
+            Self::LocalImport => "a local import",
         }
     }
 }

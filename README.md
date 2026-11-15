@@ -5,15 +5,18 @@ a shared Kotlin Multiplatform and Compose Multiplatform interface, a shared Rust
 core, and peer-to-peer networking without a mandatory central account or content
 service.
 
-This repository is at the end of **Stage 07: Publishing, chunk manifests,
-revisions, and tombstones**. The Android and Windows shells still run the shared,
+This repository is at the end of **Stage 08: C ABI, JNI/JNA adapters,
+lifecycle, and streaming**. The Android and Windows shells still run the shared,
 clickable UI prototype with visibly labelled mock data. Underneath it, the Rust
 core now owns an embedded SQLite schema, migrations, a content-addressed managed
 file store, quota accounting, reference-counted cleanup, startup reconciliation,
 metadata export/restore, local Ed25519 identities, stable `nx1...` identity IDs,
 canonical signed records, encrypted identity storage, passphrase-encrypted
-backups, streaming content IDs, chunk manifests, publication revisions, and
-signed tombstones. Downloads, hosting, and networking remain later stages.
+backups, streaming content IDs, chunk manifests, publication revisions, signed
+tombstones, and the versioned native boundary. A C harness, Android JNI shim,
+and Windows JNA adapter exercise the same lifecycle, dispatch, event,
+cancellation, and streaming contract. Networking and hosting remain later
+stages.
 
 ## Current status
 
@@ -31,8 +34,8 @@ signed tombstones. Downloads, hosting, and networking remain later stages.
 | Loading, empty, offline, error, and retry states | Complete on data-driven screens |
 | Accessibility and keyboard support | Implemented; focus, keyboard, and Escape checks passed |
 | Stage 04 desktop test pass | Complete; journeys, five states, themes, and compact layout verified |
-| SQLite schema and transactional migrations | Complete; schema version 3 |
-| Managed content-addressed file store | Complete; atomic import and exclusive lock |
+| SQLite schema and transactional migrations | Complete; schema version 4 |
+| Managed content-addressed file store | Complete; atomic import, no-copy staged adoption, and exclusive lock |
 | Quota, free-space reserve, and file limits | Complete; 10 GiB default, 1 GiB reserve, 4 GiB file cap |
 | Reference-counted deletion and cleanup | Complete; published originals and replicas require confirmation |
 | Crash reconciliation and corrupt-file quarantine | Complete; verified by restart tests |
@@ -42,15 +45,22 @@ signed tombstones. Downloads, hosting, and networking remain later stages.
 | Streaming content IDs and chunk manifests | Complete; raw SHA-256, fixed 1 MiB chunks, signed manifest roots |
 | Publication revisions and signed tombstones | Complete; immutability, attribution, and revision rules |
 | Encrypted identity at rest and backup | Complete; LEK/HKDF at rest, Argon2id/XChaCha20-Poly1305 backup |
+| C ABI and versioned CBOR envelopes | Complete; 17 functions, opaque handles, panic containment |
+| Core lifecycle, dispatch, and event queue | Complete; six methods, four workers, coalescing queue |
+| Streaming import/export through the ABI | Complete; 1 MiB chunks, staged adoption, bounded export |
+| JNI and JNA adapters | Complete on Windows JNA and a Windows-hosted JNI proxy; Android runtime execution deferred |
+| C harness and adapter contract tests | Complete; 100 lifecycle cycles and 2.5 MB round-trip |
 | Formatting, linting, and static analysis | Enforced locally and in CI |
 | CI workflow and dependency review | Defined |
 | Developer setup and contribution guides | Complete |
-| Product features | Mock UI prototypes; storage, crypto, and publication foundations complete, feature backends start in Stage 08 |
+| Product features | Mock UI prototypes; storage, crypto, publication, and native foundations complete, networking starts in Stage 09 |
 
-See [docs/progress/STAGE_07.md](docs/progress/STAGE_07.md) for the exact
+See [docs/progress/STAGE_08.md](docs/progress/STAGE_08.md) for the exact
 evidence and commands used to verify this stage. The byte-level record, identity,
 manifest, tombstone, at-rest, and backup formats are specified in
-[docs/architecture/SIGNED_RECORD_FORMATS.md](docs/architecture/SIGNED_RECORD_FORMATS.md).
+[docs/architecture/SIGNED_RECORD_FORMATS.md](docs/architecture/SIGNED_RECORD_FORMATS.md),
+and the native boundary is specified in
+[docs/architecture/FFI_INTERFACE.md](docs/architecture/FFI_INTERFACE.md).
 
 ## Repository layout
 
@@ -60,7 +70,7 @@ manifest, tombstone, at-rest, and backup formats are specified in
 | `apps/desktopApp` | Windows desktop shell and packaging. |
 | `shared/model` | Serializable DTOs, IDs, events, and redaction helpers. |
 | `shared/core-api` | Platform-independent `NexusCore` contract and fake core. |
-| `shared/core-client` | FFI bridge boundary; native implementation arrives later. |
+| `shared/core-client` | Native JNI/JNA bridge, CBOR codec, event pump, and typed `NexusCore` client. |
 | `shared/presentation` | View models, state reduction, and screen models. |
 | `shared/ui` | Shared Compose screens, components, and theme. |
 | `crates/nexus-*` | Twelve Rust crates for types, crypto, protocol, identity, store, transfer, networking, search, core, FFI, observability, and testkit. |
@@ -107,8 +117,11 @@ The full guide, including the manual path and troubleshooting, is
 After `. .\scripts\dev-env.ps1`:
 
 ```powershell
-# Formatting, static analysis, Android, desktop, and shared tests
+# Formatting, static analysis, native build, Android, desktop, and shared tests
 .\scripts\build.ps1
+
+# Native artifacts, export checks, and the C harness only
+.\scripts\build-native.ps1 -Target All -Configuration Release
 
 # Individual Gradle checks
 .\gradlew.bat spotlessCheck detekt
@@ -129,6 +142,8 @@ Artifacts:
 
 - Android debug APK: `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk`
 - Windows application image: `apps/desktopApp/build/compose/binaries/main/app/NEXUS`
+- Windows native core: `build/native/windows-x64/nexus_core.dll`
+- Android native cores: `build/native/android-arm64-v8a/libnexus_core.so` and `build/native/android-x86_64/libnexus_core.so`
 
 The Windows image is not yet an installer. The Inno Setup per-user installer is
 scheduled for Stage 19, as defined by ADR-0009.
@@ -162,12 +177,14 @@ Every change must pass:
 1. Repository hygiene: no secrets, keystores, signing material, or local paths.
 2. Kotlin formatting with Spotless and ktlint 1.8.0.
 3. Kotlin static analysis with detekt 1.23.8.
-4. Android debug assembly.
-5. Windows desktop application image assembly.
-6. Shared presentation and UI JVM tests.
-7. Rust formatting, Clippy with warnings denied, and workspace tests.
-8. Rust dependency, license, and advisory policy checks.
-9. Conventional Commit pull request titles.
+4. Native Windows and Android artifacts build, required exports are present, and
+   the C harness passes.
+5. Android debug assembly.
+6. Windows desktop application image assembly.
+7. Shared presentation and UI JVM tests, including the native adapter contract.
+8. Rust formatting, Clippy with warnings denied, and workspace tests.
+9. Rust dependency, license, and advisory policy checks.
+10. Conventional Commit pull request titles.
 
 The same commands are used by `.github/workflows/ci.yml`. See
 [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) for the daily
@@ -180,6 +197,8 @@ workflow and release conventions.
 | [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md) | Product scope and v1 requirements. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System, module, crate, storage, security, and lifecycle design. |
 | [docs/architecture/SIGNED_RECORD_FORMATS.md](docs/architecture/SIGNED_RECORD_FORMATS.md) | Exact v1 identity, CBOR, signed-record, manifest, tombstone, at-rest, and backup formats. |
+| [docs/architecture/FFI_INTERFACE.md](docs/architecture/FFI_INTERFACE.md) | C ABI, JNI/JNA mapping, envelopes, events, streaming, and ABI compatibility. |
+| [docs/progress/STAGE_08.md](docs/progress/STAGE_08.md) | Stage 08 scope, architecture, tests, and verification evidence. |
 | [docs/decisions](docs/decisions/README.md) | Accepted architecture decision records. |
 | [docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md) | Repeatable Windows setup and troubleshooting. |
 | [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) | Branches, commits, pull requests, releases, and CI. |
@@ -197,6 +216,7 @@ details. Debug logs must be redacted according to
 
 ## Next stage
 
-Stage 08 adds Kotlin/FFI integration and Android runtime verification for the
-identity, signed-record, manifest, and tombstone layers. It must not begin until
-Stage 07 is reviewed and approved by the project owner.
+Stage 09 adds QUIC/TCP connections, peer authentication, network-change
+handling, and resource limits. It must not begin until Stage 08 is reviewed and
+approved by the project owner. Android JNI runtime verification and remote CI
+execution remain outstanding from Stage 08.

@@ -21,10 +21,22 @@ kotlin {
         commonMain.dependencies {
             api(project(":shared:core-api"))
         }
+        jvmMain.dependencies {
+            implementation(libs.jna)
+        }
         jvmTest.dependencies {
             implementation(kotlin("test"))
             implementation(kotlin("test-junit5"))
             implementation(libs.junit.jupiter)
         }
     }
+}
+
+tasks.withType<Test>().configureEach {
+    val nativeDll =
+        rootProject.layout.projectDirectory
+            .dir("build/native/windows-x64")
+            .file("nexus_core.dll")
+            .asFile
+    systemProperty("nexus.native.path", nativeDll.absolutePath)
 }

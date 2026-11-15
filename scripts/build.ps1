@@ -7,6 +7,7 @@
 param(
     [switch]$SkipGradle,
     [switch]$SkipRust,
+    [switch]$SkipNative,
     [switch]$SkipHygiene,
     [switch]$WithDependencyScan
 )
@@ -43,6 +44,14 @@ function Invoke-NativeStep {
 
 Push-Location $RepoRoot
 try {
+    if (-not $SkipNative) {
+        Write-Host "== Native: Windows and Android artifacts, C harness =="
+        & (Join-Path $PSScriptRoot "build-native.ps1") -Target All -Configuration Release
+        if ($LASTEXITCODE -ne 0) {
+            throw "native build failed with exit code $LASTEXITCODE."
+        }
+    }
+
     if (-not $SkipGradle) {
         Write-Host "== Gradle: format, static analysis, builds, tests =="
         Invoke-NativeStep "Gradle checks" {
