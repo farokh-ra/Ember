@@ -192,7 +192,18 @@ Result: PASS on 2026-11-15.
   reported vulnerabilities.
 - Repository hygiene: PASS, 249 files scanned.
 
-The clean-checkout replay is recorded after the Stage 08 commit.
+### Clean checkout
+
+```text
+.\scripts\verify-clean-checkout.ps1
+```
+
+Result: PASS on 2026-11-15 at Stage 08 commit `6903384`. The local clone built
+the Windows DLL and both Android libraries, passed the C harness, built the
+Android APK and desktop image, passed Spotless, detekt, and all five JVM test
+tasks, passed all 166 Rust tests, and passed hygiene with 248 files scanned.
+The script does not run the dependency scan; that was covered by the full gate
+above.
 
 ## Errors and failed attempts
 
