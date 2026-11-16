@@ -114,6 +114,12 @@ fn status_for(error: &CoreError) -> NexusStatus {
             | StoreError::InvalidConfig(_) => NexusStatus::InvalidArgument,
             _ => NexusStatus::Internal,
         },
+        CoreError::Network(error) => match error.code() {
+            "invalid_config" | "invalid_address" | "missing_peer_id" | "invalid_peer_id" | "message_too_large" => {
+                NexusStatus::InvalidArgument
+            }
+            _ => NexusStatus::Internal,
+        },
         CoreError::NotRunning => NexusStatus::InvalidArgument,
         CoreError::Io(_) | CoreError::Identity(_) | CoreError::Internal(_) => NexusStatus::Internal,
     }

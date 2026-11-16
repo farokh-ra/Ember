@@ -1,0 +1,105 @@
+//! Bounded length-prefixed framing for `/nexus/test/1`.
+//!
+//! The request-response behaviour does not frame messages for us, so this
+//! codec writes a four-byte big-endian length followed by the canonical CBOR
+//! body. Both directions reject empty, truncated, and oversized frames before
+//! allocating.
+
+use std::io;
+
+use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use libp2p::request_response::Codec;
+use libp2p::swarm::StreamProtocol;
+use nexus_protocol::MAX_TEST_MESSAGE_BYTES;
+
+/// Protocol ID of the Stage 09 diagnostic request/response protocol.
+pub const TEST_PROTOCOL_NAME: &str = "/nexus/test/1";
+
+const LENGTH_PREFIX_BYTES: usize = 4;
+
+/// Bounded request/response codec carrying canonical CBOR bodies.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TestCodec;
+
+impl Codec for TestCodec {
+    type Protocol = StreamProtocol;
+    type Request = Vec<u8>;
+    type Response = Vec<u8>;
+
+    async fn read_request<T>(&mut self, _protocol: &Self::Protocol, io: &mut T) -> io::Result<Self::Request>
+    where
+        T: AsyncRead + Unpin + Send,
+    {
+        read_frame(io).await
+    }
+
+    async fn read_response<T>(&mut self, _protocol: &Self::Protocol, io: &mut T) -> io::Result<Self::Response>
+    where
+        T: AsyncRead + Unpin + Send,
+    {
+        read_frame(io).await
+    }
+
+    async fn write_request<T>(
+        &mut self,
+        _protocol: &Self::Protocol,
+        io: &mut T,
+        request: Self::Request,
+    ) -> io::Result<()>
+    where
+        T: AsyncWrite + Unpin + Send,
+    {
+        write_frame(io, &request).await
+    }
+
+    async fn write_response<T>(
+        &mut self,
+        _protocol: &Self::Protocol,
+        io: &mut T,
+        response: Self::Response,
+    ) -> io::Result<()>
+    where
+        T: AsyncWrite + Unpin + Send,
+    {
+        write_frame(io, &response).await
+    }
+}
+
+/// Returns the request-response stream protocol.
+#[must_use]
+pub fn test_protocol() -> StreamProtocol {
+    StreamProtocol::new(TEST_PROTOCOL_NAME)
+}
+
+async fn read_frame<T>(io: &mut T) -> io::Result<Vec<u8>>
+where
+    T: AsyncRead + Unpin + Send,
+{
+    let mut prefix = [0_u8; LENGTH_PREFIX_BYTES];
+    io.read_exact(&mut prefix).await?;
+    let length = usize::try_from(u32::from_be_bytes(prefix)).map_err(|_| invalid_data())?;
+    if length == 0 || length > MAX_TEST_MESSAGE_BYTES {
+        return Err(invalid_data());
+    }
+    let mut body = vec![0_u8; length];
+    io.read_exact(&mut body).await?;
+    Ok(body)
+}
+
+async fn write_frame<T>(io: &mut T, body: &[u8]) -> io::Result<()>
+where
+    T: AsyncWrite + Unpin + Send,
+{
+    if body.is_empty() || body.len() > MAX_TEST_MESSAGE_BYTES {
+        return Err(invalid_data());
+    }
+    let length = u32::try_from(body.len()).map_err(|_| invalid_data())?;
+    io.write_all(&length.to_be_bytes()).await?;
+    io.write_all(body).await?;
+    io.flush().await?;
+    Ok(())
+}
+
+fn invalid_data() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "transport-check frame is out of bounds")
+}

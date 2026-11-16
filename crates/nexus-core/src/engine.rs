@@ -8,12 +8,17 @@ use std::time::Duration;
 
 use nexus_crypto::Value;
 use nexus_identity::{Identity, IdentityVault, LocalEncryptionKey};
+use nexus_net::{Network, NetworkConfig, NetworkState, NetworkStatus, PeerSnapshot};
 use nexus_store::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage, Store, StoreConfig, StoreError, safe_display_name};
 
 use crate::config::CoreConfig;
 use crate::envelope::{MAX_RESPONSE_BYTES, Request, encode_failure, encode_success, error_value};
 use crate::error::{CoreError, DomainCode, DomainError};
 use crate::event::{EventQueue, PendingEvent};
+use crate::network::{
+    CoreNetworkObserver, connected_peer_value, domain_error as network_domain_error, peer_value, status_value,
+    test_reply_value,
+};
 use crate::ops::{CancelOutcome, CancelToken, OPERATION_WORKERS, OperationRegistry, WorkerPool};
 use crate::streaming::{ExportCursor, FinishedImport, ImportError, ImportSession, MAX_STREAM_CHUNK};
 
@@ -106,9 +111,11 @@ pub struct Engine {
     pool: WorkerPool,
     imports: Mutex<HashMap<u64, ImportSession>>,
     exports: Mutex<HashMap<u64, ExportCursor>>,
+    network: Mutex<Option<Arc<Network>>>,
+    network_error: Mutex<Option<&'static str>>,
     next_import: AtomicU64,
     next_export: AtomicU64,
-    dropped_events: AtomicU64,
+    dropped_events: Arc<AtomicU64>,
     shutting_down: AtomicBool,
 }
 
@@ -140,9 +147,11 @@ impl Engine {
             pool,
             imports: Mutex::new(HashMap::new()),
             exports: Mutex::new(HashMap::new()),
+            network: Mutex::new(None),
+            network_error: Mutex::new(None),
             next_import: AtomicU64::new(1),
             next_export: AtomicU64::new(1),
-            dropped_events: AtomicU64::new(0),
+            dropped_events: Arc::new(AtomicU64::new(0)),
             shutting_down: AtomicBool::new(false),
         })
     }
@@ -206,6 +215,7 @@ impl Engine {
                     Value::Map(vec![(Value::Text("reason".to_owned()), Value::Text(reason))]),
                 ));
             }
+            self.start_network();
             Ok(())
         })();
 
@@ -241,6 +251,19 @@ impl Engine {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();
+
+        let network = self
+            .network
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        *self
+            .network_error
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        if let Some(network) = network {
+            network.shutdown();
+        }
 
         let checkpoint = self.store.checkpoint();
         {
@@ -459,6 +482,14 @@ impl Engine {
             0x0102 => self.system_health().map(MethodOutcome::Result),
             0x0103 => self.system_snapshot(&params).map(MethodOutcome::Result),
             0x0401 => self.store_usage().map(MethodOutcome::Result),
+            0x0601 => Ok(MethodOutcome::Result(self.network_status_method()?)),
+            0x0602 => self.network_peers(&params).map(MethodOutcome::Result),
+            0x0603 => self.network_bootstrap_list().map(MethodOutcome::Result),
+            0x0604 => self.network_bootstrap_add(&params),
+            0x0605 => self.network_bootstrap_remove(&params),
+            0x0606 => self.network_reconnect(&params),
+            0x0607 => self.network_connect(&params),
+            0x0608 => self.network_send_test(&params),
             0x0B01 => Ok(MethodOutcome::Result(self.test_echo(&params)?)),
             0x0B02 => self.test_fault(&params),
             _ => Err(CoreError::Unsupported(method_id)),
@@ -466,17 +497,30 @@ impl Engine {
     }
 
     fn system_info(&self) -> Result<Value, CoreError> {
-        let capabilities: Vec<Value> = ["system.info", "system.health", "system.snapshot", "store.usage"]
-            .into_iter()
-            .chain(
-                self.config
-                    .enable_test_methods
-                    .then_some(["test.echo", "test.fault"])
-                    .into_iter()
-                    .flatten(),
-            )
-            .map(|name| Value::Text(name.to_owned()))
-            .collect();
+        let capabilities: Vec<Value> = [
+            "system.info",
+            "system.health",
+            "system.snapshot",
+            "store.usage",
+            "network.status",
+            "network.peers",
+            "network.bootstrap_list",
+            "network.bootstrap_add",
+            "network.bootstrap_remove",
+            "network.reconnect",
+            "network.connect",
+            "network.send_test",
+        ]
+        .into_iter()
+        .chain(
+            self.config
+                .enable_test_methods
+                .then_some(["test.echo", "test.fault"])
+                .into_iter()
+                .flatten(),
+        )
+        .map(|name| Value::Text(name.to_owned()))
+        .collect();
         Ok(Value::Map(vec![
             (
                 Value::Text("core_version".to_owned()),
@@ -525,7 +569,7 @@ impl Engine {
             ),
             (
                 Value::Text("network_state".to_owned()),
-                Value::Text(self.network_state().to_owned()),
+                Value::Text(self.network_state()),
             ),
             (
                 Value::Text("network_enabled".to_owned()),
@@ -623,16 +667,7 @@ impl Engine {
             ));
         }
         if include("network") {
-            entries.push((
-                Value::Text("network".to_owned()),
-                Value::Map(vec![
-                    (
-                        Value::Text("state".to_owned()),
-                        Value::Text(self.network_state().to_owned()),
-                    ),
-                    (Value::Text("peer_count".to_owned()), Value::Unsigned(0)),
-                ]),
-            ));
+            entries.push((Value::Text("network".to_owned()), status_value(&self.network_status())));
         }
         if include("event_queue") {
             entries.push((
@@ -762,12 +797,262 @@ impl Engine {
             .clone()
     }
 
-    fn network_state(&self) -> &'static str {
-        if self.config.network_enabled {
-            "unavailable"
-        } else {
-            "disabled"
+    fn network_snapshot(&self) -> Option<Arc<Network>> {
+        self.network
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn network_status(&self) -> NetworkStatus {
+        if let Some(network) = self.network_snapshot() {
+            return network.status();
         }
+        if self.config.network_enabled {
+            let mut status = NetworkStatus::starting(String::new());
+            status.state = NetworkState::Unavailable;
+            status.last_error = self
+                .network_error
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .map(str::to_owned);
+            status
+        } else {
+            NetworkStatus::disabled()
+        }
+    }
+
+    fn network_state(&self) -> String {
+        self.network_status().state.as_str().to_owned()
+    }
+
+    /// Starts networking after identity and storage work. A networking failure
+    /// never fails core start: the core remains usable offline and the failure
+    /// is reported through `network.state` and `network.status`.
+    fn start_network(&self) {
+        if !self.config.network_enabled {
+            return;
+        }
+        let key = match LocalEncryptionKey::from_slice(&self.secret) {
+            Ok(key) => key,
+            Err(_) => {
+                self.record_network_start_error("local_secret_invalid");
+                return;
+            }
+        };
+        let observer = Arc::new(CoreNetworkObserver::new(
+            Arc::clone(&self.events),
+            Arc::clone(&self.dropped_events),
+        ));
+        let config = NetworkConfig::new(self.config.data_root.clone());
+        match Network::start(config, &key, observer) {
+            Ok(network) => {
+                let status = network.status();
+                *self.network.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(network));
+                *self
+                    .network_error
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+                self.emit_network_state(status.state.as_str(), status.peer_count, status.transports, None);
+            }
+            Err(error) => self.record_network_start_error(error.code()),
+        }
+    }
+
+    fn record_network_start_error(&self, code: &'static str) {
+        *self
+            .network_error
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(code);
+        let transports = NetworkStatus::starting(String::new()).transports;
+        self.emit_network_state("unavailable", 0, transports, Some(code));
+    }
+
+    fn emit_network_state(&self, state: &str, peer_count: usize, transports: Vec<String>, reason: Option<&str>) {
+        let mut entries = vec![
+            (Value::Text("state".to_owned()), Value::Text(state.to_owned())),
+            (
+                Value::Text("peer_count".to_owned()),
+                Value::Unsigned(u64::try_from(peer_count).unwrap_or(u64::MAX)),
+            ),
+            (
+                Value::Text("transports".to_owned()),
+                Value::Array(transports.into_iter().map(Value::Text).collect()),
+            ),
+        ];
+        if let Some(reason) = reason {
+            entries.push((
+                Value::Text("reason".to_owned()),
+                Value::Text(nexus_observability::text(reason)),
+            ));
+        }
+        self.try_emit(PendingEvent::durable("network.state", Value::Map(entries)));
+    }
+
+    fn require_network(&self) -> Result<Arc<Network>, DomainError> {
+        if !self.config.network_enabled {
+            return Err(network_domain_error(&nexus_net::NetError::Disabled));
+        }
+        self.network_snapshot()
+            .ok_or_else(|| network_domain_error(&nexus_net::NetError::Unavailable))
+    }
+
+    fn network_status_method(&self) -> Result<Value, CoreError> {
+        Ok(status_value(&self.network_status()))
+    }
+
+    fn network_peers(&self, params: &Value) -> Result<Value, CoreError> {
+        let limit = optional_unsigned(params, "limit")?.unwrap_or(64);
+        if !(1..=128).contains(&limit) {
+            return Err(CoreError::InvalidArgument("limit must be between 1 and 128"));
+        }
+        let cursor = match map_get(params, "cursor") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .as_text()
+                    .ok_or(CoreError::InvalidArgument("cursor must be text"))?,
+            ),
+        };
+        let mut peers = self.network_snapshot().map_or_else(Vec::new, |network| network.peers());
+        peers.sort_by(|left, right| left.peer_id.cmp(&right.peer_id));
+        let total = peers.len();
+        let start = cursor.map_or(0, |cursor| {
+            peers
+                .iter()
+                .position(|peer| peer.peer_id.as_str() > cursor)
+                .unwrap_or(total)
+        });
+        let selected: Vec<&PeerSnapshot> = peers
+            .iter()
+            .skip(start)
+            .take(usize::try_from(limit).unwrap_or(usize::MAX))
+            .collect();
+        let next_cursor = if start + selected.len() < total {
+            selected
+                .last()
+                .map_or(Value::Null, |peer| Value::Text(peer.peer_id.clone()))
+        } else {
+            Value::Null
+        };
+        Ok(Value::Map(vec![
+            (
+                Value::Text("peers".to_owned()),
+                Value::Array(selected.into_iter().map(peer_value).collect()),
+            ),
+            (Value::Text("next_cursor".to_owned()), next_cursor),
+            (
+                Value::Text("total".to_owned()),
+                Value::Unsigned(u64::try_from(total).unwrap_or(u64::MAX)),
+            ),
+        ]))
+    }
+
+    fn network_bootstrap_list(&self) -> Result<Value, CoreError> {
+        let addresses = self
+            .network_snapshot()
+            .map_or_else(Vec::new, |network| network.bootstrap_list());
+        Ok(bootstrap_value(&addresses))
+    }
+
+    fn network_bootstrap_add(&self, params: &Value) -> Result<MethodOutcome, CoreError> {
+        self.require_running()?;
+        let multiaddr = required_multiaddr(params)?;
+        let network = match self.require_network() {
+            Ok(network) => network,
+            Err(error) => return Ok(MethodOutcome::Domain(error)),
+        };
+        match network.bootstrap_add(&multiaddr) {
+            Ok(()) => Ok(MethodOutcome::Result(bootstrap_value(&network.bootstrap_list()))),
+            Err(error) => Ok(MethodOutcome::Domain(network_domain_error(&error))),
+        }
+    }
+
+    fn network_bootstrap_remove(&self, params: &Value) -> Result<MethodOutcome, CoreError> {
+        self.require_running()?;
+        let multiaddr = required_multiaddr(params)?;
+        let network = match self.require_network() {
+            Ok(network) => network,
+            Err(error) => return Ok(MethodOutcome::Domain(error)),
+        };
+        match network.bootstrap_remove(&multiaddr) {
+            Ok(()) => Ok(MethodOutcome::Result(bootstrap_value(&network.bootstrap_list()))),
+            Err(error) => Ok(MethodOutcome::Domain(network_domain_error(&error))),
+        }
+    }
+
+    fn network_reconnect(&self, params: &Value) -> Result<MethodOutcome, CoreError> {
+        self.require_running()?;
+        let peer_id = match map_get(params, "peer_id") {
+            None | Some(Value::Null) => None,
+            Some(value) => {
+                let peer_id = value
+                    .as_text()
+                    .ok_or(CoreError::InvalidArgument("peer_id must be text"))?;
+                if peer_id.is_empty() || peer_id.len() > 128 {
+                    return Err(CoreError::InvalidArgument("peer_id is out of bounds"));
+                }
+                Some(peer_id.to_owned())
+            }
+        };
+        let network = match self.require_network() {
+            Ok(network) => network,
+            Err(error) => return Ok(MethodOutcome::Domain(error)),
+        };
+        let (op_id, token) = self.ops.begin();
+        let events = Arc::clone(&self.events);
+        let ops = Arc::clone(&self.ops);
+        self.pool
+            .submit(move || run_network_reconnect(&events, &ops, op_id, token, network, peer_id))?;
+        Ok(MethodOutcome::Result(op_accepted(op_id)))
+    }
+
+    fn network_connect(&self, params: &Value) -> Result<MethodOutcome, CoreError> {
+        self.require_running()?;
+        let multiaddr = required_multiaddr(params)?;
+        let network = match self.require_network() {
+            Ok(network) => network,
+            Err(error) => return Ok(MethodOutcome::Domain(error)),
+        };
+        let (op_id, token) = self.ops.begin();
+        let events = Arc::clone(&self.events);
+        let ops = Arc::clone(&self.ops);
+        self.pool.submit(move || {
+            run_network_connect(&events, &ops, op_id, token, network, multiaddr);
+        })?;
+        Ok(MethodOutcome::Result(op_accepted(op_id)))
+    }
+
+    fn network_send_test(&self, params: &Value) -> Result<MethodOutcome, CoreError> {
+        self.require_running()?;
+        let peer_id = map_get(params, "peer_id")
+            .and_then(Value::as_text)
+            .ok_or(CoreError::InvalidArgument("peer_id is required"))?;
+        if peer_id.is_empty() || peer_id.len() > 128 {
+            return Err(CoreError::InvalidArgument("peer_id is out of bounds"));
+        }
+        let payload = match map_get(params, "payload") {
+            Some(Value::Bytes(payload)) => payload.clone(),
+            Some(_) => return Err(CoreError::InvalidArgument("payload must be a byte string")),
+            None => return Err(CoreError::InvalidArgument("payload is required")),
+        };
+        if payload.len() > nexus_protocol::MAX_TEST_PAYLOAD_BYTES {
+            return Ok(MethodOutcome::Domain(network_domain_error(
+                &nexus_net::NetError::MessageTooLarge,
+            )));
+        }
+        let peer_id = peer_id.to_owned();
+        let network = match self.require_network() {
+            Ok(network) => network,
+            Err(error) => return Ok(MethodOutcome::Domain(error)),
+        };
+        let (op_id, token) = self.ops.begin();
+        let events = Arc::clone(&self.events);
+        let ops = Arc::clone(&self.ops);
+        self.pool.submit(move || {
+            run_network_send_test(&events, &ops, op_id, token, network, peer_id, payload);
+        })?;
+        Ok(MethodOutcome::Result(op_accepted(op_id)))
     }
 
     fn require_running(&self) -> Result<(), CoreError> {
@@ -857,6 +1142,177 @@ fn run_test_operation(
             .with_op(op_id),
         );
     }
+    ops.finish(op_id);
+}
+
+fn op_accepted(op_id: u64) -> Value {
+    Value::Map(vec![
+        (Value::Text("op_id".to_owned()), Value::Unsigned(op_id)),
+        (Value::Text("accepted".to_owned()), Value::Bool(true)),
+    ])
+}
+
+fn bootstrap_value(addresses: &[String]) -> Value {
+    Value::Map(vec![(
+        Value::Text("bootstrap".to_owned()),
+        Value::Array(addresses.iter().cloned().map(Value::Text).collect()),
+    )])
+}
+
+fn required_multiaddr(params: &Value) -> Result<String, CoreError> {
+    let multiaddr = map_get(params, "multiaddr")
+        .and_then(Value::as_text)
+        .ok_or(CoreError::InvalidArgument("multiaddr is required"))?;
+    if multiaddr.is_empty() || multiaddr.len() > 512 {
+        return Err(CoreError::InvalidArgument("multiaddr is out of bounds"));
+    }
+    Ok(multiaddr.to_owned())
+}
+
+fn emit_network_terminal(events: &EventQueue, op_id: u64, event_type: &str, data: Value) {
+    let _ = events.push(PendingEvent::durable(event_type, data).with_op(op_id));
+}
+
+fn run_network_connect(
+    events: &EventQueue,
+    ops: &OperationRegistry,
+    op_id: u64,
+    token: Arc<CancelToken>,
+    network: Arc<Network>,
+    multiaddr: String,
+) {
+    if token.is_cancelled() {
+        emit_network_terminal(
+            events,
+            op_id,
+            "network.connect_cancelled",
+            Value::Map(vec![(Value::Text("multiaddr".to_owned()), Value::Text(multiaddr))]),
+        );
+        ops.finish(op_id);
+        return;
+    }
+    let result = network.connect(&multiaddr);
+    if token.is_cancelled() {
+        emit_network_terminal(
+            events,
+            op_id,
+            "network.connect_cancelled",
+            Value::Map(vec![(Value::Text("multiaddr".to_owned()), Value::Text(multiaddr))]),
+        );
+        ops.finish(op_id);
+        return;
+    }
+    let (event_type, data) = match result {
+        Ok(peer) => ("network.connect_completed", connected_peer_value(&peer, &multiaddr)),
+        Err(error) => (
+            "network.connect_failed",
+            Value::Map(vec![
+                (Value::Text("multiaddr".to_owned()), Value::Text(multiaddr.clone())),
+                (
+                    Value::Text("error".to_owned()),
+                    error_value(&network_domain_error(&error)),
+                ),
+            ]),
+        ),
+    };
+    emit_network_terminal(events, op_id, event_type, data);
+    ops.finish(op_id);
+}
+
+fn run_network_send_test(
+    events: &EventQueue,
+    ops: &OperationRegistry,
+    op_id: u64,
+    token: Arc<CancelToken>,
+    network: Arc<Network>,
+    peer_id: String,
+    payload: Vec<u8>,
+) {
+    if token.is_cancelled() {
+        emit_network_terminal(
+            events,
+            op_id,
+            "network.test_cancelled",
+            Value::Map(vec![(Value::Text("peer_id".to_owned()), Value::Text(peer_id))]),
+        );
+        ops.finish(op_id);
+        return;
+    }
+    let result = network.send_test(&peer_id, &payload);
+    if token.is_cancelled() {
+        emit_network_terminal(
+            events,
+            op_id,
+            "network.test_cancelled",
+            Value::Map(vec![(Value::Text("peer_id".to_owned()), Value::Text(peer_id))]),
+        );
+        ops.finish(op_id);
+        return;
+    }
+    let (event_type, data) = match result {
+        Ok(reply) => ("network.test_message", test_reply_value(&reply)),
+        Err(error) => (
+            "network.test_failed",
+            Value::Map(vec![
+                (Value::Text("peer_id".to_owned()), Value::Text(peer_id.clone())),
+                (
+                    Value::Text("error".to_owned()),
+                    error_value(&network_domain_error(&error)),
+                ),
+            ]),
+        ),
+    };
+    emit_network_terminal(events, op_id, event_type, data);
+    ops.finish(op_id);
+}
+
+fn run_network_reconnect(
+    events: &EventQueue,
+    ops: &OperationRegistry,
+    op_id: u64,
+    token: Arc<CancelToken>,
+    network: Arc<Network>,
+    peer_id: Option<String>,
+) {
+    let peer_value = || peer_id.as_ref().map_or(Value::Null, |id| Value::Text(id.clone()));
+    if token.is_cancelled() {
+        emit_network_terminal(
+            events,
+            op_id,
+            "network.reconnect_cancelled",
+            Value::Map(vec![(Value::Text("peer_id".to_owned()), peer_value())]),
+        );
+        ops.finish(op_id);
+        return;
+    }
+    let result = network.reconnect(peer_id.as_deref());
+    if token.is_cancelled() {
+        emit_network_terminal(
+            events,
+            op_id,
+            "network.reconnect_cancelled",
+            Value::Map(vec![(Value::Text("peer_id".to_owned()), peer_value())]),
+        );
+        ops.finish(op_id);
+        return;
+    }
+    let (event_type, data) = match result {
+        Ok(()) => (
+            "network.reconnect_completed",
+            Value::Map(vec![(Value::Text("peer_id".to_owned()), peer_value())]),
+        ),
+        Err(error) => (
+            "network.reconnect_failed",
+            Value::Map(vec![
+                (Value::Text("peer_id".to_owned()), peer_value()),
+                (
+                    Value::Text("error".to_owned()),
+                    error_value(&network_domain_error(&error)),
+                ),
+            ]),
+        ),
+    };
+    emit_network_terminal(events, op_id, event_type, data);
     ops.finish(op_id);
 }
 

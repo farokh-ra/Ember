@@ -10,18 +10,20 @@ name for ABI and format stability: Kotlin packages (`io.nexus`), Rust crates
 (`nexus-*`), the native library (`nexus_core`), and signed record tags
 (`NEXUS-*`).
 
-This repository is at the end of **Stage 08: C ABI, JNI/JNA adapters,
-lifecycle, and streaming**. The Android and Windows shells still run the shared,
+This repository is at the end of **Stage 09: peer identity, transports, and
+direct connections**. The Android and Windows shells still run the shared,
 clickable UI prototype with visibly labelled mock data. Underneath it, the Rust
 core now owns an embedded SQLite schema, migrations, a content-addressed managed
 file store, quota accounting, reference-counted cleanup, startup reconciliation,
 metadata export/restore, local Ed25519 identities, stable `nx1...` identity IDs,
 canonical signed records, encrypted identity storage, passphrase-encrypted
 backups, streaming content IDs, chunk manifests, publication revisions, signed
-tombstones, and the versioned native boundary. A C harness, Android JNI shim,
-and Windows JNA adapter exercise the same lifecycle, dispatch, event,
-cancellation, and streaming contract. Networking and hosting remain later
-stages.
+tombstones, the versioned native boundary, and an authenticated libp2p transport
+stack. A C harness, Android JNI shim, and Windows JNA adapter exercise the same
+lifecycle, dispatch, event, cancellation, and streaming contract. Networking now
+supports QUIC v1 and TCP + Noise + Yamux, direct connections, persisted
+bootstrap peers, and bounded reconnection. Hosting, search, and downloads remain
+later stages.
 
 ## Current status
 
@@ -51,16 +53,22 @@ stages.
 | Publication revisions and signed tombstones | Complete; immutability, attribution, and revision rules |
 | Encrypted identity at rest and backup | Complete; LEK/HKDF at rest, Argon2id/XChaCha20-Poly1305 backup |
 | C ABI and versioned CBOR envelopes | Complete; 17 functions, opaque handles, panic containment |
-| Core lifecycle, dispatch, and event queue | Complete; six methods, four workers, coalescing queue |
+| Core lifecycle, dispatch, and event queue | Complete; fourteen methods, four workers, coalescing queue |
 | Streaming import/export through the ABI | Complete; 1 MiB chunks, staged adoption, bounded export |
+| Device peer identity and encrypted peer key | Complete; independent of the user signing identity |
+| QUIC v1 and TCP/Noise/Yamux transports | Complete on Windows loopback; Android runtime deferred |
+| Authenticated direct connections | Complete; wrong-peer identity rejected before protocols run |
+| Network state, peers, and address reporting | Complete; observed and confirmed addresses kept separate |
+| Bootstrap persistence and reconnection | Complete; 64 entries, 1-60 s backoff, network-change reset |
+| Network method surface and events | Complete; eight `network.*` methods and terminal events |
 | JNI and JNA adapters | Complete on Windows JNA and a Windows-hosted JNI proxy; Android runtime execution deferred |
 | C harness and adapter contract tests | Complete; 100 lifecycle cycles and 2.5 MB round-trip |
 | Formatting, linting, and static analysis | Enforced locally and in CI |
 | CI workflow and dependency review | Defined |
 | Developer setup and contribution guides | Complete |
-| Product features | Mock UI prototypes; storage, crypto, publication, and native foundations complete, networking starts in Stage 09 |
+| Product features | Mock UI prototypes; storage, crypto, publication, native, and network foundations complete, hosting and search later |
 
-See [docs/progress/STAGE_08.md](docs/progress/STAGE_08.md) for the exact
+See [docs/progress/STAGE_09.md](docs/progress/STAGE_09.md) for the exact
 evidence and commands used to verify this stage. The byte-level record, identity,
 manifest, tombstone, at-rest, and backup formats are specified in
 [docs/architecture/SIGNED_RECORD_FORMATS.md](docs/architecture/SIGNED_RECORD_FORMATS.md),
@@ -203,7 +211,7 @@ workflow and release conventions.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System, module, crate, storage, security, and lifecycle design. |
 | [docs/architecture/SIGNED_RECORD_FORMATS.md](docs/architecture/SIGNED_RECORD_FORMATS.md) | Exact v1 identity, CBOR, signed-record, manifest, tombstone, at-rest, and backup formats. |
 | [docs/architecture/FFI_INTERFACE.md](docs/architecture/FFI_INTERFACE.md) | C ABI, JNI/JNA mapping, envelopes, events, streaming, and ABI compatibility. |
-| [docs/progress/STAGE_08.md](docs/progress/STAGE_08.md) | Stage 08 scope, architecture, tests, and verification evidence. |
+| [docs/progress/STAGE_09.md](docs/progress/STAGE_09.md) | Stage 09 scope, architecture, tests, and verification evidence. |
 | [docs/decisions](docs/decisions/README.md) | Accepted architecture decision records. |
 | [docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md) | Repeatable Windows setup and troubleshooting. |
 | [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) | Branches, commits, pull requests, releases, and CI. |
@@ -221,7 +229,9 @@ details. Debug logs must be redacted according to
 
 ## Next stage
 
-Stage 09 adds QUIC/TCP connections, peer authentication, network-change
-handling, and resource limits. It must not begin until Stage 08 is reviewed and
-approved by the project owner. Android JNI runtime verification and remote CI
-execution remain outstanding from Stage 08.
+Stage 10 adds Kademlia-based peer routing, bounded record publication and
+lookup, multi-bootstrap failover, and lookup timeouts on top of the Stage 09
+transports. It must not begin until Stage 09 is reviewed and approved by the
+project owner. Android JNI runtime verification and remote CI execution remain
+outstanding from Stage 08, and Android on-device networking evidence remains
+outstanding from Stage 09.

@@ -3,15 +3,15 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-DEPS-001 |
-| Version | 1.5.0 |
-| Status | Stage 08 C ABI, JNI, JNA, and native packaging dependencies realized; later-stage direct dependencies remain planned |
-| Date | 2026-11-14 |
+| Version | 1.6.0 |
+| Status | Stage 09 networking dependencies realized; later-stage direct dependencies remain planned |
+| Date | 2026-11-16 |
 | Policy source | [ADR-0009](../decisions/ADR-0009-build-packaging-dependency-policy.md) |
 | Architecture | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 
 ## 1. Purpose and scope
 
-This inventory records the direct runtime, test, and build dependencies planned for Ember v1, their pinned compatibility versions, licenses, platform use, purpose, and fallback. Stage 03 realizes the build-baseline dependencies needed by the empty shells and shared foundation. Stage 05 realizes the storage dependencies listed in section 4.1: bundled SQLite through `rusqlite`/`libsqlite3-sys`, CBOR metadata archives, SHA-256 hashing, typed errors, and managed-store locking. Stage 06 realizes the cryptographic primitives, canonical encoding, identity storage, and signed-record validation dependencies: Ed25519, Bech32m, XChaCha20-Poly1305, HKDF, Argon2id, NFC normalization, OS randomness, and secret zeroization. Stage 07 realizes the streaming manifest and verification path through `sha2` plus the existing `nexus-crypto` and `nexus-protocol` crates, and wires both into `nexus-transfer` and `nexus-store`. Stage 08 realizes the FFI boundary through the `jni` crate on both native targets and JNA 5.14.0 on the Windows JVM. Every other row in this table is planned for the stage that implements the owning feature and is not resolved by the current workspace. `Cargo.lock` contains 131 packages, including the twelve workspace crates and the transitive graphs of the realized dependencies.
+This inventory records the direct runtime, test, and build dependencies planned for Ember v1, their pinned compatibility versions, licenses, platform use, purpose, and fallback. Stage 03 realizes the build-baseline dependencies needed by the empty shells and shared foundation. Stage 05 realizes the storage dependencies listed in section 4.1: bundled SQLite through `rusqlite`/`libsqlite3-sys`, CBOR metadata archives, SHA-256 hashing, typed errors, and managed-store locking. Stage 06 realizes the cryptographic primitives, canonical encoding, identity storage, and signed-record validation dependencies: Ed25519, Bech32m, XChaCha20-Poly1305, HKDF, Argon2id, NFC normalization, OS randomness, and secret zeroization. Stage 07 realizes the streaming manifest and verification path through `sha2` plus the existing `nexus-crypto` and `nexus-protocol` crates, and wires both into `nexus-transfer` and `nexus-store`. Stage 08 realizes the FFI boundary through the `jni` crate on both native targets and JNA 5.14.0 on the Windows JVM. Stage 09 realizes the pinned libp2p transport stack and its Tokio and futures support. Every other row in this table is planned for the stage that implements the owning feature and is not resolved by the current workspace. `Cargo.lock` contains 406 packages, including the twelve workspace crates and the transitive graphs of the realized dependencies.
 
 The inventory covers:
 
@@ -66,16 +66,17 @@ Build-only tools may use other licenses because they are not distributed with th
 Stage 03 realizes `tracing` and `tracing-subscriber`; Stage 05 adds the storage
 dependencies listed in section 4.1; Stage 06 adds the crypto, identity, and
 signed-record dependencies; Stage 07 adds the streaming transfer and manifest
-store wiring over those same crates; Stage 08 adds the `jni` shim. Every other
-row in this table is planned for the stage that implements the owning feature and
-is not resolved by the current workspace. `Cargo.lock` contains 131 packages,
+store wiring over those same crates; Stage 08 adds the `jni` shim; Stage 09 adds
+the pinned libp2p transport stack with Tokio and futures. Every other row in
+this table is planned for the stage that implements the owning feature and is
+not resolved by the current workspace. `Cargo.lock` contains 406 packages,
 including the twelve workspace crates and the transitive graphs of the realized
 dependencies.
 
 | Dependency | Pin | License | Platform | Purpose | Fallback |
 |---|---|---|---|---|---|
-| libp2p | 0.57.1 | MIT | Both | Transports, peer identity, DHT, request/response. | Hold 0.56 line; TCP-only configuration. |
-| tokio | 1.54.1 | MIT | Both | Async runtime, timers, synchronization. | Bounded std threads with async bridge. |
+| libp2p | 0.57.1 | MIT | Both | QUIC v1, TCP + Noise + Yamux, DNS, identify, ping, request/response, connection limits. | Hold the 0.56 line; TCP-only configuration. |
+| tokio | 1.54.1 | MIT | Both | Current-thread driver runtime, timers, bounded channels, synchronization. | Bounded std threads with an async bridge. |
 | rusqlite | 0.42.0 | MIT | Both | SQLite access and migrations. | sqlx 0.9 with bundled SQLite. |
 | libsqlite3-sys | 0.40.0 | MIT | Both | Bundled SQLite and FTS5. | System SQLite with verified FTS5. |
 | serde | 1.0.229 | MIT OR Apache-2.0 | Both | Serialization traits and derives. | Manual codec at the boundary. |
@@ -101,7 +102,7 @@ dependencies.
 | fs2 | 0.4.3 | MIT OR Apache-2.0 | Both | Store lock and free-space queries. | Platform-specific file lock and statvfs APIs. |
 | jni | 0.21.1 | MIT OR Apache-2.0 | Both | JNI shim for the C ABI; compiled on Windows for the JVM proxy test and on Android for packaging. | JNA on Android. |
 
-### 4.1 Stage 03, Stage 05, Stage 06, Stage 07, and Stage 08 locked Rust graph
+### 4.1 Stage 03, Stage 05, Stage 06, Stage 07, Stage 08, and Stage 09 locked Rust graph
 
 | Direct crate | Version | License | Purpose |
 |---|---|---|---|
@@ -123,8 +124,11 @@ dependencies.
 | `thiserror` | 2.0.21 | MIT OR Apache-2.0 | Typed crypto, identity, protocol, transfer, and storage errors with actionable context. |
 | `fs2` | 0.4.3 | MIT OR Apache-2.0 | Exclusive managed-store lock and free-space reporting. |
 | `jni` | 0.21.1 | MIT OR Apache-2.0 | Static JNI symbols, byte-array copies, and panic-guarded JNI entry points. |
+| `libp2p` | 0.57.1 | MIT | QUIC v1, TCP + Noise + Yamux, DNS, identify, ping, `/nexus/test/1` request/response, connection limits. Enabled with `dns`, `ed25519`, `identify`, `macros`, `noise`, `ping`, `quic`, `request-response`, `tcp`, `tokio`, and `yamux`. |
+| `tokio` | 1.54.1 | MIT | Current-thread network driver runtime, timers, bounded channels, and one-shot replies. Enabled with `macros`, `net`, `rt`, `sync`, and `time`. |
+| `futures` | 0.3.34 | MIT OR Apache-2.0 | Swarm event stream polling and async I/O traits in the codec. |
 
-`libsqlite3-sys` 0.40.0 is realized transitively and compiles the bundled SQLite amalgamation with FTS5. The SQLite graph adds `bitflags`, `fallible-iterator`, `fallible-streaming-iterator`, `smallvec`, and the build-only `cc`, `find-msvc-tools`, `pkg-config`, `shlex`, and `vcpkg` crates. The CBOR, serde, hashing, and error graphs add `ciborium-io`, `ciborium-ll`, `half`, `zerocopy`, `zerocopy-derive`, `serde_core`, `serde_derive`, `proc-macro2`, `quote`, `syn` 2 and 3, `unicode-ident`, `cfg-if`, `cpufeatures`, `digest`, `block-buffer`, `hybrid-array`, `typenum`, `const-oid`, `crypto-common`, `thiserror-impl`, `winapi`, and `winapi-x86_64-pc-windows-gnu`. The Stage 06 crypto graph adds `aead`, `chacha20`, `poly1305`, `cipher`, `cmov`, `crypto-common`, `curve25519-dalek`, `curve25519-dalek-derive`, `ed25519`, `signature`, `rand_core`, `blake2`, `password-hash`, `phc`, `universal-hash`, `subtle`, `inout`, `base64ct`, `hmac`, and `zeroize_derive`. The Stage 08 JNI graph adds `cesu8`, `combine`, `jni-sys` 0.3.1 and 0.4.1, `log`, `once_cell`, `thiserror` 1.0.69, and `windows-sys` 0.45.0. All are MIT, Apache-2.0, BSD, Zlib, or Unicode-3.0 licensed and are checked by `cargo-deny`. Run `cargo tree -p nexus-core -p nexus-ffi -p nexus-crypto -p nexus-identity -p nexus-protocol -p nexus-transfer -p nexus-store` for the exact realized graph.
+`libsqlite3-sys` 0.40.0 is realized transitively and compiles the bundled SQLite amalgamation with FTS5. The SQLite graph adds `bitflags`, `fallible-iterator`, `fallible-streaming-iterator`, `smallvec`, and the build-only `cc`, `find-msvc-tools`, `pkg-config`, `shlex`, and `vcpkg` crates. The CBOR, serde, hashing, and error graphs add `ciborium-io`, `ciborium-ll`, `half`, `zerocopy`, `zerocopy-derive`, `serde_core`, `serde_derive`, `proc-macro2`, `quote`, `syn` 2 and 3, `unicode-ident`, `cfg-if`, `cpufeatures`, `digest`, `block-buffer`, `hybrid-array`, `typenum`, `const-oid`, `crypto-common`, `thiserror-impl`, `winapi`, and `winapi-x86_64-pc-windows-gnu`. The Stage 06 crypto graph adds `aead`, `chacha20`, `poly1305`, `cipher`, `cmov`, `crypto-common`, `curve25519-dalek`, `curve25519-dalek-derive`, `ed25519`, `signature`, `rand_core`, `blake2`, `password-hash`, `phc`, `universal-hash`, `subtle`, `inout`, `base64ct`, `hmac`, and `zeroize_derive`. The Stage 08 JNI graph adds `cesu8`, `combine`, `jni-sys` 0.3.1 and 0.4.1, `log`, `once_cell`, `thiserror` 1.0.69, and `windows-sys` 0.45.0. The Stage 09 libp2p graph adds the QUIC stack (`quinn`, `quinn-proto`, `quinn-udp`, `rustls`, `rustls-pki-types`, `ring`, `aws-lc-rs` and its build tooling), the Noise and Yamux stack (`snow`, `yamux`, `unsigned-varint`), address and identity crates (`multiaddr`, `multihash`, `libp2p-identity`, `libp2p-swarm`, `libp2p-core`, `libp2p-tls`, `rcgen`), and supporting utilities (`asynchronous-codec`, `futures-timer`, `futures-bounded`, `either`, `pin-project-lite`, `socket2`, `if-watch`, `hickory-resolver`, `data-encoding`, `nix`, and platform-specific `windows-sys`/`windows` crate lines). All are MIT, Apache-2.0, BSD, ISC, Zlib, Unicode-3.0, or compatible permissive licenses and are checked by `cargo-deny`. Run `cargo tree -p nexus-net -p nexus-core -p nexus-ffi -p nexus-crypto -p nexus-identity -p nexus-protocol -p nexus-transfer -p nexus-store` for the exact realized graph.
 
 ## 5. Kotlin, Compose, and JVM dependencies
 
@@ -219,27 +223,28 @@ Update cadence:
 - Major updates require an ADR or an amendment to this inventory and a cross-platform build.
 - Lockfiles are committed. Release builds use `--locked` and fail on an unlocked dependency.
 
-## 10. Stage 03, Stage 05, Stage 06, Stage 07, and Stage 08 verification status
+## 10. Stage 03, Stage 05, Stage 06, Stage 07, Stage 08, and Stage 09 verification status
 
 Stage 03 verifies the build baseline, Stage 05 verifies the realized storage
 graph, Stage 06 verifies the realized crypto and identity graph, Stage 07
-verifies the streaming manifest, transfer, and store integration, and Stage 08
-verifies the C ABI, JNI/JNA adapters, and native packaging. Feature-specific
-verification is deferred to the stage that activates the dependency, so the
-project does not claim runtime evidence it does not have.
+verifies the streaming manifest, transfer, and store integration, Stage 08
+verifies the C ABI, JNI/JNA adapters, and native packaging, and Stage 09
+verifies the pinned libp2p transport graph. Feature-specific verification is
+deferred to the stage that activates the dependency, so the project does not
+claim runtime evidence it does not have.
 
 | Task | Stage | Status and evidence |
 |---|---|---|
 | Install and record the exact JDK, Gradle, Rust, NDK, and local linker versions. | 03 | Complete. `docs/progress/STAGE_03.md` records the exact versions. MSVC and the Windows SDK are absent locally; CI and release remain MSVC. |
-| Generate `Cargo.lock`; confirm the realized Rust graph resolves. | 03, 05, 06, 07, 08 | Complete. Stage 08 resolves 131 packages; `cargo tree -p nexus-core -p nexus-ffi -p nexus-crypto -p nexus-identity -p nexus-protocol -p nexus-transfer -p nexus-store` and `cargo test --workspace` pass. |
-| Run `cargo deny check` and `cargo audit`; record the transitive license and advisory reports. | 03, 05, 06, 07, 08 | Complete for the realized tracing, storage, crypto, transfer, and JNI graphs. Stage 08 reports `advisories ok, bans ok, licenses ok, sources ok`; `cargo audit` scanned 131 dependencies with no vulnerability reported. |
+| Generate `Cargo.lock`; confirm the realized Rust graph resolves. | 03, 05, 06, 07, 08, 09 | Complete. Stage 09 resolves 406 packages; `cargo tree -p nexus-net -p nexus-core -p nexus-ffi -p nexus-crypto -p nexus-identity -p nexus-protocol -p nexus-transfer -p nexus-store` and `cargo test --workspace` pass. |
+| Run `cargo deny check` and `cargo audit`; record the transitive license and advisory reports. | 03, 05, 06, 07, 08, 09 | Complete for the realized tracing, storage, crypto, transfer, JNI, and libp2p graphs. Stage 09 reports `advisories ok, bans ok, licenses ok, sources ok` after documenting one accepted unmaintained warning (`paste`, RUSTSEC-2024-0436, Linux-only through `if-watch`/netlink). `cargo audit` scanned 406 dependencies with no vulnerability reported and one allowed warning. |
 | Confirm the committed Ed25519, Bech32m, canonical CBOR, signed-record, content, manifest, tombstone, at-rest, and backup vectors. | 06, 07 | Complete on Windows. `nexus-crypto`, `nexus-identity`, `nexus-protocol`, `nexus-transfer`, and `nexus-store` assert all vectors; Android runtime cross-verification remains deferred. |
-| Confirm secret material stays out of SQLite, logs, temporary files, and Debug output. | 06, 08 | Complete in Rust and the native create path. The identity file is encrypted with a host-supplied LEK, temporary identity writes are removed on failure, secret types redact `Debug`, and `NativeCoreClient` zeroes the caller's secret after create. |
+| Confirm secret material stays out of SQLite, logs, temporary files, and Debug output. | 06, 08, 09 | Complete in Rust and the native create path. The identity file and the device peer key are encrypted with a host-supplied LEK, temporary key writes are removed on failure, secret types redact `Debug`, and `NativeCoreClient` zeroes the caller's secret after create. |
 | Confirm FTS5, WAL, and bundled SQLite compile and run on Windows x64. | 05 | Complete. `nexus-store` builds bundled SQLite 3.x through `libsqlite3-sys` 0.40.0, applies WAL, foreign keys, a busy timeout, and a bounded cache, and creates the FTS5 `search_index` table in migration 2. All 37 `nexus-store` tests pass on the local GNU/MinGW host. |
 | Confirm content IDs, chunk manifests, manifest roots, revisions, and tombstones round-trip and reject corruption. | 07 | Complete on Windows. `nexus-transfer` and `nexus-store` assert the committed 2.5 MB vector, one-byte change, chunk corruption, reordering, truncation, root mismatch, immutable publications, monotonic tombstones, manifest repair, and reconciliation quarantine. |
 | Confirm FTS5, WAL, and bundled SQLite compile for Android arm64 and x86_64. | 05, 08 | Complete for compilation. `scripts/build-native.ps1` cross-compiles bundled SQLite into both Android `.so` files; runtime storage is not exercised because no emulator or device is available. |
 | Confirm the CBOR metadata manifest and archive hashes round-trip. | 05 | Complete. `data_007_metadata_export_and_restore_round_trip` reads the archive magic, manifest length, raw snapshot hash, and CBOR manifest, then restores into a separate store and verifies its contents. |
-| Confirm QUIC builds with the chosen crypto provider on both platforms, or activate the TCP fallback. | 09 | Deferred; libp2p is not a dependency yet. |
+| Confirm QUIC builds with the chosen crypto provider on both platforms, or activate the TCP fallback. | 09 | Complete for compilation. libp2p 0.57.1 builds QUIC with Quinn and rustls on Windows; `nexus-net` and `nexus-core` prove QUIC and TCP/Noise/Yamux on Windows loopback. Both Android `.so` files cross-build with the same graph; on-device QUIC remains deferred. |
 | Confirm JNA 5.14.0 loads the Windows DLL and JNI loads the Android `.so`. | 08 | JNA and the JNI shim load `nexus_core.dll` on a Windows JVM and pass the shared contract. Android `.so` loading is deferred until an emulator or device is available. |
 | Confirm Android Rust cross-compilation and native library packaging. | 08 | Complete for arm64-v8a and x86_64. Both `libnexus_core.so` files build, package, and export-check; runtime execution is deferred. |
 | Confirm the C ABI compiles and runs through an independent C consumer. | 08 | Complete on Windows. The C harness compiles against `nexus_core.h` with `-Wall -Wextra -Werror`, passes 100 lifecycle cycles, and verifies events, errors, panic containment, cancellation, and streaming. |

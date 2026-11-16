@@ -48,4 +48,7 @@ pub enum ProtocolError {
     /// A tombstone did not match the publication it withdraws.
     #[error("tombstone does not match the publication it withdraws")]
     TombstoneMismatch,
+    /// A bounded transport-check message was malformed or oversized.
+    #[error("transport-check message is malformed")]
+    InvalidWireMessage,
 }

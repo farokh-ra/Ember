@@ -3,11 +3,22 @@ name = "nexus-net"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "libp2p networking and peer discovery"
+description = "libp2p networking, authenticated peer connections, and connection diagnostics"
 publish = false
 
 [lints]
 workspace = true
 
 [dependencies]
-nexus-types.workspace = true
+futures.workspace = true
+libp2p.workspace = true
+nexus-crypto.workspace = true
+nexus-identity.workspace = true
+nexus-protocol.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+nexus-identity.workspace = true
