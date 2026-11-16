@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 nexus-crypto.workspace = true
 nexus-identity.workspace = true
+nexus-net.workspace = true
 nexus-observability.workspace = true
 nexus-protocol.workspace = true
 nexus-store.workspace = true

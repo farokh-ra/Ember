@@ -16,7 +16,7 @@
 
 This document defines the first-release architecture for Ember: a local-first, peer-to-peer file publishing and discovery application for Android and Windows. It covers the application shells, the shared Kotlin/Compose layer, the Rust core, storage, networking, transfer, replication, search, security boundaries, lifecycle, packaging, and verification strategy.
 
-Stage 02 is a design stage. No application, Rust, or network code exists yet. Build and runtime evidence begins in Stage 03 and continues through Stage 19. Statements in this document are design commitments unless they explicitly cite completed evidence.
+Stage 02 produced this design commitment. Build and runtime evidence begins in Stage 03 and continues through Stage 19; each realized stage is recorded in `docs/progress`.
 
 The architecture must satisfy three exit criteria:
 
@@ -182,12 +182,13 @@ No operation creates an unbounded thread. No callback re-enters the JVM from a R
 Core:     Created -> Starting -> Running -> Stopping -> Stopped -> Destroyed
                           \-> Failed
 
-Network:  Stopped -> Starting -> Online -> Degraded -> Offline
+Network:  Disabled -> Starting -> Online -> Degraded -> Unavailable -> Stopping
                           \-> Failed
 ```
 
 - Core state and network state are separate. A running core can be offline.
-- `Online` requires a usable path or peer. `Degraded` means partial connectivity or bounded lookup failures. The UI never infers online state from a cached record.
+- `Online` requires at least one connected peer. `Degraded` means listeners are up but no peer is connected. The UI never infers online state from a cached record.
+- Stage 09 realizes the network names `disabled`, `starting`, `online`, `degraded`, `unavailable`, and `stopping`; `failed` remains a terminal start outcome reported through `unavailable` plus `last_error`.
 - `stop` pauses transfers, persists verified progress, stops networking, flushes SQLite, and zeroizes keys.
 - `start` and `stop` are idempotent; `destroy` releases the handle.
 

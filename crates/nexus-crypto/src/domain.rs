@@ -17,6 +17,8 @@ pub const MANIFEST: &[u8] = b"NEXUS-MANIFEST-v1";
 pub const BACKUP: &[u8] = b"NEXUS-BACKUP-v1";
 /// Info string for deriving the identity-at-rest key from the LEK.
 pub const IDENTITY_KEY: &[u8] = b"NEXUS-IDENTITY-KEY-v1";
+/// Info string for deriving the device peer-key-at-rest key from the LEK.
+pub const PEER_KEY: &[u8] = b"NEXUS-PEER-KEY-v1";
 /// Domain tag for the publication DHT key.
 pub const DHT_PUBLICATION: &[u8] = b"NEXUS-DHT-PUB-v1";
 /// Domain tag for the tombstone DHT key.
@@ -41,6 +43,8 @@ pub enum DomainTag {
     Backup,
     /// Identity-at-rest key derivation.
     IdentityKey,
+    /// Device peer-key-at-rest key derivation.
+    PeerKey,
     /// Publication DHT key derivation.
     DhtPublication,
     /// Tombstone DHT key derivation.
@@ -61,6 +65,7 @@ impl DomainTag {
             Self::Manifest => MANIFEST,
             Self::Backup => BACKUP,
             Self::IdentityKey => IDENTITY_KEY,
+            Self::PeerKey => PEER_KEY,
             Self::DhtPublication => DHT_PUBLICATION,
             Self::DhtTombstone => DHT_TOMBSTONE,
             Self::DhtProfile => DHT_PROFILE,
@@ -78,6 +83,7 @@ impl DomainTag {
             Self::Manifest => "NEXUS-MANIFEST-v1",
             Self::Backup => "NEXUS-BACKUP-v1",
             Self::IdentityKey => "NEXUS-IDENTITY-KEY-v1",
+            Self::PeerKey => "NEXUS-PEER-KEY-v1",
             Self::DhtPublication => "NEXUS-DHT-PUB-v1",
             Self::DhtTombstone => "NEXUS-DHT-TOMB-v1",
             Self::DhtProfile => "NEXUS-DHT-PROFILE-v1",
@@ -111,6 +117,7 @@ mod tests {
             DomainTag::Manifest,
             DomainTag::Backup,
             DomainTag::IdentityKey,
+            DomainTag::PeerKey,
             DomainTag::DhtPublication,
             DomainTag::DhtTombstone,
             DomainTag::DhtProfile,

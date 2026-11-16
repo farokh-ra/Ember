@@ -1,6 +1,10 @@
 [advisories]
 version = 2
 yanked = "deny"
+# `paste` is unmaintained, not vulnerable. It enters the graph only through
+# if-watch -> netlink on Linux and has no safe upgrade upstream yet. Remove
+# this exception when the libp2p/if-watch line drops it.
+ignore = ["RUSTSEC-2024-0436"]
 
 [licenses]
 version = 2

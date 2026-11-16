@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-FFI-001 |
-| Version | 1.1.0 (ABI 1) |
-| Status | Implemented in Stage 08; Android runtime verification deferred |
-| Date | 2026-11-14 |
+| Version | 1.2.0 (ABI 1) |
+| Status | Implemented through Stage 09; Android runtime verification deferred |
+| Date | 2026-11-16 |
 | Header | [nexus_core.h](nexus_core.h) |
 | Related | [ADR-0003](../decisions/ADR-0003-ffi-c-abi-jni-jna.md), [Architecture](../ARCHITECTURE.md) |
 
@@ -87,7 +87,7 @@ Streaming functions are defined in section 8.
 - `nexus_core_create` validates the config, copies the local secret into zeroizing memory, opens the database and store, runs migrations, and returns a handle. It does not start networking.
 - The config is CBOR and contains app-private paths, locale, network settings, quota, and log level. It never contains the local secret. The required `abi_version` is checked before any directory, database, or network work, so a mismatch cannot create the data root.
 - The local secret is exactly 32 bytes. A different length returns `NEXUS_STATUS_INVALID_ARGUMENT`. The host zeroes its copy after the call.
-- `start` loads the identity, starts networking if enabled, recovers download state, and schedules replica verification. It is idempotent. Stage 08 starts the local lifecycle only; transport and replica work arrive in later stages.
+- `start` loads the identity, starts networking if enabled, recovers download state, and schedules replica verification. It is idempotent. Since Stage 09, `network_enabled` starts the transport stack; a networking failure never fails `start`. The core remains usable offline and reports the failure as `network.state` = `unavailable` with a stable `last_error` code.
 - `stop` is idempotent and safe to call from the event-pump shutdown path. It closes the event queue after flushing durable state and does not destroy the handle.
 - `destroy` stops if needed, stops the event queue, and removes the handle. Double destroy returns `NEXUS_STATUS_INVALID_HANDLE`; an unknown handle is rejected by every call helper before dispatch.
 - A handle is valid until `destroy` returns. No concurrent operation may use a handle after destroy begins.
@@ -103,7 +103,7 @@ The create-time config is a canonical CBOR text-keyed map with a maximum of 64 K
 | `app_version` | text | No | 1-64 bytes; defaults to `0.0.0`. |
 | `locale` | text | No | 1-35 bytes; defaults to `en`. |
 | `log_level` | text | No | `trace`, `debug`, `info`, `warn`, or `error`; defaults to `info`. |
-| `network_enabled` | bool | No | Recorded for `system.health` and future stages; Stage 08 starts no transport. Defaults to `false`. |
+| `network_enabled` | bool | No | Starts QUIC and TCP/Noise/Yamux transports with the core. A start failure never fails `start`; it is reported through `network.status`. Defaults to `false`. |
 | `quota_bytes` | uint | No | 1-500 GiB; defaults to 10 GiB. |
 | `enable_test_methods` | bool | No | Exposes `test.*`; defaults to `false`. Release callers must leave this false. |
 
@@ -222,12 +222,14 @@ All production methods are available on both Android and Windows. Method IDs are
 | 0x0503 | `publication.get` | S | `publication_id` | Local or cached verified record and tombstone state. |
 | 0x0504 | `publication.list_local` | S | `cursor`, `limit` | Local publications with revision and serving state. |
 | 0x0505 | `publication.lookup` | A | `publication_id` | `publication.lookup_completed` with verified record and freshness. |
-| 0x0601 | `network.status` | S | none | Network state, peer count, transports, bootstrap summary. |
-| 0x0602 | `network.peers` | S | `cursor`, `limit` | Observed peers, addresses, direction, last seen. |
+| 0x0601 | `network.status` | S | none | Network state, local peer ID, transports, listen/observed/confirmed addresses, peer and connection counts, counters, last error. |
+| 0x0602 | `network.peers` | S | `cursor`, `limit` | Observed peers with state, direction, transport, address, last seen, RTT, protocols, agent version. |
 | 0x0603 | `network.bootstrap_list` | S | none | Configured bootstrap and manual peers. |
-| 0x0604 | `network.bootstrap_add` | S | `multiaddr` | Validated and persisted address. |
+| 0x0604 | `network.bootstrap_add` | S | `multiaddr` | Validated and persisted address; updated list. |
 | 0x0605 | `network.bootstrap_remove` | S | `multiaddr` | Updated list. |
-| 0x0606 | `network.reconnect` | A | none | `network.reconnect_completed` or bounded failure. |
+| 0x0606 | `network.reconnect` | A | `peer_id?` | `network.reconnect_completed` or bounded failure. |
+| 0x0607 | `network.connect` | A | `multiaddr` | `network.connect_completed` with peer ID, transport, and address. |
+| 0x0608 | `network.send_test` | A | `peer_id`, `payload` (bytes) | `network.test_message` with echoed payload and round-trip time. |
 | 0x0701 | `discovery.explore` | A | `category?`, `sort`, `cursor`, `limit` | `discovery.page` and `discovery.completed` with coverage. |
 | 0x0702 | `search.query` | A | `query`, `filters`, `cursor`, `limit` | `search.page` and `search.completed` with coverage. |
 | 0x0703 | `search.cancel` | S | `op_id` | Cancellation accepted. |
@@ -251,9 +253,22 @@ All production methods are available on both Android and Windows. Method IDs are
 
 Method IDs are grouped by domain. A future minor ABI may add methods in unused IDs; a released ID is never renumbered. Unknown IDs return `NEXUS_STATUS_UNSUPPORTED` with a domain error.
 
-Stage 08 implements `system.info`, `system.health`, `system.snapshot`, `store.usage`, `test.echo`, and `test.fault`. These six IDs are the whole callable surface of ABI 1 in this build; every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
+Stage 09 implements fourteen callable methods: `system.info`, `system.health`, `system.snapshot`, `store.usage`, the eight `network.*` methods above, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
 
-### 6.1 Async operation semantics
+### 6.1 Network method semantics
+
+- `network.status` is always callable. Without a running network it returns `disabled` when `network_enabled` is false, otherwise `unavailable` with `last_error` carrying the start-failure code (for example `peer_key_invalid`).
+- `listen_addresses` are local listeners. `observed_addresses` are addresses peers reported for this node. `confirmed_addresses` are only addresses validated end to end. The core never reports an address as publicly reachable or dialable from the internet; an empty `confirmed_addresses` list means exactly that.
+- Network states are `disabled`, `starting`, `online` (at least one connected peer), `degraded` (listeners up, no peers), `unavailable`, and `stopping`. Peer states are `connecting`, `connected`, `disconnected`, and `failed`.
+- `bootstrap_add` requires a complete `/p2p/<peer-id>` multiaddr, persists the list in the data root, and dials with exponential backoff from 1 s to 60 s. `bootstrap_remove` removes it. Both return the updated `{bootstrap: [...]}` list.
+- `network.reconnect` without `peer_id` re-dials every bootstrap target; with `peer_id` it retries that peer if it is known. `network.connect` dials one explicit multiaddr. `network.send_test` sends the bounded `/nexus/test/1` payload to one connected peer.
+- Each dial is bounded by the configured connect timeout (10 s by default) and each test exchange by the request timeout (8 s by default). A failed dial or exchange never stops the core or any other peer connection.
+- A dial that authenticates to a different peer identity than the one in the multiaddr fails with `verification_failed` and details `net_code` = `wrong_peer_id`; the mismatched peer is never recorded as connected.
+- Operational network failures (`disabled`, `unavailable`, `timeout`, `connection_failed`, `wrong_peer_id`, `peer_not_found`, `not_connected`, `rejected`, `message_too_large`) return domain failures. Malformed parameters, such as a missing `multiaddr` field or a payload of the wrong type, remain ABI-level `NEXUS_STATUS_INVALID_ARGUMENT`.
+- `network.status.last_error` and every network domain error carry small stable codes (`net_code`) without socket details, addresses of unrelated peers, or key material.
+- The Stage 09 stack listens on QUIC v1 and TCP with Noise and Yamux. mDNS is disabled in v1; discovery uses the persisted bootstrap list and explicit connects.
+
+### 6.2 Async operation semantics
 
 - `invoke` for an async method validates the request and returns a success response containing `op_id` and any immediately known IDs, such as `download_id`.
 - The operation then runs on a fixed pool of four worker threads. It emits zero or more progress events and exactly one terminal event: `*.completed`, `*.failed`, or `*.cancelled`.
@@ -279,6 +294,8 @@ Stage 08 implements `system.info`, `system.health`, `system.snapshot`, `store.us
 | `permission_denied` | After user action | Missing platform permission or inaccessible picker result. |
 | `locked` | After user action | Identity is locked because the LEK is unavailable. |
 | `internal` | With diagnostics | Guarded core fault. |
+
+Network failures add a `net_code` detail from a small stable set: `disabled`, `invalid_config`, `invalid_address`, `missing_peer_id`, `invalid_peer_id`, `message_too_large`, `peer_key_locked`, `peer_key_unavailable`, `peer_key_invalid`, `not_running`, `busy`, `network_unavailable`, `timeout`, `connection_failed`, `wrong_peer_id`, `unsupported_protocol`, `not_found`, `not_connected`, `rejected`, `io_error`, `crypto_error`, and `driver_failed`. A wrong remote identity maps to `verification_failed` with `net_code` = `wrong_peer_id`.
 
 ## 8. Streaming file APIs
 
@@ -355,7 +372,7 @@ NexusStatus nexus_core_export_close(
 
 Events use the envelope in section 5.4.
 
-Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
+Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
 
 | Event | Meaning | Data |
 |---|---|---|
@@ -364,8 +381,17 @@ Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stop
 | `identity.locked` | LEK or identity unavailable. | `reason` |
 | `identity.backup_ready` | Backup export completed. | `backup_bytes`, `format_version` |
 | `identity.restored` | Backup restore completed. | `identity_id` |
-| `network.state` | Network state changed. | `state`, `peer_count`, `transports` |
-| `network.peer_event` | Peer connected, disconnected, or failed. | `peer_id`, `event`, `reason?` |
+| `network.state` | Network state changed. | `state`, `peer_count`, `transports`, `reason?` |
+| `network.peer_event` | Peer connected, disconnected, or failed. | `peer_id`, `event`, `direction?`, `transport?`, `reason?` |
+| `network.reconnect_completed` | Reconnect request finished. | `peer_id` (null for all bootstrap targets) |
+| `network.reconnect_failed` | Reconnect request failed. | `peer_id`, `error` |
+| `network.reconnect_cancelled` | Reconnect request cancelled. | `peer_id` |
+| `network.connect_completed` | Direct connection established and authenticated. | `peer_id`, `transport`, `remote_address`, `established_ms`, `multiaddr` |
+| `network.connect_failed` | Direct connection failed or identity did not match. | `multiaddr`, `error` |
+| `network.connect_cancelled` | Direct connection cancelled. | `multiaddr` |
+| `network.test_message` | Transport-check exchange completed. | `peer_id`, `payload`, `round_trip_ms` |
+| `network.test_failed` | Transport-check exchange failed. | `peer_id`, `error` |
+| `network.test_cancelled` | Transport-check exchange cancelled. | `peer_id` |
 | `publication.published` | Publication stored and announcement attempted. | `publication_id`, `content_id`, `announcement` |
 | `publication.unpublished` | Tombstone stored and announced. | `publication_id`, `tombstone_id` |
 | `download.started` | Download accepted. | `download_id`, `publication_id`, `content_id` |
@@ -460,6 +486,7 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 
 - The local secret is passed as a separate buffer, never inside config CBOR.
 - The host zeroes the Kotlin byte array immediately after `create`. The core zeroizes its copy after deriving the key.
+- The device peer key is separate from the user signing identity, is stored encrypted at `network/peer_key.enc`, and is never included in identity backup or restore.
 - Config, requests, and events never contain private keys, passphrases, or full identity backups except the explicit backup export result.
 - Backup bytes are returned only to the requesting operation and are not logged or cached.
 - Error details and logs redact local paths, keys, and unnecessary peer identifiers.
@@ -470,7 +497,7 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 
 ## 13. Verification plan
 
-| Stage | Check | Stage 08 status |
+| Stage | Check | Status |
 |---|---|---|
 | 08 | C harness compiles against the header and exercises lifecycle, invoke, events, streaming, and errors. | Passed on Windows. |
 | 08 | Android JNI and Windows JNA pass the same contract suite. | Windows JNA passed. The JNI shim passed through a Windows-hosted JVM proxy. Android runtime execution is deferred. |
@@ -478,8 +505,11 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 | 08 | 100 start/stop cycles show no leaked memory, threads, or handles. | Passed in the Rust C ABI test and C harness. |
 | 08 | A forced panic returns an internal error without unwinding into the JVM. | Passed through the C ABI, JNI proxy, and JNA. |
 | 08 | Streaming import/export round-trips with 1 MiB bounds. | Passed at 2.5 MB in Rust, C, JNI proxy, and JNA. |
+| 09 | Two nodes connect and exchange a test message over QUIC and over TCP/Noise/Yamux. | Passed in `nexus-net` and `nexus-core` loopback tests. |
+| 09 | A dial that authenticates to the wrong peer identity fails with `verification_failed` and leaves the core usable. | Passed in the `nexus-core` Stage 09 suite. |
+| 09 | Unreachable peers, a peer restart, and repeatable start/stop do not crash or hang the node. | Passed in the `nexus-net` Stage 09 suite. |
 | 12 | Import/export streaming handles a 4 GiB file with bounded memory. | Not yet exercised at that size. |
 | 19 | Fuzzing covers malformed CBOR, oversized buffers, invalid handles, and cancellation races. | Not yet implemented. |
 
 The detailed evidence, commands, and test counts are in
-[STAGE_08.md](../progress/STAGE_08.md).
+[STAGE_08.md](../progress/STAGE_08.md) and [STAGE_09.md](../progress/STAGE_09.md).

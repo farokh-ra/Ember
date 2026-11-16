@@ -132,6 +132,25 @@ All notable changes to Ember are recorded here. The format follows
 - 35 new Stage 08 Rust tests and six new JVM tests, for 166 Rust and 76 JVM
   tests total.
 - Stage 08 evidence record.
+- An encrypted device peer key at `network/peer_key.enc`, independent of the
+  user signing identity and excluded from identity backup and restore.
+- Pinned libp2p `0.57.1` transports: QUIC v1 preferred and TCP + Noise + Yamux
+  fallback, with DNS resolution and identify/ping health checks.
+- Authenticated direct connections, explicit multiaddress dialing, and
+  wrong-peer-identity rejection before application protocols run.
+- A bounded `/nexus/test/1` request/response exchange with a 4 KiB payload cap,
+  an 8 KiB frame cap, and canonical CBOR.
+- Network and peer state reporting, including separate listen, observed, and
+  confirmed address classes and stable counters.
+- Persisted bootstrap and manual peers in `network/bootstrap.list`, bounded to
+  64 entries, with atomic add/remove.
+- Exponential reconnect backoff from 1 s to 60 s, network-change reset, and a
+  bounded synchronous driver API.
+- Connection, stream, frame, request-rate, and idle-timeout limits.
+- Eight `network.*` core methods and the `network.state`, `network.peer_event`,
+  and `network.reconnect_*` / `network.connect_*` / `network.test_*` events.
+- 35 new Stage 09 Rust tests, for 201 Rust tests total.
+- Stage 09 evidence record.
 
 ### Changed
 
@@ -157,6 +176,14 @@ All notable changes to Ember are recorded here. The format follows
   publications are immutable, and verified staged imports can be retained.
 - The full local gate now builds Windows and Android native artifacts and runs
   the C harness before Gradle.
+- `network_enabled` now starts the transport stack. A networking failure never
+  fails core start; the core stays usable offline and reports the failure through
+  `network.status`.
+- The protocol version is now `0.1.0-stage-09`; the ABI remains 1.
+- The committed `Cargo.lock` now resolves 406 packages, and the dependency and
+  license inventory is at version 1.6.0. One unmaintained, non-vulnerable
+  Linux-only `paste` advisory is documented in `deny.toml`.
+- The FFI interface document is at version 1.2.0 with fourteen callable methods.
 
 ### Fixed
 
@@ -194,6 +221,16 @@ All notable changes to Ember are recorded here. The format follows
   a wrong passphrase returns one generic failure.
 - The UI copy distinguishes a verified signature from real-world identity and
   states that v1 has no automatic rotation or central revocation.
+- The device peer key is encrypted at rest with `DomainTag::PeerKey` and the
+  local encryption key; it is never included in backups, exports, logs, or
+  diagnostics.
+- Both transports authenticate the remote peer before any application protocol
+  runs, and a mismatched peer identity is rejected without being recorded as
+  connected.
+- Status reporting keeps observed and confirmed addresses separate and never
+  claims public reachability without evidence.
+- Test messages, frames, bootstrap entries, listen addresses, connection counts,
+  and per-peer inbound requests are bounded.
 
 ### Known limitations
 
@@ -203,6 +240,14 @@ All notable changes to Ember are recorded here. The format follows
 - Networking, publishing, transfer, hosting, and search behavior are not
   implemented yet. Stage 08 provides the native boundary, lifecycle, events,
   streaming, and test methods only.
+- The network layer is implemented and tested on Windows loopback, but the
+  product screens are still mock content and are not connected to it.
+- Stage 09 supports manual peers and configured bootstrap addresses only. mDNS,
+  relay, hole punching, and DHT routing are deferred, so some restrictive or
+  local networks cannot connect in v1.
+- The Android lifecycle hook for Wi-Fi switches and sleep/wake is not bound yet;
+  `Network::notify_network_change` is implemented and tested at the network
+  layer.
 - Android JNI runtime execution is deferred because no emulator or device is
   available locally. The Android arm64-v8a and x86_64 libraries are compiled and
   export-checked, and the JNI shim is exercised through a Windows-hosted JVM

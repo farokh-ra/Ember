@@ -1,109 +1,85 @@
 # Ember Project Handoff
 
-**Current stage:** 08 - C ABI, JNI/JNA adapters, lifecycle, and streaming
+**Current stage:** 09 - Peer identity, transports, and direct connections
 **Stage status:** Complete
-**Last updated:** 2026-11-15
-**Next stage:** 09 - Networking foundation (waiting for user permission)
+**Last updated:** 2026-11-16
+**Next stage:** 10 - DHT publish and lookup (waiting for user permission)
 
 ## What was implemented
 
-Stage 08 connects the verified Rust core to Kotlin through the stable C ABI and
-adds the lifecycle, event, error, and streaming layers required by ADR-0003:
+Stage 09 adds the authenticated transport and connection layer required by
+ADR-0005, ADR-0007, and ADR-0008:
 
-- 17-function C ABI exported from `nexus-ffi`, with opaque handles, panic
-  containment, and versioned CBOR envelopes.
-- Create-time configuration with an ABI gate that runs before the database or
-  data root is opened.
-- Idempotent create/start/stop/destroy behavior and a handle registry that
-  rejects every unknown or stale token.
-- Six callable methods: `system.info`, `system.health`, `system.snapshot`,
-  `store.usage`, `test.echo`, and `test.fault`.
-- Stable domain error envelopes, retryable flags, and ABI status mapping.
-- A 1,024-entry event queue with progress coalescing and non-blocking lifecycle
-  pushes.
-- Fixed four-worker asynchronous operations with progress, terminal, and
-  cancellation events.
-- Streaming import to `store/tmp` with incremental SHA-256 and chunk hashing,
-  canonical manifests, no-copy adoption, and a `local_import` reference retained
-  until another owner takes the bytes.
-- Bounded export with a 1 MiB cursor and EOF signaling.
-- Store migration 4, which rebuilds `content_refs` to allow `local_import`.
-- Android JNI shim using static `Java_io_nexus_core_client_NexusNative_*`
-  symbols and `JNI_OnLoad` ABI rejection.
-- Windows JNA adapter with the native `NexusBuffer` layout.
-- Kotlin `NativeCoreClient` with ABI check, secret zeroing, invoke/cancel,
-  streaming calls, and a single event pump.
-- C harness, six Rust C ABI contract tests, and a shared Kotlin contract that
-  runs against both Windows adapters.
-- `scripts/build-native.ps1` for Windows and Android artifacts, export checks,
-  and the C harness; `scripts/build.ps1` now runs it before Gradle.
+- A device peer key at `network/peer_key.enc`, encrypted under the local
+  encryption key with HKDF-SHA256 and `DomainTag::PeerKey`.
+- Device peer identity separated from the user signing identity. Identity backup
+  and restore never read or replace the peer key.
+- Pinned libp2p `0.57.1` with QUIC v1 and TCP + Noise + Yamux, DNS resolution,
+  identify, ping, connection limits, and `/nexus/test/1` request/response.
+- Authenticated direct connections and wrong-peer-identity rejection before any
+  application protocol runs.
+- A bounded canonical-CBOR transport-check schema with a 4 KiB payload cap and
+  an 8 KiB frame cap.
+- Network and peer state with separate listen, observed, and confirmed address
+  classes. The core never claims public reachability without evidence.
+- Persisted bootstrap and manual peers in `network/bootstrap.list`, bounded to
+  64 entries and requiring `/p2p/<peer-id>`.
+- Exponential reconnect backoff from 1 s to 60 s, network-change reset, and a
+  bounded synchronous driver API.
+- Connection, stream, request-rate, message, and idle-timeout bounds.
+- Eight `network.*` core methods, network events, and domain-error mapping.
+- A network start failure never fails core start; the core stays usable offline.
+- 35 new Rust tests, for 201 total.
 
-No networking, hosting, search, downloads, or product features are implemented
-yet. The Kotlin screens still use visibly labelled demo data.
+The Kotlin product screens still use visibly labelled mock data. DHT routing,
+hosting, downloads, search, relay, hole punching, and mDNS remain later stages.
 
 ## Files changed
+
+Network crate:
+
+- `crates/nexus-net/Cargo.toml`
+- `crates/nexus-net/src/lib.rs`
+- `crates/nexus-net/src/behaviour.rs` (new)
+- `crates/nexus-net/src/bootstrap.rs` (new)
+- `crates/nexus-net/src/codec.rs` (new)
+- `crates/nexus-net/src/config.rs` (new)
+- `crates/nexus-net/src/driver.rs` (new)
+- `crates/nexus-net/src/error.rs` (new)
+- `crates/nexus-net/src/peer_key.rs` (new)
+- `crates/nexus-net/src/shared.rs` (new)
+- `crates/nexus-net/src/state.rs` (new)
+- `crates/nexus-net/tests/stage09.rs` (new)
 
 Core crate:
 
 - `crates/nexus-core/Cargo.toml`
+- `crates/nexus-core/src/engine.rs`
+- `crates/nexus-core/src/error.rs`
 - `crates/nexus-core/src/lib.rs`
-- `crates/nexus-core/src/config.rs` (new)
-- `crates/nexus-core/src/engine.rs` (new)
-- `crates/nexus-core/src/envelope.rs` (new)
-- `crates/nexus-core/src/error.rs` (new)
-- `crates/nexus-core/src/event.rs` (new)
-- `crates/nexus-core/src/ops.rs` (new)
-- `crates/nexus-core/src/streaming.rs` (new)
+- `crates/nexus-core/src/network.rs` (new)
+- `crates/nexus-core/tests/stage09.rs` (new)
 
-FFI crate:
+Protocol and crypto:
 
-- `crates/nexus-ffi/Cargo.toml`
+- `crates/nexus-protocol/src/error.rs`
+- `crates/nexus-protocol/src/lib.rs`
+- `crates/nexus-protocol/src/wire.rs` (new)
+- `crates/nexus-crypto/src/domain.rs`
+
+FFI and workspace:
+
 - `crates/nexus-ffi/src/lib.rs`
-- `crates/nexus-ffi/src/jni_bridge.rs` (new)
-- `crates/nexus-ffi/src/registry.rs` (new)
-- `crates/nexus-ffi/tests/c_abi.rs` (new)
+- `crates/nexus-ffi/tests/c_abi.rs`
+- `Cargo.toml`, `Cargo.lock`
+- `deny.toml`
 
-Store crate:
+Documentation:
 
-- `crates/nexus-store/src/managed_store.rs`
-- `crates/nexus-store/src/migrations.rs`
-- `crates/nexus-store/src/model.rs`
-- `crates/nexus-store/src/store.rs`
-- `crates/nexus-store/tests/storage.rs`
-- `crates/nexus-store/migrations/0004_local_import_refs.sql` (new)
-- `crates/nexus-store/tests/local_import.rs` (new)
-
-Native and scripts:
-
-- `native/c_harness/main.c` (new)
-- `scripts/build-native.ps1` (new)
-- `scripts/build.ps1`
-
-Kotlin:
-
-- `gradle/libs.versions.toml`
-- `shared/core-client/build.gradle.kts`
-- `shared/core-client/src/commonMain/kotlin/io/nexus/core/client/Cbor.kt` (new)
-- `shared/core-client/src/commonMain/kotlin/io/nexus/core/client/NativeBridge.kt` (new)
-- `shared/core-client/src/commonMain/kotlin/io/nexus/core/client/NativeConfig.kt` (new)
-- `shared/core-client/src/commonMain/kotlin/io/nexus/core/client/NativeCoreClient.kt` (new)
-- `shared/core-client/src/commonMain/kotlin/io/nexus/core/client/NativeStatusPayload.kt` (new)
-- `shared/core-client/src/commonMain/kotlin/io/nexus/core/client/NexusException.kt` (new)
-- `shared/core-client/src/jvmMain/kotlin/io/nexus/core/client/JnaNativeBridge.kt` (new)
-- `shared/core-client/src/androidMain/kotlin/io/nexus/core/client/NexusNative.kt` (new)
-- `shared/core-client/src/androidMain/kotlin/io/nexus/core/client/JniNativeBridge.kt` (new)
-- `shared/core-client/src/jvmTest/kotlin/io/nexus/core/client/CborTest.kt` (new)
-- `shared/core-client/src/jvmTest/kotlin/io/nexus/core/client/NativeContract.kt` (new)
-- `shared/core-client/src/jvmTest/kotlin/io/nexus/core/client/NativeContractTest.kt` (new)
-- `shared/core-client/src/jvmTest/kotlin/io/nexus/core/client/NexusNative.kt` (test-only JNI proxy)
-- `shared/core-client/src/jvmTest/kotlin/io/nexus/core/client/JvmJniNativeBridge.kt` (new)
-
-Workspace and documentation:
-
-- `Cargo.lock`
 - `docs/architecture/FFI_INTERFACE.md`
 - `docs/architecture/DEPENDENCY_LICENSE_INVENTORY.md`
-- `docs/progress/STAGE_08.md` (new)
+- `docs/ARCHITECTURE.md`
+- `docs/progress/STAGE_09.md` (new)
 - `docs/HANDOFF.md`
 - `README.md`, `CHANGELOG.md`
 
@@ -122,39 +98,43 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 Result: PASS.
 
 - Windows `build/native/windows-x64/nexus_core.dll` built and packaged.
-- `libnexus_core.dll.a` regenerated with `gendef` and `dlltool`.
-- 19 required Windows exports present.
-- C harness compiled with `-std=c11 -Wall -Wextra -Werror` and passed,
-  including 100 lifecycle cycles and the 2.5 MB streaming round-trip.
-- Android arm64-v8a and x86_64 `libnexus_core.so` built and export-checked.
+- `libnexus_core.dll.a` regenerated and used by the C harness.
+- Required Windows exports present; the C ABI harness passed.
+- Android arm64-v8a and x86_64 `libnexus_core.so` built with libp2p/QUIC and
+  export-checked.
 
-### Tests
+### Rust tests
 
 ```text
 cargo test --workspace
 ```
 
-Result: PASS, 166 tests, 0 failures.
+Result: PASS, 201 tests, 0 failures.
+
+Stage 09-specific suites:
 
 ```text
-.\gradlew.bat --no-daemon --console=plain :shared:core-client:jvmTest
+cargo test -p nexus-net --test stage09 -- --test-threads=1
+cargo test -p nexus-core --test stage09 -- --test-threads=1
 ```
 
-Result: PASS, 7 `core-client` tests, 0 failures. The two native-contract tests
-cover Windows JNA and the Windows-hosted JNI proxy.
+Result: PASS, 8 and 4 tests respectively.
 
 ### Test breakdown
 
 | Suite | Tests | Failures |
 |---|---:|---:|
-| `nexus-core` unit tests | 23 | 0 |
+| `nexus-core` unit tests | 27 | 0 |
+| `nexus-core` Stage 09 tests | 4 | 0 |
+| `nexus-crypto` unit tests | 24 | 0 |
 | `nexus-ffi` unit tests | 4 | 0 |
 | `nexus-ffi` C ABI tests | 6 | 0 |
-| `nexus-crypto` unit tests | 24 | 0 |
 | `nexus-identity` unit tests | 9 | 0 |
 | `nexus-identity` integration tests | 12 | 0 |
+| `nexus-net` unit tests | 14 | 0 |
+| `nexus-net` Stage 09 tests | 8 | 0 |
 | `nexus-observability` unit tests | 3 | 0 |
-| `nexus-protocol` unit tests | 16 | 0 |
+| `nexus-protocol` unit tests | 21 | 0 |
 | `nexus-protocol` signed-record tests | 9 | 0 |
 | `nexus-protocol` Stage 07 tests | 8 | 0 |
 | `nexus-store` unit tests | 17 | 0 |
@@ -164,90 +144,76 @@ cover Windows JNA and the Windows-hosted JNI proxy.
 | `nexus-transfer` unit tests | 7 | 0 |
 | `nexus-transfer` integration tests | 7 | 0 |
 | `nexus-types` unit tests | 1 | 0 |
-| **Rust total** | **166** | **0** |
-| `shared:core-api` JVM tests | 1 | 0 |
-| `shared:core-client` JVM tests | 7 | 0 |
-| `shared:model` JVM tests | 3 | 0 |
-| `shared:presentation` JVM tests | 44 | 0 |
-| `shared:ui` JVM tests | 21 | 0 |
-| **JVM total** | **76** | **0** |
+| **Rust total** | **201** | **0** |
 
-### Full local gate
+### Formatting, linting, and dependency policy
 
 ```text
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-.\scripts\build.ps1 -WithDependencyScan
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo deny check
+cargo audit
 ```
 
-Result: PASS on 2026-11-15.
-
-- Native Windows and Android artifacts built, required exports verified, and the
-  C harness passed all checks including 100 lifecycle cycles.
-- Gradle Spotless, detekt, Android debug assembly, desktop image, and all five
-  JVM test tasks passed with 76 tests and 0 failures.
-- Rust formatting, Clippy with warnings denied, and workspace tests passed with
-  166 tests and 0 failures.
-- `cargo deny check`: advisories, bans, licenses, and sources all OK.
-- `cargo audit`: 131 dependencies scanned against 1,509 advisories with no
-  reported vulnerabilities.
-- Repository hygiene: PASS, 249 files scanned.
-
-### Clean checkout
-
-```text
-.\scripts\verify-clean-checkout.ps1
-```
-
-Result: PASS on 2026-11-15 at Stage 08 commit `6903384`. The local clone built
-the Windows DLL and both Android libraries, passed the C harness, built the
-Android APK and desktop image, passed Spotless, detekt, and all five JVM test
-tasks, passed all 166 Rust tests, and passed hygiene with 248 files scanned.
-The script does not run the dependency scan; that was covered by the full gate
-above.
-
-### Recheck
-
-The full gate and clean-checkout replay were repeated on 2026-11-15 at commit
-`cab521a`; both passed with the same test totals, dependency results, and
-hygiene result. A forced rerun of all five JVM test tasks also passed with 76
-tests, 0 failures, and 0 skipped.
+- Formatting and Clippy with warnings denied: PASS.
+- `cargo deny check`: `advisories ok, bans ok, licenses ok, sources ok`. One
+  unmaintained, non-vulnerable Linux-only `paste` advisory
+  (`RUSTSEC-2024-0436`) is documented in `deny.toml` with removal guidance.
+- `cargo audit`: 406 dependencies scanned against 1,509 advisories; no
+  vulnerabilities and one allowed warning.
+- The `Cargo.lock` resolves 406 packages and the dependency inventory is at
+  version 1.6.0.
 
 ## Errors and failed attempts
 
-1. The JNI dependency was conditional on Android, preventing a Windows JVM JNI
-   proxy test. It is now unconditional and `jni_bridge` compiles on Windows.
-2. The Rust cdylib is `nexus_ffi.dll`, while the product and JNA loader expect
-   `nexus_core.dll`. Packaging renames the artifact and regenerates the import
-   library so the recorded DLL name is correct.
-3. Android `libsqlite3-sys` could not find a cross C compiler. The native script
-   now sets the NDK clang wrappers and `CC_/CXX_/AR_<target>` variables.
-4. Unknown handles could reach a dispatch path. All call helpers now return
-   `NEXUS_STATUS_INVALID_HANDLE` immediately.
-5. A panic in a JNI byte-returning call could have returned null. The fallback
-   now returns a status-payload array, and Kotlin decodes null defensively.
-6. Progress coalescing made an exact event-count assertion flaky. The contract
-   now requires 1-4 progress events and one terminal event.
-7. The first full gate after the detekt changes failed to compile
-   `DEFAULT_QUOTA_BYTES` because `ULong` arithmetic is not a constant expression.
-   The constant is now the literal `10_737_418_240uL`, and the rerun passed.
+1. A second transport connection to an already-connected peer was skipped.
+   `DialOpts` now uses `PeerCondition::Always`.
+2. `request_response::Behaviour::add_address` did not give the swarm a dial
+   target. Bootstrap dials now call `Swarm::add_peer_address` before `dial`.
+3. `multiaddr` 0.19 stores a parsed `PeerId` in `Protocol::P2p`; the code uses
+   the typed value instead of rebuilding a multihash.
+4. Network operational failures were mapped to `NEXUS_STATUS_INTERNAL`. They are
+   now domain errors with `net_code`, while malformed field values stay
+   ABI-level `INVALID_ARGUMENT`.
+5. A network start failure initially failed `Engine::start`. It is now recorded
+   and swallowed so the core stays offline-usable.
+6. `notify_network_change` was fire-and-forget and untested. It now waits for the
+   driver to apply the reset, and a loopback test proves prompt reconnection
+   after accumulated backoff.
+7. The new libp2p graph triggered the `paste` unmaintained advisory. The
+   advisory is accepted with a documented, Linux-only, non-vulnerable
+   justification in `deny.toml`.
 
 ## Decisions and unresolved questions
 
-- Stage 08 was explicitly approved by the project owner.
-- ADR-0003, ADR-0008, and ADR-0009 are implemented without architecture changes.
-- The ABI remains version 1; the protocol version is `0.1.0-stage-08`.
-- `test.*` is enabled only by config and must stay disabled in release hosts.
-- A completed streaming import is retained by a `local_import` reference until a
-  publication, download, or replica takes ownership.
-- Android runtime verification is deferred because no emulator or device is
-  available. The Android libraries are compiled and export-checked; the JNI shim
-  is exercised through a Windows-hosted JVM proxy.
-- Remote GitHub Actions execution has not run for Stage 08.
+- Stage 09 was explicitly approved by the project owner.
+- ADR-0005, ADR-0007, and ADR-0008 are implemented without architecture changes.
+- libp2p is pinned exactly at `0.57.1`; `tokio` is `1.54.1` and `futures` is
+  `0.3.34`.
+- QUIC is preferred; TCP + Noise + Yamux is the fallback; DNS is enabled; mDNS
+  is disabled in v1.
+- The device peer key is separate from the user signing identity and is stored
+  encrypted with `DomainTag::PeerKey`.
+- `network_enabled` starts transports, but a networking failure never fails core
+  start.
+- Bootstrap and manual peers persist in `network/bootstrap.list`; every entry
+  must include `/p2p`.
+- Reconnect backoff is 1 s to 60 s by default and resets on a reported network
+  change.
+- Operational `network.*` failures are domain errors; malformed arguments are
+  ABI-level.
+- The ABI remains 1; the protocol version is `0.1.0-stage-09`.
+- Android runtime networking evidence is deferred because no emulator or device
+  is available. The Android libraries cross-build and export-check.
+- The Android lifecycle hook for Wi-Fi switches and sleep/wake is not bound yet.
+- Remote GitHub Actions execution has not run for Stage 09.
 
 ## Exact next action
 
-1. Review `docs/progress/STAGE_08.md` and the updated
-   `docs/architecture/FFI_INTERFACE.md`.
-2. Give explicit approval to start Stage 09.
-3. Stage 09 adds QUIC/TCP connections, peer authentication, network-change
-   handling, and resource limits. Do not begin it before that approval.
+1. Review `docs/progress/STAGE_09.md`, the updated
+   `docs/architecture/FFI_INTERFACE.md`, and the `nexus-net`/`nexus-core`
+   Stage 09 tests.
+2. Give explicit approval to start Stage 10.
+3. Stage 10 adds Kademlia peer routing, bounded record publication and lookup,
+   multi-bootstrap failover, and lookup timeouts on top of these transports. Do
+   not begin it before that approval.

@@ -156,6 +156,9 @@ pub enum CoreError {
     /// An identity operation failed.
     #[error("identity operation failed: {0}")]
     Identity(#[from] nexus_identity::IdentityError),
+    /// A networking operation failed.
+    #[error("network operation failed: {0}")]
+    Network(#[from] nexus_net::NetError),
     /// The method ID is not known to this build.
     #[error("method 0x{0:04X} is not available in this build")]
     Unsupported(u32),
@@ -202,6 +205,7 @@ impl DomainError {
                 _ => Self::new(DomainCode::IoError, "The local identity could not be read."),
             },
             CoreError::Unsupported(_) => Self::invalid("The operation is not available in this build."),
+            CoreError::Network(network) => crate::network::domain_error(network),
             CoreError::NotRunning => Self::new(DomainCode::Conflict, "The core is not running."),
             CoreError::Internal(_) => Self::internal("The core could not complete the operation."),
             CoreError::Event(_) => Self::internal("The event queue is unavailable."),

@@ -11,6 +11,7 @@ mod manifest;
 mod profile;
 mod publication;
 mod tombstone;
+mod wire;
 
 pub use envelope::{MAX_SIGNED_BODY_BYTES, MAX_SIGNED_RECORD_BYTES, SignedRecord};
 pub use error::ProtocolError;
@@ -24,6 +25,10 @@ pub use publication::{
     MAX_TAG_BYTES, MAX_TAGS, PUBLICATION_SCHEMA_VERSION, PublicationV1, SignedPublication, publication_id,
 };
 pub use tombstone::{SignedTombstone, TOMBSTONE_SCHEMA_VERSION, TombstoneV1};
+pub use wire::{
+    MAX_TEST_ERROR_BYTES, MAX_TEST_MESSAGE_BYTES, MAX_TEST_PAYLOAD_BYTES, TEST_WIRE_VERSION, TestRequest, TestResponse,
+    decode_test_request, decode_test_response, encode_test_request, encode_test_response,
+};
 
 /// Returns the architecture component name for diagnostics.
 #[must_use]

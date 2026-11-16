@@ -1,7 +1,271 @@
-//! libp2p networking and peer discovery.
+//! libp2p networking, authenticated peer connections, and connection diagnostics.
+//!
+//! The public surface is synchronous and bounded. [`Network::start`] loads (or
+//! creates) the encrypted device peer key, spawns one background driver thread,
+//! and starts QUIC v1 and TCP listeners. Calls such as [`Network::connect`] and
+//! [`Network::send_test`] submit a bounded command and wait for a one-shot
+//! reply; failures never panic and never require the caller to own a runtime.
+//!
+//! The device peer key is separate from the user signing identity. Restoring an
+//! identity backup never reads or replaces `network/peer_key.enc`.
 
-/// Returns the architecture component name for diagnostics.
-#[must_use]
-pub const fn component_name() -> &'static str {
-    "nexus-net"
+mod behaviour;
+mod bootstrap;
+mod codec;
+mod config;
+mod driver;
+mod error;
+mod peer_key;
+mod shared;
+mod state;
+
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+use libp2p::{Multiaddr, PeerId};
+use nexus_identity::LocalEncryptionKey;
+use tokio::sync::{mpsc, oneshot};
+
+pub use bootstrap::{BOOTSTRAP_FILE_NAME, BOOTSTRAP_MAX_FILE_LENGTH};
+pub use config::{
+    DEFAULT_CONNECT_TIMEOUT, DEFAULT_IDLE_CONNECTION_TIMEOUT, DEFAULT_MAX_CONCURRENT_STREAMS, DEFAULT_MAX_ESTABLISHED,
+    DEFAULT_MAX_ESTABLISHED_PER_PEER, DEFAULT_MAX_PENDING_INCOMING, DEFAULT_MAX_REQUESTS_PER_PEER_PER_MINUTE,
+    DEFAULT_RECONNECT_BASE_DELAY, DEFAULT_RECONNECT_MAX_DELAY, DEFAULT_REQUEST_TIMEOUT, MAX_BOOTSTRAP_PEERS,
+    MAX_CONNECTION_LIMIT, MAX_LISTEN_ADDRESSES, NetworkConfig, QUIC_LISTEN_ADDRESS, TCP_LISTEN_ADDRESS,
+    require_peer_id,
+};
+pub use error::NetError;
+pub use peer_key::{
+    NETWORK_DIRECTORY, PEER_KEY_FILE_NAME, PEER_KEY_FORMAT_VERSION, PEER_KEY_HEADER_LENGTH, PEER_KEY_KDF_HKDF_SHA256,
+    PEER_KEY_MAGIC, PEER_KEY_MAX_FILE_LENGTH, PEER_KEY_SALT_LENGTH, PEER_KEY_SEED_LENGTH, PeerKey,
+};
+pub use state::{
+    ConnectedPeer, NetworkEvent, NetworkObserver, NetworkState, NetworkStatus, PeerEventKind, PeerSnapshot, PeerState,
+    TestReply, transports,
+};
+
+use crate::driver::{COMMAND_CAPACITY, Command};
+use crate::shared::Shared;
+
+/// How long [`Network::start`] waits for the driver to build the swarm.
+pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// A running peer node.
+///
+/// Dropping the value shuts the driver down. All methods are bounded: they
+/// either complete or return a typed [`NetError`].
+pub struct Network {
+    shared: Arc<Shared>,
+    commands: mpsc::Sender<Command>,
+    peer_id: String,
+    thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl Network {
+    /// Validates `config`, unlocks the device peer key, and starts the driver.
+    ///
+    /// The persisted bootstrap list is merged into the configured list before
+    /// listeners start. A returned error means no driver thread is running.
+    pub fn start(
+        config: NetworkConfig,
+        local_key: &LocalEncryptionKey,
+        observer: Arc<dyn NetworkObserver>,
+    ) -> Result<Self, NetError> {
+        let mut config = config;
+        for address in bootstrap::load(&config.data_root)? {
+            if !config.bootstrap.contains(&address) {
+                config.bootstrap.push(address);
+            }
+        }
+        config.validate()?;
+
+        let peer_key = PeerKey::load_or_create(&config.data_root, local_key)?;
+        let peer_id = peer_key.peer_id();
+        let keypair = peer_key.keypair().clone();
+        let address_texts: Vec<String> = config.bootstrap.iter().map(ToString::to_string).collect();
+
+        let status = NetworkStatus::starting(peer_id.to_string());
+        let shared = Arc::new(Shared::new(status, observer));
+        shared.set_bootstrap(address_texts);
+
+        let config = Arc::new(config);
+        let (commands, receiver) = mpsc::channel(COMMAND_CAPACITY);
+        let (startup_sender, startup_receiver) = std::sync::mpsc::sync_channel(1);
+        let thread_config = Arc::clone(&config);
+        let thread_shared = Arc::clone(&shared);
+
+        let thread = std::thread::Builder::new()
+            .name("nexus-net".to_owned())
+            .spawn(move || {
+                let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                    Ok(runtime) => runtime,
+                    Err(_) => {
+                        let _ = startup_sender.send(Err(NetError::DriverFailed));
+                        return;
+                    }
+                };
+                runtime.block_on(async move {
+                    match driver::Driver::start(thread_config, keypair, thread_shared, receiver) {
+                        Ok(driver) => {
+                            let _ = startup_sender.send(Ok(()));
+                            driver.run().await;
+                        }
+                        Err(error) => {
+                            let _ = startup_sender.send(Err(error));
+                        }
+                    }
+                });
+            })
+            .map_err(NetError::Io)?;
+
+        match startup_receiver.recv_timeout(STARTUP_TIMEOUT) {
+            Ok(Ok(())) => Ok(Self {
+                shared,
+                commands,
+                peer_id: peer_id.to_string(),
+                thread: Mutex::new(Some(thread)),
+            }),
+            Ok(Err(error)) => {
+                let _ = thread.join();
+                Err(error)
+            }
+            Err(_) => {
+                let _ = thread.join();
+                Err(NetError::Timeout)
+            }
+        }
+    }
+
+    /// This node's device peer ID.
+    #[must_use]
+    pub fn peer_id(&self) -> &str {
+        &self.peer_id
+    }
+
+    /// Current aggregate status.
+    #[must_use]
+    pub fn status(&self) -> NetworkStatus {
+        self.shared.status()
+    }
+
+    /// Bounded snapshot of observed peers.
+    #[must_use]
+    pub fn peers(&self) -> Vec<PeerSnapshot> {
+        self.shared.peers()
+    }
+
+    /// Persisted bootstrap and manual peer addresses.
+    #[must_use]
+    pub fn bootstrap_list(&self) -> Vec<String> {
+        self.shared.bootstrap()
+    }
+
+    /// Dials one `/p2p`-terminated address and waits for an authenticated
+    /// connection.
+    pub fn connect(&self, address: &str) -> Result<ConnectedPeer, NetError> {
+        let (peer_id, address) = parse_peer_address(address)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::Dial {
+            peer_id,
+            address,
+            respond,
+        })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Sends a bounded transport-check payload to a connected peer and returns
+    /// the echoed bytes.
+    pub fn send_test(&self, peer_id: &str, payload: &[u8]) -> Result<TestReply, NetError> {
+        let peer_id: PeerId = peer_id.trim().parse().map_err(|_| NetError::InvalidPeerId)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::SendTest {
+            peer_id,
+            payload: payload.to_vec(),
+            respond,
+        })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Adds a bootstrap or manual peer and persists the list.
+    pub fn bootstrap_add(&self, address: &str) -> Result<(), NetError> {
+        let (_, address) = parse_peer_address(address)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::BootstrapAdd { address, respond })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Removes a bootstrap or manual peer and persists the list.
+    pub fn bootstrap_remove(&self, address: &str) -> Result<(), NetError> {
+        let (_, address) = parse_peer_address(address)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::BootstrapRemove { address, respond })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Re-dials one target peer, or every target peer when `None`.
+    pub fn reconnect(&self, peer_id: Option<&str>) -> Result<(), NetError> {
+        let peer_id = match peer_id {
+            Some(text) => Some(text.trim().parse().map_err(|_| NetError::InvalidPeerId)?),
+            None => None,
+        };
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::Reconnect { peer_id, respond })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Tells the driver that the network path changed (Wi-Fi switch or
+    /// sleep/wake). Returns once every target's reconnect backoff is reset.
+    pub fn notify_network_change(&self) -> Result<(), NetError> {
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::NetworkChanged { respond })?;
+        receiver.blocking_recv().map_err(|_| NetError::NotRunning)
+    }
+
+    /// Stops the driver and waits for its thread to exit. Idempotent.
+    pub fn shutdown(&self) {
+        let handle = self
+            .thread
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        let Some(handle) = handle else {
+            return;
+        };
+        let (respond, receiver) = oneshot::channel();
+        if self.commands.blocking_send(Command::Shutdown { respond }).is_ok() {
+            let _ = receiver.blocking_recv();
+        }
+        let _ = handle.join();
+    }
+
+    fn send(&self, command: Command) -> Result<(), NetError> {
+        match self.commands.try_send(command) {
+            Ok(()) => Ok(()),
+            Err(mpsc::error::TrySendError::Full(_)) => Err(NetError::Busy),
+            Err(mpsc::error::TrySendError::Closed(_)) => Err(NetError::NotRunning),
+        }
+    }
+}
+
+impl Drop for Network {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+impl std::fmt::Debug for Network {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Network")
+            .field("peer_id", &self.peer_id)
+            .field("state", &self.shared.status().state)
+            .finish()
+    }
+}
+
+fn parse_peer_address(text: &str) -> Result<(PeerId, Multiaddr), NetError> {
+    let address: Multiaddr = text.trim().parse().map_err(|_| NetError::InvalidAddress)?;
+    let (peer_id, address) = config::split_peer_address(&address)?;
+    Ok((peer_id, address))
 }
