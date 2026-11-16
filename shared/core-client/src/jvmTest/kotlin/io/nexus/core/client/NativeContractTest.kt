@@ -1,5 +1,7 @@
 package io.nexus.core.client
 
+import org.junit.jupiter.api.condition.EnabledOnOs
+import org.junit.jupiter.api.condition.OS
 import kotlin.test.Test
 
 /**
@@ -9,7 +11,11 @@ import kotlin.test.Test
  * names, and result encodings on the Windows JVM. It is not Android runtime
  * evidence. Android execution remains deferred until an emulator or device is
  * available.
+ *
+ * Both adapters load `nexus_core.dll`, so the suite is skipped on non-Windows
+ * hosts. The shared JVM tests run on Linux in CI.
  */
+@EnabledOnOs(OS.WINDOWS)
 class NativeContractTest {
     @Test
     fun jnaAdapterSatisfiesTheContract() {
