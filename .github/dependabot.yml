@@ -53,3 +53,7 @@ updates:
       actions:
         patterns:
           - "*"
+    ignore:
+      # The ref is a Rust toolchain version, not an action version. Dependabot
+      # previously bumped it to a toolchain that does not exist.
+      - dependency-name: "dtolnay/rust-toolchain"

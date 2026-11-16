@@ -59,7 +59,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install Rust 1.99.1
-        uses: dtolnay/rust-toolchain@1.120.0
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt, clippy
 
@@ -97,7 +97,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install Rust 1.99.1
-        uses: dtolnay/rust-toolchain@1.120.0
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt, clippy
 
