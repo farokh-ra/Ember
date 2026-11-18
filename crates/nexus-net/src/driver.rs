@@ -9,12 +9,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
+use libp2p::kad::store::RecordStore;
+use libp2p::kad::{self, ProgressStep, ProviderRecord, Quorum, Record, RecordKey};
 use libp2p::request_response::{self, OutboundFailure, OutboundRequestId, ResponseChannel};
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use libp2p::swarm::{DialError, SwarmEvent};
 use libp2p::{Multiaddr, PeerId, Swarm, identify, ping};
 use nexus_protocol::{
-    TestResponse, decode_test_request, decode_test_response, encode_test_request, encode_test_response,
+    DHT_KEY_BYTES, DHT_MAX_VALUE_BYTES, DhtRecord, DhtRecordDecision, TestResponse, decode_test_request,
+    decode_test_response, encode_test_request, encode_test_response, validate_provider_addresses,
+    validate_provider_key,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -23,7 +27,7 @@ use crate::bootstrap;
 use crate::config::{NetworkConfig, split_peer_address};
 use crate::error::NetError;
 use crate::shared::Shared;
-use crate::state::{ConnectedPeer, NetworkState, TestReply};
+use crate::state::{ConnectedPeer, DhtValue, DiscoveredPeer, NetworkState, PeerDiscovery, TestReply};
 
 /// Bounded command queue depth.
 pub(crate) const COMMAND_CAPACITY: usize = 64;
@@ -33,6 +37,12 @@ const TICK: Duration = Duration::from_millis(250);
 const REQUEST_GRACE: Duration = Duration::from_secs(1);
 /// Maximum retained per-peer rate-limit windows.
 const MAX_RATE_WINDOWS: usize = 256;
+/// Minimum delay between forced Kademlia bootstrap attempts.
+const BOOTSTRAP_RETRY: Duration = Duration::from_secs(10);
+/// Maximum peers returned by one discovery query.
+const MAX_DISCOVERED_PEERS: usize = 32;
+/// Maximum addresses retained for one discovered peer.
+const MAX_DISCOVERED_ADDRESSES: usize = 8;
 
 pub(crate) enum Command {
     Dial {
@@ -44,6 +54,27 @@ pub(crate) enum Command {
         peer_id: PeerId,
         payload: Vec<u8>,
         respond: oneshot::Sender<Result<TestReply, NetError>>,
+    },
+    DhtDiscover {
+        target: Option<[u8; DHT_KEY_BYTES]>,
+        respond: oneshot::Sender<Result<PeerDiscovery, NetError>>,
+    },
+    DhtPublish {
+        key: [u8; DHT_KEY_BYTES],
+        value: Vec<u8>,
+        respond: oneshot::Sender<Result<(), NetError>>,
+    },
+    DhtLookup {
+        key: [u8; DHT_KEY_BYTES],
+        respond: oneshot::Sender<Result<Option<DhtValue>, NetError>>,
+    },
+    DhtStartProviding {
+        key: [u8; DHT_KEY_BYTES],
+        respond: oneshot::Sender<Result<(), NetError>>,
+    },
+    DhtFindProviders {
+        key: [u8; DHT_KEY_BYTES],
+        respond: oneshot::Sender<Result<Vec<DiscoveredPeer>, NetError>>,
     },
     BootstrapAdd {
         address: Multiaddr,
@@ -77,6 +108,45 @@ struct PendingRequest {
     deadline: Instant,
 }
 
+enum PendingQuery {
+    Discover {
+        respond: oneshot::Sender<Result<PeerDiscovery, NetError>>,
+        started: Instant,
+        deadline: Instant,
+    },
+    Publish {
+        respond: oneshot::Sender<Result<(), NetError>>,
+        deadline: Instant,
+    },
+    Lookup {
+        key: [u8; DHT_KEY_BYTES],
+        respond: oneshot::Sender<Result<Option<DhtValue>, NetError>>,
+        deadline: Instant,
+    },
+    StartProviding {
+        respond: oneshot::Sender<Result<(), NetError>>,
+        deadline: Instant,
+    },
+    FindProviders {
+        key: [u8; DHT_KEY_BYTES],
+        respond: oneshot::Sender<Result<Vec<DiscoveredPeer>, NetError>>,
+        providers: Vec<PeerId>,
+        deadline: Instant,
+    },
+}
+
+impl PendingQuery {
+    fn deadline(&self) -> Instant {
+        match self {
+            Self::Discover { deadline, .. }
+            | Self::Publish { deadline, .. }
+            | Self::Lookup { deadline, .. }
+            | Self::StartProviding { deadline, .. }
+            | Self::FindProviders { deadline, .. } => *deadline,
+        }
+    }
+}
+
 struct Backoff {
     attempts: u32,
     next_at: Instant,
@@ -94,9 +164,13 @@ pub(crate) struct Driver {
     commands: mpsc::Receiver<Command>,
     pending_dials: HashMap<PeerId, PendingDial>,
     pending_requests: HashMap<OutboundRequestId, PendingRequest>,
+    pending_queries: HashMap<kad::QueryId, PendingQuery>,
     backoff: HashMap<PeerId, Backoff>,
     targets: BTreeMap<PeerId, Vec<Multiaddr>>,
     rate: HashMap<PeerId, RateWindow>,
+    dht_bootstrapped: bool,
+    last_bootstrap: Option<Instant>,
+    routing_peers: usize,
 }
 
 impl Driver {
@@ -155,14 +229,26 @@ impl Driver {
             commands,
             pending_dials: HashMap::new(),
             pending_requests: HashMap::new(),
+            pending_queries: HashMap::new(),
             backoff: HashMap::new(),
             targets,
             rate: HashMap::new(),
+            dht_bootstrapped: false,
+            last_bootstrap: None,
+            routing_peers: 0,
         };
+        driver.shared.set_dht_mode(driver.config.dht_mode.as_str());
 
         let peers: Vec<PeerId> = driver.targets.keys().copied().collect();
         for peer_id in peers {
             let addresses = driver.targets.get(&peer_id).cloned().unwrap_or_default();
+            for address in &addresses {
+                driver
+                    .swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .add_address(&peer_id, address.clone());
+            }
             driver.dial_background(peer_id, addresses);
         }
 
@@ -182,6 +268,7 @@ impl Driver {
                         self.shared.force_state(NetworkState::Stopping, Some("shutdown"));
                         self.pending_dials.clear();
                         self.pending_requests.clear();
+                        self.pending_queries.clear();
                         let _ = respond.send(());
                         return;
                     }
@@ -205,6 +292,11 @@ impl Driver {
                 payload,
                 respond,
             } => self.send_test(peer_id, payload, respond),
+            Command::DhtDiscover { target, respond } => self.dht_discover(target, respond),
+            Command::DhtPublish { key, value, respond } => self.dht_publish(key, value, respond),
+            Command::DhtLookup { key, respond } => self.dht_lookup(key, respond),
+            Command::DhtStartProviding { key, respond } => self.dht_start_providing(key, respond),
+            Command::DhtFindProviders { key, respond } => self.dht_find_providers(key, respond),
             Command::BootstrapAdd { address, respond } => self.bootstrap_add(address, respond),
             Command::BootstrapRemove { address, respond } => self.bootstrap_remove(&address, respond),
             Command::Reconnect { peer_id, respond } => {
@@ -298,6 +390,127 @@ impl Driver {
         );
     }
 
+    fn dht_discover(
+        &mut self,
+        target: Option<[u8; DHT_KEY_BYTES]>,
+        respond: oneshot::Sender<Result<PeerDiscovery, NetError>>,
+    ) {
+        let target = match target {
+            Some(target) => target,
+            None => match nexus_crypto::random_array::<DHT_KEY_BYTES>() {
+                Ok(target) => target,
+                Err(error) => {
+                    let _ = respond.send(Err(NetError::Crypto(error)));
+                    return;
+                }
+            },
+        };
+        let query = self.swarm.behaviour_mut().kademlia.get_closest_peers(target.to_vec());
+        self.shared.record_dht_query_started();
+        self.pending_queries.insert(
+            query,
+            PendingQuery::Discover {
+                respond,
+                started: Instant::now(),
+                deadline: self.dht_deadline(),
+            },
+        );
+    }
+
+    fn dht_publish(
+        &mut self,
+        key: [u8; DHT_KEY_BYTES],
+        value: Vec<u8>,
+        respond: oneshot::Sender<Result<(), NetError>>,
+    ) {
+        if value.len() > DHT_MAX_VALUE_BYTES {
+            let _ = respond.send(Err(NetError::RecordTooLarge));
+            return;
+        }
+        let record = Record::new(RecordKey::new(&key), value);
+        let query = match self.swarm.behaviour_mut().kademlia.put_record(record, Quorum::One) {
+            Ok(query) => query,
+            Err(_) => {
+                let _ = respond.send(Err(NetError::RecordTooLarge));
+                return;
+            }
+        };
+        self.shared.record_dht_query_started();
+        self.pending_queries.insert(
+            query,
+            PendingQuery::Publish {
+                respond,
+                deadline: self.dht_deadline(),
+            },
+        );
+    }
+
+    fn dht_lookup(&mut self, key: [u8; DHT_KEY_BYTES], respond: oneshot::Sender<Result<Option<DhtValue>, NetError>>) {
+        let query = self.swarm.behaviour_mut().kademlia.get_record(RecordKey::new(&key));
+        self.shared.record_dht_query_started();
+        self.pending_queries.insert(
+            query,
+            PendingQuery::Lookup {
+                key,
+                respond,
+                deadline: self.dht_deadline(),
+            },
+        );
+    }
+
+    fn dht_start_providing(&mut self, key: [u8; DHT_KEY_BYTES], respond: oneshot::Sender<Result<(), NetError>>) {
+        if validate_provider_key(&key).is_err() {
+            let _ = respond.send(Err(NetError::InvalidKey));
+            return;
+        }
+        let query = match self
+            .swarm
+            .behaviour_mut()
+            .kademlia
+            .start_providing(RecordKey::new(&key))
+        {
+            Ok(query) => query,
+            Err(_) => {
+                let _ = respond.send(Err(NetError::Busy));
+                return;
+            }
+        };
+        self.shared.record_dht_query_started();
+        self.pending_queries.insert(
+            query,
+            PendingQuery::StartProviding {
+                respond,
+                deadline: self.dht_deadline(),
+            },
+        );
+    }
+
+    fn dht_find_providers(
+        &mut self,
+        key: [u8; DHT_KEY_BYTES],
+        respond: oneshot::Sender<Result<Vec<DiscoveredPeer>, NetError>>,
+    ) {
+        if validate_provider_key(&key).is_err() {
+            let _ = respond.send(Err(NetError::InvalidKey));
+            return;
+        }
+        let query = self.swarm.behaviour_mut().kademlia.get_providers(RecordKey::new(&key));
+        self.shared.record_dht_query_started();
+        self.pending_queries.insert(
+            query,
+            PendingQuery::FindProviders {
+                key,
+                respond,
+                providers: Vec::new(),
+                deadline: self.dht_deadline(),
+            },
+        );
+    }
+
+    fn dht_deadline(&self) -> Instant {
+        Instant::now() + self.config.dht_query_timeout + REQUEST_GRACE
+    }
+
     fn bootstrap_add(&mut self, address: Multiaddr, respond: oneshot::Sender<Result<(), NetError>>) {
         let mut addresses: Vec<Multiaddr> = self
             .shared
@@ -317,6 +530,10 @@ impl Driver {
                 self.shared
                     .set_bootstrap(addresses.iter().map(ToString::to_string).collect());
                 if let Ok((peer_id, address)) = split_peer_address(&address) {
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .add_address(&peer_id, address.clone());
                     self.targets.insert(peer_id, vec![address]);
                 }
                 let _ = respond.send(Ok(()));
@@ -347,7 +564,11 @@ impl Driver {
             Ok(()) => {
                 self.shared
                     .set_bootstrap(addresses.iter().map(ToString::to_string).collect());
-                if let Ok((peer_id, _)) = split_peer_address(address) {
+                if let Ok((peer_id, plain_address)) = split_peer_address(address) {
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .remove_address(&peer_id, &plain_address);
                     self.targets.remove(&peer_id);
                     self.backoff.remove(&peer_id);
                 }
@@ -434,6 +655,21 @@ impl Driver {
             }
         }
 
+        let expired: Vec<kad::QueryId> = self
+            .pending_queries
+            .iter()
+            .filter(|(_, pending)| pending.deadline() <= now)
+            .map(|(query, _)| *query)
+            .collect();
+        for query in expired {
+            if let Some(pending) = self.pending_queries.remove(&query) {
+                self.fail_pending(pending, "dht_timeout", NetError::Timeout);
+            }
+        }
+
+        self.refresh_routing_peers();
+        self.maybe_bootstrap();
+
         if self.rate.len() > MAX_RATE_WINDOWS {
             self.rate
                 .retain(|_, window| window.started.elapsed() < Duration::from_secs(60));
@@ -453,6 +689,358 @@ impl Driver {
         }
 
         self.shared.refresh();
+    }
+
+    fn refresh_routing_peers(&mut self) {
+        let count: usize = self
+            .swarm
+            .behaviour_mut()
+            .kademlia
+            .kbuckets()
+            .map(|bucket| bucket.iter().count())
+            .sum();
+        if count != self.routing_peers {
+            self.routing_peers = count;
+            self.shared.set_dht_routing_peers(count);
+        }
+    }
+
+    fn routing_addresses(&mut self, peer: &PeerId) -> Vec<Multiaddr> {
+        let mut addresses = Vec::new();
+        for bucket in self.swarm.behaviour_mut().kademlia.kbuckets() {
+            if let Some(entry) = bucket.iter().find(|entry| entry.node.key.preimage() == peer) {
+                addresses = entry.node.value.iter().cloned().collect();
+                break;
+            }
+        }
+        addresses
+    }
+
+    fn maybe_bootstrap(&mut self) {
+        if self.dht_bootstrapped || self.routing_peers == 0 {
+            return;
+        }
+        if self.last_bootstrap.is_some_and(|last| last.elapsed() < BOOTSTRAP_RETRY) {
+            return;
+        }
+        self.last_bootstrap = Some(Instant::now());
+        // An empty routing table is a normal state for an offline node. The
+        // periodic and on-low-peers bootstrap in `kad` retries once a peer is
+        // known, and the next tick re-evaluates this throttle.
+        let _ = self.swarm.behaviour_mut().kademlia.bootstrap();
+    }
+
+    fn on_kademlia_event(&mut self, event: kad::Event) {
+        match event {
+            kad::Event::InboundRequest { request } => match request {
+                kad::InboundRequest::PutRecord {
+                    record: Some(record), ..
+                } => self.store_inbound_record(record),
+                kad::InboundRequest::AddProvider { record: Some(record) } => self.store_inbound_provider(record),
+                _ => {}
+            },
+            kad::Event::OutboundQueryProgressed { id, result, step, .. } => self.on_query_progressed(id, result, step),
+            kad::Event::RoutingUpdated { .. } => self.refresh_routing_peers(),
+            kad::Event::ModeChanged { new_mode } => {
+                let mode = match new_mode {
+                    kad::Mode::Client => "client",
+                    kad::Mode::Server => "server",
+                };
+                self.shared.set_dht_mode(mode);
+            }
+            _ => {}
+        }
+    }
+
+    /// Validates an inbound DHT value before it reaches the bounded store.
+    ///
+    /// Values must be exact signed envelopes whose derived key matches the
+    /// record key. Revisions are monotonic per key, so stale or conflicting
+    /// copies cannot roll back a newer signed record.
+    fn store_inbound_record(&mut self, record: Record) {
+        if record.key.as_ref().len() != DHT_KEY_BYTES || record.value.len() > DHT_MAX_VALUE_BYTES {
+            self.shared.record_dht_record(false);
+            return;
+        }
+        let parsed = match DhtRecord::verify_for_key(record.key.as_ref(), &record.value) {
+            Ok(parsed) => parsed,
+            Err(_) => {
+                self.shared.record_dht_record(false);
+                return;
+            }
+        };
+        let existing = self
+            .swarm
+            .behaviour_mut()
+            .kademlia
+            .store_mut()
+            .get(&record.key)
+            .and_then(|existing| DhtRecord::parse(&existing.value).ok());
+        match DhtRecord::classify_update(existing.as_ref(), &parsed) {
+            DhtRecordDecision::Store => {
+                let stored = self.swarm.behaviour_mut().kademlia.store_mut().put(record).is_ok();
+                self.shared.record_dht_record(stored);
+            }
+            DhtRecordDecision::AlreadyStored => self.shared.record_dht_record(true),
+            DhtRecordDecision::Stale | DhtRecordDecision::Conflict => {
+                self.shared.record_dht_record(false);
+            }
+        }
+    }
+
+    /// Validates an inbound provider announcement before storing it.
+    fn store_inbound_provider(&mut self, mut record: ProviderRecord) {
+        if record.addresses.is_empty() {
+            record.addresses = self.routing_addresses(&record.provider);
+        }
+        let key = record.key.as_ref();
+        let lengths: Vec<usize> = record.addresses.iter().map(Multiaddr::len).collect();
+        if validate_provider_key(key).is_err() || validate_provider_addresses(&lengths).is_err() {
+            self.shared.record_dht_provider(false);
+            return;
+        }
+        let stored = self
+            .swarm
+            .behaviour_mut()
+            .kademlia
+            .store_mut()
+            .add_provider(record)
+            .is_ok();
+        self.shared.record_dht_provider(stored);
+    }
+
+    fn on_query_progressed(&mut self, id: kad::QueryId, result: kad::QueryResult, step: ProgressStep) {
+        match result {
+            kad::QueryResult::Bootstrap(result) => match result {
+                Ok(_) => {
+                    self.dht_bootstrapped = true;
+                    self.last_bootstrap = None;
+                    self.shared.mark_dht_bootstrapped();
+                }
+                Err(_) => self.shared.record_last_error("dht_bootstrap_failed"),
+            },
+            kad::QueryResult::GetClosestPeers(result) => {
+                let Some(PendingQuery::Discover { respond, started, .. }) = self.pending_queries.remove(&id) else {
+                    return;
+                };
+                match result {
+                    Ok(ok) => {
+                        let mut peers: Vec<DiscoveredPeer> = ok
+                            .peers
+                            .into_iter()
+                            .map(|info| DiscoveredPeer {
+                                peer_id: info.peer_id.to_string(),
+                                addresses: info
+                                    .addrs
+                                    .iter()
+                                    .take(MAX_DISCOVERED_ADDRESSES)
+                                    .map(ToString::to_string)
+                                    .collect(),
+                            })
+                            .collect();
+                        peers.sort_by(|left, right| left.peer_id.cmp(&right.peer_id));
+                        peers.dedup_by(|left, right| left.peer_id == right.peer_id);
+                        peers.truncate(MAX_DISCOVERED_PEERS);
+                        let discovery = PeerDiscovery {
+                            peers,
+                            routing_peers: self.routing_peers,
+                            elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                        };
+                        let _ = respond.send(Ok(discovery));
+                    }
+                    Err(_) => {
+                        self.shared.record_dht_query_failed("dht_discovery_failed");
+                        let _ = respond.send(Err(NetError::Timeout));
+                    }
+                }
+            }
+            kad::QueryResult::GetRecord(result) => {
+                let key = match self.pending_queries.get(&id) {
+                    Some(PendingQuery::Lookup { key, .. }) => *key,
+                    _ => return,
+                };
+                match result {
+                    Ok(kad::GetRecordOk::FoundRecord(peer_record)) => {
+                        if DhtRecord::verify_for_key(&key, &peer_record.record.value).is_err() {
+                            self.shared.record_dht_record(false);
+                            return;
+                        }
+                        let Some(PendingQuery::Lookup { respond, .. }) = self.pending_queries.remove(&id) else {
+                            return;
+                        };
+                        let value = DhtValue {
+                            key: key.to_vec(),
+                            value: peer_record.record.value,
+                            peer_id: peer_record.peer.map(|peer| peer.to_string()),
+                        };
+                        let _ = respond.send(Ok(Some(value)));
+                    }
+                    Ok(kad::GetRecordOk::FinishedWithNoAdditionalRecord { .. }) => {
+                        if let Some(PendingQuery::Lookup { respond, .. }) = self.pending_queries.remove(&id) {
+                            let _ = respond.send(Ok(None));
+                        }
+                    }
+                    Err(kad::GetRecordError::NotFound { .. }) => {
+                        if let Some(PendingQuery::Lookup { respond, .. }) = self.pending_queries.remove(&id) {
+                            let _ = respond.send(Ok(None));
+                        }
+                    }
+                    Err(kad::GetRecordError::Timeout { .. }) => {
+                        if let Some(pending) = self.pending_queries.remove(&id) {
+                            self.fail_pending(pending, "dht_lookup_timeout", NetError::Timeout);
+                        }
+                    }
+                }
+            }
+            kad::QueryResult::PutRecord(result) => {
+                if !step.last {
+                    return;
+                }
+                let Some(pending) = self.pending_queries.remove(&id) else {
+                    return;
+                };
+                match result {
+                    Ok(_) => {
+                        self.shared.record_dht_publish(true);
+                        if let PendingQuery::Publish { respond, .. } = pending {
+                            let _ = respond.send(Ok(()));
+                        }
+                    }
+                    Err(_) => {
+                        // `fail_pending` records both the query failure and the
+                        // publish failure; counting the publish here again would
+                        // double the `dht_publish_failures` status field.
+                        self.fail_pending(pending, "dht_publish_failed", NetError::Rejected);
+                    }
+                }
+            }
+            kad::QueryResult::StartProviding(result) => {
+                let Some(pending) = self.pending_queries.remove(&id) else {
+                    return;
+                };
+                match result {
+                    Ok(_) => {
+                        if let PendingQuery::StartProviding { respond, .. } = pending {
+                            let _ = respond.send(Ok(()));
+                        }
+                    }
+                    Err(_) => {
+                        self.fail_pending(pending, "dht_provider_failed", NetError::Rejected);
+                    }
+                }
+            }
+            kad::QueryResult::GetProviders(result) => match result {
+                Ok(kad::GetProvidersOk::FoundProviders { providers, .. }) => {
+                    let Some(PendingQuery::FindProviders { providers: found, .. }) = self.pending_queries.get_mut(&id)
+                    else {
+                        return;
+                    };
+                    for provider in providers {
+                        if found.len() >= MAX_DISCOVERED_PEERS {
+                            break;
+                        }
+                        if !found.contains(&provider) {
+                            found.push(provider);
+                        }
+                    }
+                }
+                Ok(kad::GetProvidersOk::FinishedWithNoAdditionalRecord { .. }) => {
+                    let Some(PendingQuery::FindProviders {
+                        key,
+                        respond,
+                        mut providers,
+                        ..
+                    }) = self.pending_queries.remove(&id)
+                    else {
+                        return;
+                    };
+                    let records = self
+                        .swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .store_mut()
+                        .providers(&RecordKey::new(&key));
+                    let mut peers: Vec<DiscoveredPeer> = Vec::new();
+                    for record in records {
+                        providers.retain(|provider| provider != &record.provider);
+                        let mut addresses: Vec<String> = record
+                            .addresses
+                            .iter()
+                            .take(MAX_DISCOVERED_ADDRESSES)
+                            .map(ToString::to_string)
+                            .collect();
+                        if addresses.is_empty() {
+                            let mut fallback = self.routing_addresses(&record.provider);
+                            fallback.truncate(MAX_DISCOVERED_ADDRESSES);
+                            addresses = fallback.into_iter().map(|address| address.to_string()).collect();
+                        }
+                        addresses.sort();
+                        addresses.dedup();
+                        peers.push(DiscoveredPeer {
+                            peer_id: record.provider.to_string(),
+                            addresses,
+                        });
+                    }
+                    for provider in providers {
+                        let mut addresses: Vec<String> = self
+                            .routing_addresses(&provider)
+                            .into_iter()
+                            .take(MAX_DISCOVERED_ADDRESSES)
+                            .map(|address| address.to_string())
+                            .collect();
+                        addresses.sort();
+                        addresses.dedup();
+                        peers.push(DiscoveredPeer {
+                            peer_id: provider.to_string(),
+                            addresses,
+                        });
+                    }
+                    peers.sort_by(|left, right| left.peer_id.cmp(&right.peer_id));
+                    peers.dedup_by(|left, right| left.peer_id == right.peer_id);
+                    peers.truncate(MAX_DISCOVERED_PEERS);
+                    let _ = respond.send(Ok(peers));
+                }
+                Err(_) => {
+                    if let Some(pending) = self.pending_queries.remove(&id) {
+                        self.fail_pending(pending, "dht_provider_lookup_failed", NetError::Timeout);
+                    }
+                }
+            },
+            kad::QueryResult::RepublishRecord(result) => {
+                self.shared.record_dht_publish(result.is_ok());
+            }
+            kad::QueryResult::RepublishProvider(result) => {
+                if result.is_err() {
+                    self.shared.record_last_error("dht_republish_provider_failed");
+                }
+            }
+        }
+    }
+
+    fn fail_pending(&mut self, pending: PendingQuery, code: &'static str, error: NetError) {
+        match pending {
+            PendingQuery::Discover { respond, .. } => {
+                self.shared.record_dht_query_failed(code);
+                let _ = respond.send(Err(error));
+            }
+            PendingQuery::Publish { respond, .. } => {
+                self.shared.record_dht_query_failed(code);
+                self.shared.record_dht_publish(false);
+                let _ = respond.send(Err(error));
+            }
+            PendingQuery::Lookup { respond, .. } => {
+                self.shared.record_dht_query_failed(code);
+                let _ = respond.send(Err(error));
+            }
+            PendingQuery::StartProviding { respond, .. } => {
+                self.shared.record_dht_query_failed(code);
+                let _ = respond.send(Err(error));
+            }
+            PendingQuery::FindProviders { respond, .. } => {
+                self.shared.record_dht_query_failed(code);
+                let _ = respond.send(Err(error));
+            }
+        }
     }
 
     fn schedule_retry(&mut self, peer_id: &PeerId) {
@@ -493,14 +1081,19 @@ impl Driver {
                 ..
             } => {
                 let direction = if endpoint.is_dialer() { "outbound" } else { "inbound" };
-                let transport = transport_label(endpoint.get_remote_address());
+                let remote_address = endpoint.get_remote_address().clone();
+                let transport = transport_label(&remote_address);
                 let connected = self.shared.record_connected(
                     &peer_id.to_string(),
                     direction,
                     transport,
-                    endpoint.get_remote_address(),
+                    &remote_address,
                     established_in,
                 );
+                self.swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .add_address(&peer_id, remote_address);
                 if num_established.get() == 1 {
                     self.backoff.remove(&peer_id);
                 }
@@ -560,11 +1153,16 @@ impl Driver {
                 self.shared.add_observed(&info.observed_addr);
                 for address in info.listen_addrs.iter().take(8) {
                     self.swarm.add_peer_address(peer_id, address.clone());
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .add_address(&peer_id, address.clone());
                 }
             }
             BehaviourEvent::Ping(ping::Event {
                 peer, result: Ok(rtt), ..
             }) => self.shared.record_rtt(&peer.to_string(), rtt),
+            BehaviourEvent::Kademlia(event) => self.on_kademlia_event(event),
             BehaviourEvent::Test(request_response::Event::Message { peer, message, .. }) => match message {
                 request_response::Message::Request { request, channel, .. } => {
                     self.on_inbound_request(peer, request, channel);

@@ -279,6 +279,59 @@ impl Shared {
         }
     }
 
+    pub(crate) fn set_dht_mode(&self, mode: &str) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.dht_mode = mode.to_owned();
+    }
+
+    pub(crate) fn set_dht_routing_peers(&self, count: usize) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.dht_routing_peers = count;
+    }
+
+    pub(crate) fn mark_dht_bootstrapped(&self) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.dht_bootstrapped = true;
+    }
+
+    pub(crate) fn record_dht_query_started(&self) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.dht_queries_started = status.dht_queries_started.saturating_add(1);
+    }
+
+    pub(crate) fn record_dht_query_failed(&self, code: &str) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.dht_queries_failed = status.dht_queries_failed.saturating_add(1);
+        status.last_error = Some(code.to_owned());
+    }
+
+    pub(crate) fn record_dht_record(&self, accepted: bool) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if accepted {
+            status.dht_records_accepted = status.dht_records_accepted.saturating_add(1);
+        } else {
+            status.dht_records_rejected = status.dht_records_rejected.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn record_dht_provider(&self, accepted: bool) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if accepted {
+            status.dht_providers_accepted = status.dht_providers_accepted.saturating_add(1);
+        } else {
+            status.dht_providers_rejected = status.dht_providers_rejected.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn record_dht_publish(&self, success: bool) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if success {
+            status.dht_publish_successes = status.dht_publish_successes.saturating_add(1);
+        } else {
+            status.dht_publish_failures = status.dht_publish_failures.saturating_add(1);
+        }
+    }
+
     pub(crate) fn record_last_error(&self, code: &str) {
         let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
         status.last_error = Some(code.to_owned());

@@ -27,6 +27,18 @@ pub const DEFAULT_MAX_CONCURRENT_STREAMS: usize = 32;
 pub const DEFAULT_MAX_REQUESTS_PER_PEER_PER_MINUTE: u32 = 60;
 /// Default idle connection timeout.
 pub const DEFAULT_IDLE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(60);
+/// Default deadline for one DHT lookup or publication.
+pub const DEFAULT_DHT_QUERY_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default lifetime of one stored DHT record or provider record.
+pub const DEFAULT_DHT_RECORD_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+/// Default interval for rebootstrap and provider republication.
+pub const DEFAULT_DHT_REPUBLISH_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);
+/// Default maximum stored DHT value records.
+pub const DEFAULT_DHT_STORE_MAX_RECORDS: usize = 1_024;
+/// Default maximum providers retained for one key.
+pub const DEFAULT_DHT_STORE_MAX_PROVIDERS: usize = 20;
+/// Default maximum content keys this node advertises as a provider.
+pub const DEFAULT_DHT_STORE_MAX_PROVIDED_KEYS: usize = 512;
 
 /// Highest accepted value for any connection limit.
 pub const MAX_CONNECTION_LIMIT: u32 = 512;
@@ -34,6 +46,37 @@ pub const MAX_CONNECTION_LIMIT: u32 = 512;
 pub const MAX_BOOTSTRAP_PEERS: usize = 64;
 /// Highest accepted listen-address count.
 pub const MAX_LISTEN_ADDRESSES: usize = 8;
+/// Highest accepted DHT query timeout.
+pub const MAX_DHT_QUERY_TIMEOUT: Duration = Duration::from_secs(120);
+/// Highest accepted DHT record lifetime.
+pub const MAX_DHT_RECORD_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+/// Highest accepted stored DHT value records.
+pub const MAX_DHT_STORE_RECORDS: usize = 8_192;
+/// Highest accepted providers retained for one key.
+pub const MAX_DHT_STORE_PROVIDERS: usize = 128;
+/// Highest accepted locally advertised provider keys.
+pub const MAX_DHT_PROVIDED_KEYS: usize = 4_096;
+
+/// Role this node takes in the Kademlia DHT.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DhtMode {
+    /// Query the DHT, store only records routed to this node, and serve them.
+    #[default]
+    Client,
+    /// Act as a public routing and storage node, typically a bootstrap node.
+    Server,
+}
+
+impl DhtMode {
+    /// Stable wire representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Client => "client",
+            Self::Server => "server",
+        }
+    }
+}
 
 /// QUIC v1 over UDP, preferred transport.
 pub const QUIC_LISTEN_ADDRESS: &str = "/ip4/0.0.0.0/udp/0/quic-v1";
@@ -69,6 +112,20 @@ pub struct NetworkConfig {
     pub max_requests_per_peer_per_minute: u32,
     /// Idle connection timeout.
     pub idle_connection_timeout: Duration,
+    /// Kademlia role for this node.
+    pub dht_mode: DhtMode,
+    /// Deadline for one DHT query.
+    pub dht_query_timeout: Duration,
+    /// Lifetime of a stored DHT record or provider record.
+    pub dht_record_ttl: Duration,
+    /// Rebootstrap and provider republication interval.
+    pub dht_republish_interval: Duration,
+    /// Maximum value records retained in the local DHT store.
+    pub dht_store_max_records: usize,
+    /// Maximum providers retained for one key.
+    pub dht_store_max_providers: usize,
+    /// Maximum content keys this node advertises as a provider.
+    pub dht_store_max_provided_keys: usize,
 }
 
 impl NetworkConfig {
@@ -89,6 +146,13 @@ impl NetworkConfig {
             reconnect_max_delay: DEFAULT_RECONNECT_MAX_DELAY,
             max_requests_per_peer_per_minute: DEFAULT_MAX_REQUESTS_PER_PEER_PER_MINUTE,
             idle_connection_timeout: DEFAULT_IDLE_CONNECTION_TIMEOUT,
+            dht_mode: DhtMode::Client,
+            dht_query_timeout: DEFAULT_DHT_QUERY_TIMEOUT,
+            dht_record_ttl: DEFAULT_DHT_RECORD_TTL,
+            dht_republish_interval: DEFAULT_DHT_REPUBLISH_INTERVAL,
+            dht_store_max_records: DEFAULT_DHT_STORE_MAX_RECORDS,
+            dht_store_max_providers: DEFAULT_DHT_STORE_MAX_PROVIDERS,
+            dht_store_max_provided_keys: DEFAULT_DHT_STORE_MAX_PROVIDED_KEYS,
         }
     }
 
@@ -150,6 +214,21 @@ impl NetworkConfig {
         {
             return Err(NetError::InvalidConfig("reconnect_delay"));
         }
+        if self.dht_query_timeout.is_zero() || self.dht_query_timeout > MAX_DHT_QUERY_TIMEOUT {
+            return Err(NetError::InvalidConfig("dht_query_timeout"));
+        }
+        if self.dht_record_ttl < Duration::from_secs(60) || self.dht_record_ttl > MAX_DHT_RECORD_TTL {
+            return Err(NetError::InvalidConfig("dht_record_ttl"));
+        }
+        if self.dht_republish_interval < Duration::from_secs(60) || self.dht_republish_interval > self.dht_record_ttl {
+            return Err(NetError::InvalidConfig("dht_republish_interval"));
+        }
+        if !(1..=MAX_DHT_STORE_RECORDS).contains(&self.dht_store_max_records)
+            || !(1..=MAX_DHT_STORE_PROVIDERS).contains(&self.dht_store_max_providers)
+            || !(1..=MAX_DHT_PROVIDED_KEYS).contains(&self.dht_store_max_provided_keys)
+        {
+            return Err(NetError::InvalidConfig("dht_store"));
+        }
         Ok(())
     }
 
@@ -192,7 +271,7 @@ mod tests {
 
     use libp2p::Multiaddr;
 
-    use super::{NetworkConfig, QUIC_LISTEN_ADDRESS, TCP_LISTEN_ADDRESS, require_peer_id};
+    use super::{DhtMode, NetworkConfig, QUIC_LISTEN_ADDRESS, TCP_LISTEN_ADDRESS, require_peer_id};
     use crate::error::NetError;
 
     fn config() -> NetworkConfig {
@@ -238,5 +317,38 @@ mod tests {
         assert_eq!(config.reconnect_delay(2), Duration::from_secs(2));
         assert_eq!(config.reconnect_delay(4), Duration::from_secs(8));
         assert_eq!(config.reconnect_delay(20), config.reconnect_max_delay);
+    }
+
+    #[test]
+    fn dht_defaults_are_client_mode_and_bounded() {
+        let config = config();
+        assert_eq!(config.dht_mode, DhtMode::Client);
+        assert_eq!(DhtMode::Client.as_str(), "client");
+        assert_eq!(DhtMode::Server.as_str(), "server");
+
+        let mut invalid = config.clone();
+        invalid.dht_query_timeout = Duration::ZERO;
+        assert!(matches!(
+            invalid.validate(),
+            Err(NetError::InvalidConfig("dht_query_timeout"))
+        ));
+
+        let mut invalid = config.clone();
+        invalid.dht_record_ttl = Duration::from_secs(30);
+        assert!(matches!(
+            invalid.validate(),
+            Err(NetError::InvalidConfig("dht_record_ttl"))
+        ));
+
+        let mut invalid = config.clone();
+        invalid.dht_republish_interval = invalid.dht_record_ttl + Duration::from_secs(1);
+        assert!(matches!(
+            invalid.validate(),
+            Err(NetError::InvalidConfig("dht_republish_interval"))
+        ));
+
+        let mut invalid = config;
+        invalid.dht_store_max_records = 0;
+        assert!(matches!(invalid.validate(), Err(NetError::InvalidConfig("dht_store"))));
     }
 }

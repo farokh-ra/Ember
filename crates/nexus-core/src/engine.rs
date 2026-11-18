@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use nexus_crypto::Value;
 use nexus_identity::{Identity, IdentityVault, LocalEncryptionKey};
-use nexus_net::{Network, NetworkConfig, NetworkState, NetworkStatus, PeerSnapshot};
+use nexus_net::{Network, NetworkConfig, NetworkState, NetworkStatus, PeerDiscovery, PeerSnapshot};
 use nexus_store::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage, Store, StoreConfig, StoreError, safe_display_name};
 
 use crate::config::CoreConfig;
@@ -490,6 +490,7 @@ impl Engine {
             0x0606 => self.network_reconnect(&params),
             0x0607 => self.network_connect(&params),
             0x0608 => self.network_send_test(&params),
+            0x0609 => self.network_discover(&params),
             0x0B01 => Ok(MethodOutcome::Result(self.test_echo(&params)?)),
             0x0B02 => self.test_fault(&params),
             _ => Err(CoreError::Unsupported(method_id)),
@@ -510,6 +511,7 @@ impl Engine {
             "network.reconnect",
             "network.connect",
             "network.send_test",
+            "network.discover",
         ]
         .into_iter()
         .chain(
@@ -844,7 +846,8 @@ impl Engine {
             Arc::clone(&self.events),
             Arc::clone(&self.dropped_events),
         ));
-        let config = NetworkConfig::new(self.config.data_root.clone());
+        let mut config = NetworkConfig::new(self.config.data_root.clone());
+        config.dht_mode = self.config.dht_mode;
         match Network::start(config, &key, observer) {
             Ok(network) => {
                 let status = network.status();
@@ -1051,6 +1054,32 @@ impl Engine {
         let ops = Arc::clone(&self.ops);
         self.pool.submit(move || {
             run_network_send_test(&events, &ops, op_id, token, network, peer_id, payload);
+        })?;
+        Ok(MethodOutcome::Result(op_accepted(op_id)))
+    }
+
+    fn network_discover(&self, params: &Value) -> Result<MethodOutcome, CoreError> {
+        self.require_running()?;
+        let target = match map_get(params, "target") {
+            None | Some(Value::Null) => None,
+            Some(Value::Bytes(bytes)) => {
+                let key: [u8; nexus_protocol::DHT_KEY_BYTES] = bytes
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| CoreError::InvalidArgument("target must be a 32-byte key"))?;
+                Some(key)
+            }
+            Some(_) => return Err(CoreError::InvalidArgument("target must be a byte string")),
+        };
+        let network = match self.require_network() {
+            Ok(network) => network,
+            Err(error) => return Ok(MethodOutcome::Domain(error)),
+        };
+        let (op_id, token) = self.ops.begin();
+        let events = Arc::clone(&self.events);
+        let ops = Arc::clone(&self.ops);
+        self.pool.submit(move || {
+            run_network_discover(&events, &ops, op_id, token, network, target);
         })?;
         Ok(MethodOutcome::Result(op_accepted(op_id)))
     }
@@ -1316,6 +1345,84 @@ fn run_network_reconnect(
     ops.finish(op_id);
 }
 
+fn run_network_discover(
+    events: &EventQueue,
+    ops: &OperationRegistry,
+    op_id: u64,
+    token: Arc<CancelToken>,
+    network: Arc<Network>,
+    target: Option<[u8; 32]>,
+) {
+    let target_value = || target.map_or(Value::Null, |key| Value::Bytes(key.to_vec()));
+    if token.is_cancelled() {
+        emit_network_terminal(
+            events,
+            op_id,
+            "network.discovery_cancelled",
+            Value::Map(vec![(Value::Text("target".to_owned()), target_value())]),
+        );
+        ops.finish(op_id);
+        return;
+    }
+    let result = network.discover_peers(target.as_ref().map(|key| key.as_slice()));
+    if token.is_cancelled() {
+        emit_network_terminal(
+            events,
+            op_id,
+            "network.discovery_cancelled",
+            Value::Map(vec![(Value::Text("target".to_owned()), target_value())]),
+        );
+        ops.finish(op_id);
+        return;
+    }
+    let (event_type, data) = match result {
+        Ok(discovery) => (
+            "network.discovery_completed",
+            discovery_value(&discovery, target_value()),
+        ),
+        Err(error) => (
+            "network.discovery_failed",
+            Value::Map(vec![
+                (Value::Text("target".to_owned()), target_value()),
+                (
+                    Value::Text("error".to_owned()),
+                    error_value(&network_domain_error(&error)),
+                ),
+            ]),
+        ),
+    };
+    emit_network_terminal(events, op_id, event_type, data);
+    ops.finish(op_id);
+}
+
+fn discovery_value(discovery: &PeerDiscovery, target: Value) -> Value {
+    let peers = discovery
+        .peers
+        .iter()
+        .map(|peer| {
+            Value::Map(vec![
+                (Value::Text("peer_id".to_owned()), Value::Text(peer.peer_id.clone())),
+                (
+                    Value::Text("addresses".to_owned()),
+                    Value::Array(peer.addresses.iter().cloned().map(Value::Text).collect()),
+                ),
+            ])
+        })
+        .collect();
+    Value::Map(vec![
+        (Value::Text("target".to_owned()), target),
+        (Value::Text("peers".to_owned()), Value::Array(peers)),
+        (
+            Value::Text("routing_peers".to_owned()),
+            Value::Unsigned(u64::try_from(discovery.routing_peers).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("elapsed_ms".to_owned()),
+            Value::Unsigned(discovery.elapsed_ms),
+        ),
+    ])
+}
+
 fn default_domain_message(code: DomainCode) -> String {
     match code {
         DomainCode::InvalidArgument => "The request is invalid.",
@@ -1394,5 +1501,55 @@ fn optional_unsigned(value: &Value, key: &str) -> Result<Option<u64>, CoreError>
             .as_unsigned()
             .map(Some)
             .ok_or(CoreError::InvalidArgument("expected an unsigned integer field")),
+    }
+}
+
+#[cfg(test)]
+mod stage10_tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+    use crate::event::EventQueue;
+    use crate::ops::OperationRegistry;
+
+    #[test]
+    fn discovery_failure_emits_a_terminal_event() {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
+        let root = std::env::temp_dir().join(format!("nexus-core-stage10-failure-{}-{suffix}", std::process::id()));
+        fs::create_dir_all(&root).expect("test root");
+
+        // A stopped driver cannot accept the DHT query; the worker must turn
+        // that into a terminal failure event instead of panicking.
+        let key = LocalEncryptionKey::new([10_u8; 32]);
+        let network = Arc::new(Network::start(NetworkConfig::new(root.clone()), &key, Arc::new(())).expect("network"));
+        network.shutdown();
+
+        let events = Arc::new(EventQueue::new());
+        let ops = Arc::new(OperationRegistry::new());
+        let (op_id, token) = ops.begin();
+        run_network_discover(&events, &ops, op_id, token, network, Some([9_u8; 32]));
+
+        let event = events
+            .next_event(Duration::from_secs(2))
+            .expect("event read")
+            .expect("terminal event");
+        assert_eq!(event.event_type, "network.discovery_failed");
+        assert_eq!(event.op_id, Some(op_id));
+        match map_get(&event.data, "target") {
+            Some(Value::Bytes(bytes)) => assert_eq!(bytes, &[9_u8; 32]),
+            other => panic!("missing target: {other:?}"),
+        }
+        let error = map_get(&event.data, "error").expect("error field");
+        assert_eq!(
+            map_get(error, "code").and_then(Value::as_text),
+            Some(DomainCode::NetworkUnavailable.as_str())
+        );
+        let details = map_get(error, "details").expect("details field");
+        assert_eq!(
+            map_get(details, "net_code").and_then(Value::as_text),
+            Some("not_running")
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 }

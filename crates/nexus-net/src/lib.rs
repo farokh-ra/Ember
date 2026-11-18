@@ -27,12 +27,15 @@ use libp2p::{Multiaddr, PeerId};
 use nexus_identity::LocalEncryptionKey;
 use tokio::sync::{mpsc, oneshot};
 
-pub use bootstrap::{BOOTSTRAP_FILE_NAME, BOOTSTRAP_MAX_FILE_LENGTH};
+pub use bootstrap::{BOOTSTRAP_ENV_VAR, BOOTSTRAP_FILE_NAME, BOOTSTRAP_MAX_FILE_LENGTH};
 pub use config::{
-    DEFAULT_CONNECT_TIMEOUT, DEFAULT_IDLE_CONNECTION_TIMEOUT, DEFAULT_MAX_CONCURRENT_STREAMS, DEFAULT_MAX_ESTABLISHED,
+    DEFAULT_CONNECT_TIMEOUT, DEFAULT_DHT_QUERY_TIMEOUT, DEFAULT_DHT_RECORD_TTL, DEFAULT_DHT_REPUBLISH_INTERVAL,
+    DEFAULT_DHT_STORE_MAX_PROVIDED_KEYS, DEFAULT_DHT_STORE_MAX_PROVIDERS, DEFAULT_DHT_STORE_MAX_RECORDS,
+    DEFAULT_IDLE_CONNECTION_TIMEOUT, DEFAULT_MAX_CONCURRENT_STREAMS, DEFAULT_MAX_ESTABLISHED,
     DEFAULT_MAX_ESTABLISHED_PER_PEER, DEFAULT_MAX_PENDING_INCOMING, DEFAULT_MAX_REQUESTS_PER_PEER_PER_MINUTE,
-    DEFAULT_RECONNECT_BASE_DELAY, DEFAULT_RECONNECT_MAX_DELAY, DEFAULT_REQUEST_TIMEOUT, MAX_BOOTSTRAP_PEERS,
-    MAX_CONNECTION_LIMIT, MAX_LISTEN_ADDRESSES, NetworkConfig, QUIC_LISTEN_ADDRESS, TCP_LISTEN_ADDRESS,
+    DEFAULT_RECONNECT_BASE_DELAY, DEFAULT_RECONNECT_MAX_DELAY, DEFAULT_REQUEST_TIMEOUT, DhtMode, MAX_BOOTSTRAP_PEERS,
+    MAX_CONNECTION_LIMIT, MAX_DHT_PROVIDED_KEYS, MAX_DHT_QUERY_TIMEOUT, MAX_DHT_RECORD_TTL, MAX_DHT_STORE_PROVIDERS,
+    MAX_DHT_STORE_RECORDS, MAX_LISTEN_ADDRESSES, NetworkConfig, QUIC_LISTEN_ADDRESS, TCP_LISTEN_ADDRESS,
     require_peer_id,
 };
 pub use error::NetError;
@@ -41,12 +44,13 @@ pub use peer_key::{
     PEER_KEY_MAGIC, PEER_KEY_MAX_FILE_LENGTH, PEER_KEY_SALT_LENGTH, PEER_KEY_SEED_LENGTH, PeerKey,
 };
 pub use state::{
-    ConnectedPeer, NetworkEvent, NetworkObserver, NetworkState, NetworkStatus, PeerEventKind, PeerSnapshot, PeerState,
-    TestReply, transports,
+    ConnectedPeer, DhtValue, DiscoveredPeer, NetworkEvent, NetworkObserver, NetworkState, NetworkStatus, PeerDiscovery,
+    PeerEventKind, PeerSnapshot, PeerState, TestReply, transports,
 };
 
 use crate::driver::{COMMAND_CAPACITY, Command};
 use crate::shared::Shared;
+use nexus_protocol::{DHT_KEY_BYTES, DhtRecord};
 
 /// How long [`Network::start`] waits for the driver to build the swarm.
 pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -73,11 +77,18 @@ impl Network {
         observer: Arc<dyn NetworkObserver>,
     ) -> Result<Self, NetError> {
         let mut config = config;
-        for address in bootstrap::load(&config.data_root)? {
-            if !config.bootstrap.contains(&address) {
-                config.bootstrap.push(address);
+        let mut merged = bootstrap::compiled()?;
+        for address in config.bootstrap.drain(..) {
+            if !merged.contains(&address) {
+                merged.push(address);
             }
         }
+        for address in bootstrap::load(&config.data_root)? {
+            if !merged.contains(&address) {
+                merged.push(address);
+            }
+        }
+        config.bootstrap = merged;
         config.validate()?;
 
         let peer_key = PeerKey::load_or_create(&config.data_root, local_key)?;
@@ -187,6 +198,60 @@ impl Network {
         receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
     }
 
+    /// Runs one bounded peer-routing query.
+    ///
+    /// `target` is a 32-byte DHT key; `None` selects a random target so a
+    /// fresh node samples the network instead of repeatedly probing one point.
+    pub fn discover_peers(&self, target: Option<&[u8]>) -> Result<PeerDiscovery, NetError> {
+        let target = match target {
+            Some(target) => Some(dht_key(target)?),
+            None => None,
+        };
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::DhtDiscover { target, respond })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Publishes one exact signed DHT envelope under its derived key.
+    ///
+    /// The value is verified before it is sent so a malformed record can never
+    /// reach the network from this node.
+    pub fn publish_record(&self, key: &[u8], value: &[u8]) -> Result<(), NetError> {
+        let key = dht_key(key)?;
+        DhtRecord::verify_for_key(&key, value).map_err(|_| NetError::InvalidRecord)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::DhtPublish {
+            key,
+            value: value.to_vec(),
+            respond,
+        })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Looks up one DHT value and verifies it against the requested key.
+    pub fn lookup_record(&self, key: &[u8]) -> Result<Option<DhtValue>, NetError> {
+        let key = dht_key(key)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::DhtLookup { key, respond })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Announces this node as a provider for one 32-byte content ID.
+    pub fn start_providing(&self, content_id: &[u8]) -> Result<(), NetError> {
+        let key = dht_key(content_id)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::DhtStartProviding { key, respond })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Finds providers for one 32-byte content ID.
+    pub fn find_providers(&self, content_id: &[u8]) -> Result<Vec<DiscoveredPeer>, NetError> {
+        let key = dht_key(content_id)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::DhtFindProviders { key, respond })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
     /// Adds a bootstrap or manual peer and persists the list.
     pub fn bootstrap_add(&self, address: &str) -> Result<(), NetError> {
         let (_, address) = parse_peer_address(address)?;
@@ -268,4 +333,8 @@ fn parse_peer_address(text: &str) -> Result<(PeerId, Multiaddr), NetError> {
     let address: Multiaddr = text.trim().parse().map_err(|_| NetError::InvalidAddress)?;
     let (peer_id, address) = config::split_peer_address(&address)?;
     Ok((peer_id, address))
+}
+
+fn dht_key(key: &[u8]) -> Result<[u8; DHT_KEY_BYTES], NetError> {
+    key.try_into().map_err(|_| NetError::InvalidKey)
 }
