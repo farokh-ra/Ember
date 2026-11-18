@@ -151,6 +151,27 @@ All notable changes to Ember are recorded here. The format follows
   and `network.reconnect_*` / `network.connect_*` / `network.test_*` events.
 - 35 new Stage 09 Rust tests, for 201 Rust tests total.
 - Stage 09 evidence record.
+- libp2p Kademlia `/nexus/kad/1.0.0` with client and server modes, a 24 h
+  record TTL, 12 h republication, replication factor 8, and disjoint query
+  paths.
+- Exact signed-envelope DHT values for publications, profiles, and tombstones,
+  with key-derived verification and monotonic revision rules.
+- Raw content-ID provider records with bounded address lists and provider
+  discovery.
+- A bounded in-memory DHT store with `StoreInserts::FilterBoth` inbound
+  validation and caps of 1,024 records, 20 providers per key, and 512 locally
+  advertised provider keys.
+- Bootstrap entry points merged from compile-time `EMBER_BOOTSTRAP_PEERS`,
+  runtime configuration, and persisted `network/bootstrap.list`, deduplicated
+  and bounded to 64 entries.
+- `network.discover` (0x0609) with bounded peer routing, sampled targets, and
+  `network.discovery_completed|failed|cancelled` terminal events.
+- Eleven DHT status fields in `network.status` and a `dht_mode` create-time
+  config key.
+- DHT record and routing design in `docs/architecture/DHT_DESIGN.md` and
+  bootstrap operator guidance in `docs/operations/BOOTSTRAP_NODES.md`.
+- 13 new Stage 10 Rust tests, for 214 Rust tests total.
+- Stage 10 evidence record.
 
 ### Changed
 
@@ -179,11 +200,13 @@ All notable changes to Ember are recorded here. The format follows
 - `network_enabled` now starts the transport stack. A networking failure never
   fails core start; the core stays usable offline and reports the failure through
   `network.status`.
-- The protocol version is now `0.1.0-stage-09`; the ABI remains 1.
-- The committed `Cargo.lock` now resolves 406 packages, and the dependency and
-  license inventory is at version 1.6.0. One unmaintained, non-vulnerable
+- The protocol version is now `0.1.0-stage-10`; the ABI remains 1.
+- The committed `Cargo.lock` now resolves 408 packages, and the dependency and
+  license inventory is at version 1.7.0. One unmaintained, non-vulnerable
   Linux-only `paste` advisory is documented in `deny.toml`.
-- The FFI interface document is at version 1.2.0 with fourteen callable methods.
+- The FFI interface document is at version 1.3.0 with fifteen callable methods.
+- The identify protocol version is now `/nexus/0.1.0-stage-10`; the Kademlia
+  protocol is `/nexus/kad/1.0.0`.
 
 ### Fixed
 
@@ -200,6 +223,8 @@ All notable changes to Ember are recorded here. The format follows
 - Re-importing identical bytes under a full quota no longer fails before the
   content can be deduplicated.
 - Managed-store scans no longer follow symlinks or reparse points.
+- A failed DHT publication now increments `dht_publish_failures` once instead of
+  twice.
 
 ### Security
 
@@ -231,6 +256,16 @@ All notable changes to Ember are recorded here. The format follows
   claims public reachability without evidence.
 - Test messages, frames, bootstrap entries, listen addresses, connection counts,
   and per-peer inbound requests are bounded.
+- DHT records are accepted only when the exact signed envelope verifies and the
+  key derived from its signed identifier matches the storage key.
+- Stale revisions, same-revision conflicts, malformed values, invalid provider
+  keys, and oversized provider address lists are rejected and counted.
+- DHT value, provider, address, store, TTL, query, and frame sizes are bounded.
+  The in-memory store refuses new entries instead of growing without limit.
+- Bootstrap peers are entry points, not authorities: they cannot sign for a
+  user, change a DHT key, or override a signed record.
+- DHT queries reveal queried keys to participating peers; sampled targets avoid
+  repeating one exact interest.
 
 ### Known limitations
 
@@ -242,9 +277,18 @@ All notable changes to Ember are recorded here. The format follows
   streaming, and test methods only.
 - The network layer is implemented and tested on Windows loopback, but the
   product screens are still mock content and are not connected to it.
-- Stage 09 supports manual peers and configured bootstrap addresses only. mDNS,
-  relay, hole punching, and DHT routing are deferred, so some restrictive or
-  local networks cannot connect in v1.
+- Stage 10 supports Kademlia peer routing, signed record publication and
+  lookup, and provider discovery. mDNS, relay, hole punching, and NAT traversal
+  are deferred, so some restrictive or local networks cannot connect in v1.
+- The DHT store is in-memory and bounded. Records are rebuilt by republication
+  and lookup after a restart; they are not durable product state.
+- DHT records remain hints. An attacker can run many peers and influence which
+  records are reachable; global Sybil resistance and provider reputation are
+  later work.
+- There is no automatic global bootstrap-list update service. Compiled,
+  configured, and persisted lists are operator or release decisions.
+- Android runtime DHT behavior is not exercised locally; the Android libraries
+  cross-build with the same graph.
 - The Android lifecycle hook for Wi-Fi switches and sleep/wake is not bound yet;
   `Network::notify_network_change` is implemented and tested at the network
   layer.

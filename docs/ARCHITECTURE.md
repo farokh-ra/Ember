@@ -337,6 +337,27 @@ No UI code parses a raw network record. No lower layer writes another layer's ta
 
 DHT values are hints. Publication and profile records must verify; a source must serve a valid chunk before it is used.
 
+- Values are exact signed envelopes. A value is accepted only when its signature
+  verifies and the key derived from its signed identifier matches the DHT key it
+  was stored under.
+- Revisions are monotonic per key. A newer revision replaces the stored record;
+  an older revision is stale, and the same revision with different bytes is a
+  conflict. Both are rejected and counted.
+- Provider keys are raw 32-byte content IDs. Provider addresses are advisory,
+  may be empty, and are capped at 8 addresses of at most 256 bytes.
+- The DHT store is bounded and in memory; record state is rebuilt by
+  republication and lookups after a restart.
+- The default Kademlia role is `client`. Bootstrap nodes run in `server` mode;
+  a bootstrap peer is an entry point, not an authority for identities or
+  ownership.
+- Bootstrap addresses merge from the compile-time `EMBER_BOOTSTRAP_PEERS` list,
+  runtime configuration, and the persisted `network/bootstrap.list`, in that
+  order and deduplicated.
+
+See [DHT_DESIGN.md](architecture/DHT_DESIGN.md) for validation, bounds, and
+lookup behavior, and [BOOTSTRAP_NODES.md](operations/BOOTSTRAP_NODES.md) for
+operator guidance.
+
 ### 8.3 Wire protocols
 
 | Protocol ID | Purpose | Maximum response |
@@ -353,8 +374,10 @@ Protocol major versions are part of the ID. Unknown major versions receive `unsu
 - libp2p 0.57.x with QUIC v1 preferred and TCP + Noise + Yamux as fallback.
 - DNS resolution for bootstrap and manually entered multiaddresses.
 - Device peer identity is separate from the user signing identity. Restoring an identity backup does not copy the device peer key.
-- Application nodes are Kademlia clients. Community bootstrap nodes may run a headless server build.
+- Application nodes are Kademlia clients. Core deployments select `dht_mode: "server"` for a bootstrap node; ordinary devices default to `client`.
 - v1 supports configured bootstrap peers and manual peer entry. mDNS is deferred.
+- Bootstrap peers come from the compile-time entry list, runtime configuration, and the persisted list. Each source is optional and merged without a central directory. A bootstrap peer is an entry point, not an identity or ownership authority.
+- Kademlia records and providers are bounded, verified, and revision-checked. Lookups have a fixed deadline and return peer hints, never trusted product state.
 - No relay or advanced NAT traversal in v1; failures are reported honestly.
 - Connections, streams, message sizes, requests per peer, and retries are bounded.
 - Network changes, sleep/wake, and process restart cause reconnect or pause, never corruption or false completion.
