@@ -143,6 +143,47 @@ pub(crate) fn status_value(status: &NetworkStatus) -> Value {
             Value::Text("requests_rejected".to_owned()),
             Value::Unsigned(status.requests_rejected),
         ),
+        (Value::Text("dht_mode".to_owned()), Value::Text(status.dht_mode.clone())),
+        (
+            Value::Text("dht_routing_peers".to_owned()),
+            Value::Unsigned(u64::try_from(status.dht_routing_peers).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("dht_bootstrapped".to_owned()),
+            Value::Bool(status.dht_bootstrapped),
+        ),
+        (
+            Value::Text("dht_queries_started".to_owned()),
+            Value::Unsigned(status.dht_queries_started),
+        ),
+        (
+            Value::Text("dht_queries_failed".to_owned()),
+            Value::Unsigned(status.dht_queries_failed),
+        ),
+        (
+            Value::Text("dht_records_accepted".to_owned()),
+            Value::Unsigned(status.dht_records_accepted),
+        ),
+        (
+            Value::Text("dht_records_rejected".to_owned()),
+            Value::Unsigned(status.dht_records_rejected),
+        ),
+        (
+            Value::Text("dht_providers_accepted".to_owned()),
+            Value::Unsigned(status.dht_providers_accepted),
+        ),
+        (
+            Value::Text("dht_providers_rejected".to_owned()),
+            Value::Unsigned(status.dht_providers_rejected),
+        ),
+        (
+            Value::Text("dht_publish_successes".to_owned()),
+            Value::Unsigned(status.dht_publish_successes),
+        ),
+        (
+            Value::Text("dht_publish_failures".to_owned()),
+            Value::Unsigned(status.dht_publish_failures),
+        ),
         (
             Value::Text("last_error".to_owned()),
             status
@@ -260,6 +301,12 @@ pub(crate) fn domain_error(error: &NetError) -> DomainError {
         ),
         NetError::PeerNotFound => (DomainCode::NotFound, "The peer is not known."),
         NetError::NotConnected => (DomainCode::NetworkUnavailable, "The peer is not connected."),
+        NetError::InvalidRecord => (
+            DomainCode::VerificationFailed,
+            "The DHT record is not a valid signed record.",
+        ),
+        NetError::InvalidKey => (DomainCode::InvalidArgument, "The DHT key is invalid."),
+        NetError::RecordTooLarge => (DomainCode::InvalidArgument, "The DHT record exceeds its size limit."),
         NetError::Rejected => (DomainCode::NetworkUnavailable, "The remote peer rejected the request."),
         NetError::Io(_) => (DomainCode::IoError, "A local network operation failed."),
         NetError::DriverFailed => (DomainCode::NetworkUnavailable, "The network driver could not start."),

@@ -116,6 +116,28 @@ pub struct NetworkStatus {
     pub requests_served: u64,
     /// Inbound transport-check requests rejected by the rate limit.
     pub requests_rejected: u64,
+    /// Kademlia role: `client`, `server`, or `disabled`.
+    pub dht_mode: String,
+    /// Peers currently present in the local Kademlia routing table.
+    pub dht_routing_peers: usize,
+    /// Whether at least one Kademlia bootstrap query has succeeded.
+    pub dht_bootstrapped: bool,
+    /// DHT queries started since this node started.
+    pub dht_queries_started: u64,
+    /// DHT queries that timed out or returned a protocol error.
+    pub dht_queries_failed: u64,
+    /// Inbound DHT records accepted and stored after validation.
+    pub dht_records_accepted: u64,
+    /// Inbound DHT records rejected as malformed, wrongly keyed, or over quota.
+    pub dht_records_rejected: u64,
+    /// Inbound provider records accepted and stored after validation.
+    pub dht_providers_accepted: u64,
+    /// Inbound provider records rejected as malformed or over quota.
+    pub dht_providers_rejected: u64,
+    /// Local record publications that reached quorum.
+    pub dht_publish_successes: u64,
+    /// Local record publications that failed or timed out.
+    pub dht_publish_failures: u64,
     /// Stable code for the most recent failure.
     pub last_error: Option<String>,
 }
@@ -139,6 +161,17 @@ impl NetworkStatus {
             dial_failures: 0,
             requests_served: 0,
             requests_rejected: 0,
+            dht_mode: "disabled".to_owned(),
+            dht_routing_peers: 0,
+            dht_bootstrapped: false,
+            dht_queries_started: 0,
+            dht_queries_failed: 0,
+            dht_records_accepted: 0,
+            dht_records_rejected: 0,
+            dht_providers_accepted: 0,
+            dht_providers_rejected: 0,
+            dht_publish_successes: 0,
+            dht_publish_failures: 0,
             last_error: None,
         }
     }
@@ -161,6 +194,17 @@ impl NetworkStatus {
             dial_failures: 0,
             requests_served: 0,
             requests_rejected: 0,
+            dht_mode: "client".to_owned(),
+            dht_routing_peers: 0,
+            dht_bootstrapped: false,
+            dht_queries_started: 0,
+            dht_queries_failed: 0,
+            dht_records_accepted: 0,
+            dht_records_rejected: 0,
+            dht_providers_accepted: 0,
+            dht_providers_rejected: 0,
+            dht_publish_successes: 0,
+            dht_publish_failures: 0,
             last_error: None,
         }
     }
@@ -194,6 +238,37 @@ pub struct TestReply {
     pub payload: Vec<u8>,
     /// Round-trip time for the request/response exchange.
     pub round_trip_ms: u64,
+}
+
+/// One verified DHT value returned by a lookup.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DhtValue {
+    /// 32-byte DHT key the value was stored under.
+    pub key: Vec<u8>,
+    /// Exact signed-envelope bytes, verified before this value was returned.
+    pub value: Vec<u8>,
+    /// Peer that served the value, when known.
+    pub peer_id: Option<String>,
+}
+
+/// One peer returned by a Kademlia peer-routing query.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiscoveredPeer {
+    /// Authenticated libp2p peer ID.
+    pub peer_id: String,
+    /// Addresses advertised for this peer, capped to 8 entries.
+    pub addresses: Vec<String>,
+}
+
+/// Result of one bounded peer-routing query.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PeerDiscovery {
+    /// Closest peers returned by the query, sorted by peer ID.
+    pub peers: Vec<DiscoveredPeer>,
+    /// Peers currently present in the local routing table.
+    pub routing_peers: usize,
+    /// Query duration.
+    pub elapsed_ms: u64,
 }
 
 /// Peer event kind.

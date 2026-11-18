@@ -59,6 +59,15 @@ pub enum NetError {
     /// A transport-check message exceeded its size limit.
     #[error("the message exceeds the transport-check limit")]
     MessageTooLarge,
+    /// A DHT value was not a valid signed publication, profile, or tombstone.
+    #[error("the DHT record is not a valid signed record")]
+    InvalidRecord,
+    /// A DHT key or provider content ID was the wrong length.
+    #[error("the DHT key is invalid")]
+    InvalidKey,
+    /// A DHT value exceeded the signed-envelope cap.
+    #[error("the DHT record exceeds its size limit")]
+    RecordTooLarge,
     /// The remote peer rejected the request.
     #[error("the remote peer rejected the request")]
     Rejected,
@@ -96,6 +105,9 @@ impl NetError {
             Self::PeerNotFound => "not_found",
             Self::NotConnected => "not_connected",
             Self::MessageTooLarge => "message_too_large",
+            Self::InvalidRecord => "invalid_record",
+            Self::InvalidKey => "invalid_key",
+            Self::RecordTooLarge => "record_too_large",
             Self::Rejected => "rejected",
             Self::Io(_) => "io_error",
             Self::Crypto(_) => "crypto_error",

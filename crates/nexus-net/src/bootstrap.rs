@@ -19,6 +19,14 @@ use crate::peer_key::NETWORK_DIRECTORY;
 pub const BOOTSTRAP_FILE_NAME: &str = "bootstrap.list";
 /// Maximum accepted file size.
 pub const BOOTSTRAP_MAX_FILE_LENGTH: u64 = 64 * 1024;
+/// Compile-time bootstrap list environment variable.
+///
+/// Release builds may bake entry points in by setting
+/// `EMBER_BOOTSTRAP_PEERS` to one or more `/p2p`-terminated multiaddresses
+/// separated by semicolons, commas, or newlines.
+pub const BOOTSTRAP_ENV_VAR: &str = "EMBER_BOOTSTRAP_PEERS";
+
+const COMPILED_BOOTSTRAP_PEERS: Option<&str> = option_env!("EMBER_BOOTSTRAP_PEERS");
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -38,6 +46,19 @@ pub(crate) fn load(data_root: &Path) -> Result<Vec<Multiaddr>, NetError> {
     }
     let text = fs::read_to_string(&path).map_err(NetError::Io)?;
     parse(&text)
+}
+
+/// Loads the compile-time bootstrap list baked into a release build.
+///
+/// The list is an entry-point hint, never an authority: entries are ordinary
+/// signed peers, and runtime configuration or the persisted list can replace
+/// them without a rebuild.
+pub(crate) fn compiled() -> Result<Vec<Multiaddr>, NetError> {
+    let Some(text) = COMPILED_BOOTSTRAP_PEERS else {
+        return Ok(Vec::new());
+    };
+    let normalized = text.replace([';', ','], "\n");
+    parse(&normalized)
 }
 
 /// Persists the list atomically.

@@ -3,6 +3,7 @@
 use std::path::{Component, PathBuf};
 
 use nexus_crypto::{CborError, CborLimits, Value, decode};
+use nexus_net::DhtMode;
 use nexus_store::{DEFAULT_QUOTA_BYTES, MAX_QUOTA_BYTES, MIN_QUOTA_BYTES};
 
 use crate::ABI_VERSION;
@@ -26,6 +27,8 @@ pub struct CoreConfig {
     pub log_level: LogLevel,
     /// Whether networking should be started with the core.
     pub network_enabled: bool,
+    /// Kademlia role: `client` for ordinary devices, `server` for bootstrap nodes.
+    pub dht_mode: DhtMode,
     /// Managed storage quota.
     pub quota_bytes: u64,
     /// Whether `test.*` debug methods are enabled.
@@ -182,6 +185,11 @@ impl CoreConfig {
             _ => return Err(ConfigError::Invalid("log_level")),
         };
         let network_enabled = optional_bool(&value, "network_enabled")?.unwrap_or(false);
+        let dht_mode = match optional_text(&value, "dht_mode")?.unwrap_or("client") {
+            "client" => DhtMode::Client,
+            "server" => DhtMode::Server,
+            _ => return Err(ConfigError::Invalid("dht_mode")),
+        };
         let quota_bytes = optional_unsigned(&value, "quota_bytes")?.unwrap_or(DEFAULT_QUOTA_BYTES);
         if !(MIN_QUOTA_BYTES..=MAX_QUOTA_BYTES).contains(&quota_bytes) {
             return Err(ConfigError::Invalid("quota_bytes"));
@@ -194,6 +202,7 @@ impl CoreConfig {
             locale: locale.to_owned(),
             log_level,
             network_enabled,
+            dht_mode,
             quota_bytes,
             enable_test_methods,
         })
@@ -261,6 +270,7 @@ mod tests {
     use std::path::Path;
 
     use nexus_crypto::Value;
+    use nexus_net::DhtMode;
 
     use super::{CoreConfig, LogLevel, encode_config_for_test};
     use crate::ABI_VERSION;
@@ -273,6 +283,7 @@ mod tests {
             ("locale", Value::Text("en-US".to_owned())),
             ("log_level", Value::Text("debug".to_owned())),
             ("network_enabled", Value::Bool(false)),
+            ("dht_mode", Value::Text("server".to_owned())),
             ("quota_bytes", Value::Unsigned(nexus_store::MIN_QUOTA_BYTES)),
             ("enable_test_methods", Value::Bool(true)),
         ]
@@ -287,6 +298,7 @@ mod tests {
         assert_eq!(config.locale, "en-US");
         assert_eq!(config.log_level, LogLevel::Debug);
         assert!(!config.network_enabled);
+        assert_eq!(config.dht_mode, DhtMode::Server);
         assert_eq!(config.quota_bytes, nexus_store::MIN_QUOTA_BYTES);
         assert!(config.enable_test_methods);
     }
@@ -303,6 +315,7 @@ mod tests {
         assert_eq!(config.locale, "en");
         assert_eq!(config.log_level, LogLevel::Info);
         assert!(!config.network_enabled);
+        assert_eq!(config.dht_mode, DhtMode::Client);
         assert!(!config.enable_test_methods);
     }
 
@@ -327,6 +340,13 @@ mod tests {
         let mut entries = valid_entries(&root);
         entries[1].1 = Value::Text("../escape".to_owned());
         assert!(CoreConfig::parse(&encode_config_for_test(&entries)).is_err());
+
+        let mut entries = valid_entries(&root);
+        entries[6].1 = Value::Text("automatic".to_owned());
+        assert!(matches!(
+            CoreConfig::parse(&encode_config_for_test(&entries)),
+            Err(super::ConfigError::Invalid("dht_mode"))
+        ));
     }
 
     #[test]

@@ -1649,6 +1649,7 @@ dependencies = [
  "libp2p-dns",
  "libp2p-identify",
  "libp2p-identity",
+ "libp2p-kad",
  "libp2p-mdns",
  "libp2p-metrics",
  "libp2p-noise",
@@ -1767,6 +1768,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "libp2p-kad"
+version = "0.49.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "973caa45045e53f3cf1cf3d596888b82602b30640fd75485836c81aa66e7c38a"
+dependencies = [
+ "asynchronous-codec",
+ "bytes",
+ "either",
+ "fnv",
+ "futures",
+ "futures-bounded",
+ "futures-timer",
+ "libp2p-core",
+ "libp2p-identity",
+ "libp2p-swarm",
+ "prost",
+ "prost-codec",
+ "rand",
+ "sha2 0.11.1",
+ "smallvec",
+ "thiserror 2.0.21",
+ "tracing",
+ "uint",
+ "web-time",
+]
+
+[[package]]
 name = "libp2p-mdns"
 version = "0.49.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1795,6 +1823,7 @@ dependencies = [
  "libp2p-core",
  "libp2p-identify",
  "libp2p-identity",
+ "libp2p-kad",
  "libp2p-ping",
  "libp2p-swarm",
  "pin-project",
@@ -2273,6 +2302,7 @@ name = "nexus-protocol"
 version = "0.1.0"
 dependencies = [
  "nexus-crypto",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
 ]
 
@@ -3400,6 +3430,18 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "uint"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2833f28e3adbd1b867292ee4053252ea89ab85e44e5e4701ffead8cada0539fa"
+dependencies = [
+ "byteorder",
+ "crunchy",
+ "hex",
+ "static_assertions",
+]
 
 [[package]]
 name = "unicode-ident"

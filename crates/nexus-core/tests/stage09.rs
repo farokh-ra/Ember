@@ -41,6 +41,7 @@ fn config(root: &Path) -> CoreConfig {
         locale: "en".to_owned(),
         log_level: LogLevel::Info,
         network_enabled: true,
+        dht_mode: nexus_core::DhtMode::Client,
         quota_bytes: 1024 * 1024 * 1024,
         enable_test_methods: false,
     }

@@ -4,6 +4,7 @@
 //! `{1: body bstr, 2: sig bstr}`. A signature covers `domain_tag || body`.
 //! Verification always uses the stored body bytes; it never re-encodes them.
 
+mod dht;
 mod envelope;
 mod error;
 mod fields;
@@ -13,6 +14,11 @@ mod publication;
 mod tombstone;
 mod wire;
 
+pub use dht::{
+    DHT_KEY_BYTES, DHT_MAX_PROVIDER_ADDRESS_BYTES, DHT_MAX_PROVIDER_ADDRESSES, DHT_MAX_VALUE_BYTES, DhtRecord,
+    DhtRecordDecision, DhtRecordKind, content_provider_key, profile_dht_key, publication_dht_key, tombstone_dht_key,
+    validate_provider_addresses, validate_provider_key,
+};
 pub use envelope::{MAX_SIGNED_BODY_BYTES, MAX_SIGNED_RECORD_BYTES, SignedRecord};
 pub use error::ProtocolError;
 pub use manifest::{ChunkEntry, MANIFEST_SCHEMA_VERSION, MAX_CHUNKS, MAX_MANIFEST_BYTES, ManifestV1, manifest_root};

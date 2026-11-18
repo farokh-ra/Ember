@@ -51,4 +51,13 @@ pub enum ProtocolError {
     /// A bounded transport-check message was malformed or oversized.
     #[error("transport-check message is malformed")]
     InvalidWireMessage,
+    /// A DHT value was not a valid signed publication, profile, or tombstone.
+    #[error("DHT record is not a valid signed record")]
+    InvalidDhtRecord,
+    /// A DHT record was stored under a key that does not match its content.
+    #[error("DHT record key does not match the record")]
+    DhtKeyMismatch,
+    /// A provider record key or address list was invalid.
+    #[error("DHT provider record is invalid")]
+    InvalidDhtProvider,
 }
