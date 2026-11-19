@@ -70,7 +70,7 @@ flowchart LR
     CoreA -.->|optional entry points| Bootstrap[Community bootstrap nodes]
     CoreW -.->|optional entry points| Bootstrap
     Peers -.->|later stage| Index[Community index providers]
-    Peers -.->|later stage| Relay[Community relays]
+    Peers -.->|optional fallback| Relay[Community relays]
     CoreA --> LocalA[(Local SQLite + managed store)]
     CoreW --> LocalW[(Local SQLite + managed store)]
 ```
@@ -80,7 +80,7 @@ flowchart LR
 - The app has no account, login, cloud sync, or central identity recovery.
 - The default bootstrap list is compiled into the release and contains at least three independently operated entry points. Losing one does not disable the network.
 - Search uses a local index and optional peer index providers. No company-operated search endpoint exists.
-- Relay is not part of v1. Later relay support is optional and community-operated.
+- Relay is optional and community-operated. Direct connections remain the default; relay fallback is used only when a direct path fails.
 - No telemetry or crash reporting is enabled by default. Diagnostics are generated locally and exported only by the user.
 - Release updates are delivered through platform distribution or a signed installer, not a mandatory runtime service.
 - Any future optional service must be replaceable, non-authoritative for identity and ownership, and approved by a new ADR.
@@ -614,7 +614,7 @@ Runtime proof of criteria 2 and 3 is deferred to Stages 08–10, as the roadmap 
 | Argon2id calibration on baseline devices | Stage 06 | The format is versioned; parameters can be calibrated without changing the wire format. |
 | Android OEM foreground-service behavior | Stage 17/19 | Resumability and honesty are fixed; device-specific evidence is gathered there. |
 | Windows signing certificate and release accounts | Stage 19 | Build and packaging shape is fixed; credentials are release operations. |
-| Relay and advanced NAT traversal | Stage 11 | v1 explicitly reports failure without relay; transport abstraction leaves room. |
+| Relay and advanced NAT traversal | Stage 11 | Realized with Circuit Relay v2, DCUtR, and AutoNAT behind optional configuration; direct connections remain the default. |
 
 ## 20. Decision index
 

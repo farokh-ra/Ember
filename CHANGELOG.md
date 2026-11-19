@@ -172,6 +172,25 @@ All notable changes to Ember are recorded here. The format follows
   bootstrap operator guidance in `docs/operations/BOOTSTRAP_NODES.md`.
 - 13 new Stage 10 Rust tests, for 214 Rust tests total.
 - Stage 10 evidence record.
+- Circuit Relay v2 fallback, including relay-client reservations, bounded relay
+  server circuits, relay lists merged from compiled, configured, and persisted
+  sources, and optional community relay nodes.
+- DCUtR hole punching and AutoNAT v1 reachability, with path reporting for
+  direct and relayed connections.
+- A direct-first fallback order with bounded direct and relay deadlines and a
+  terminal `NoViablePath` result when every candidate fails.
+- Four new core methods: `network.relay_list` (0x060A), `network.relay_add`
+  (0x060B), `network.relay_remove` (0x060C), and `network.connectivity`
+  (0x060D).
+- NAT, relay, path, fallback, hole-punch, and relay-server fields in
+  `network.status`, `network.peers`, `network.connect_*`, and
+  `network.peer_event`, plus a connectivity troubleshooting hint.
+- Relay cost visibility through negotiated circuit byte and duration limits and
+  accepted/closed circuit counters.
+- NAT traversal and relay design in `docs/architecture/NAT_TRAVERSAL.md` and
+  relay operator guidance in `docs/operations/RELAY_NODES.md`.
+- 15 new Stage 11 Rust tests, for 229 Rust tests total.
+- Stage 11 evidence record.
 
 ### Changed
 
@@ -200,13 +219,16 @@ All notable changes to Ember are recorded here. The format follows
 - `network_enabled` now starts the transport stack. A networking failure never
   fails core start; the core stays usable offline and reports the failure through
   `network.status`.
-- The protocol version is now `0.1.0-stage-10`; the ABI remains 1.
-- The committed `Cargo.lock` now resolves 408 packages, and the dependency and
-  license inventory is at version 1.7.0. One unmaintained, non-vulnerable
+- The protocol version is now `0.1.0-stage-11`; the ABI remains 1.
+- The committed `Cargo.lock` now resolves 411 packages, and the dependency and
+  license inventory is at version 1.8.0. One unmaintained, non-vulnerable
   Linux-only `paste` advisory is documented in `deny.toml`.
-- The FFI interface document is at version 1.3.0 with fifteen callable methods.
-- The identify protocol version is now `/nexus/0.1.0-stage-10`; the Kademlia
+- The FFI interface document is at version 1.4.0 with nineteen callable
+  methods.
+- The identify protocol version is now `/nexus/0.1.0-stage-11`; the Kademlia
   protocol is `/nexus/kad/1.0.0`.
+- `libp2p` now enables the `autonat`, `dcutr`, and `relay` features. The
+  optional `libp2p-upnp` crate remains in the graph but is not enabled.
 
 ### Fixed
 
@@ -278,8 +300,14 @@ All notable changes to Ember are recorded here. The format follows
 - The network layer is implemented and tested on Windows loopback, but the
   product screens are still mock content and are not connected to it.
 - Stage 10 supports Kademlia peer routing, signed record publication and
-  lookup, and provider discovery. mDNS, relay, hole punching, and NAT traversal
-  are deferred, so some restrictive or local networks cannot connect in v1.
+  lookup, and provider discovery. Stage 11 adds Circuit Relay v2 fallback,
+  DCUtR hole punching, and AutoNAT. mDNS is deferred; NAT traversal is not
+  guaranteed without a reachable relay.
+- Raw relayed byte totals are not exposed by libp2p. Relay cost reporting uses
+  negotiated circuit limits and circuit counters, not a byte total.
+- UPnP and NAT-PMP port mapping are deferred; `libp2p-upnp` is not enabled.
+- The Kotlin Network troubleshooting section is demo data and is not connected
+  to the core yet.
 - The DHT store is in-memory and bounded. Records are rebuilt by republication
   and lookup after a restart; they are not durable product state.
 - DHT records remain hints. An attacker can run many peers and influence which
@@ -289,6 +317,8 @@ All notable changes to Ember are recorded here. The format follows
   configured, and persisted lists are operator or release decisions.
 - Android runtime DHT behavior is not exercised locally; the Android libraries
   cross-build with the same graph.
+- Android runtime relay, DCUtR, and AutoNAT behavior is not exercised locally;
+  the Android libraries cross-build with the same relay graph.
 - The Android lifecycle hook for Wi-Fi switches and sleep/wake is not bound yet;
   `Network::notify_network_change` is implemented and tested at the network
   layer.
