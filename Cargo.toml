@@ -44,6 +44,8 @@ getrandom = "0.4.3"
 hex = "0.4.3"
 hkdf = "0.13.0"
 libp2p = { version = "=0.57.1", features = [
+    "autonat",
+    "dcutr",
     "dns",
     "ed25519",
     "identify",
@@ -52,6 +54,7 @@ libp2p = { version = "=0.57.1", features = [
     "noise",
     "ping",
     "quic",
+    "relay",
     "request-response",
     "tcp",
     "tokio",

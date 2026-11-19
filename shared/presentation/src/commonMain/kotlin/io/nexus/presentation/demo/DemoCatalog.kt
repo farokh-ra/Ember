@@ -355,7 +355,18 @@ public object DemoCatalog {
     private fun onlineSnapshot(): DemoNetworkSnapshot =
         DemoNetworkSnapshot(
             state = PreviewNetworkState.ONLINE,
+            connectivity = DemoConnectivity.RELAY,
+            natStatus = DemoNatStatus.PRIVATE,
+            natPublicAddress = null,
+            relayFallbackEnabled = true,
             peerCount = 4,
+            directConnections = 2,
+            relayedConnections = 2,
+            fallbackAttempts = 3,
+            fallbackSuccesses = 2,
+            relayDataLimitLabel = "128 KiB per circuit",
+            relayDurationLimitLabel = "2 min per circuit",
+            relayPaths = demoRelayPaths(BootstrapPathState.CONNECTED, BootstrapPathState.UNREACHABLE),
             bootstrapPaths =
                 bootstrapPaths(
                     BootstrapPathState.CONNECTED,
@@ -363,12 +374,25 @@ public object DemoCatalog {
                     BootstrapPathState.CONNECTED,
                 ),
             recentErrors = emptyList(),
+            troubleshootingHint =
+                "Two peers are reachable through a community relay. Relay limits apply to each circuit.",
         )
 
     private fun connectingSnapshot(): DemoNetworkSnapshot =
         DemoNetworkSnapshot(
             state = PreviewNetworkState.CONNECTING,
+            connectivity = DemoConnectivity.CONNECTING,
+            natStatus = DemoNatStatus.UNKNOWN,
+            natPublicAddress = null,
+            relayFallbackEnabled = true,
             peerCount = 0,
+            directConnections = 0,
+            relayedConnections = 0,
+            fallbackAttempts = 0,
+            fallbackSuccesses = 0,
+            relayDataLimitLabel = null,
+            relayDurationLimitLabel = null,
+            relayPaths = emptyList(),
             bootstrapPaths =
                 bootstrapPaths(
                     BootstrapPathState.CONNECTING,
@@ -376,12 +400,25 @@ public object DemoCatalog {
                     BootstrapPathState.CONNECTING,
                 ),
             recentErrors = emptyList(),
+            troubleshootingHint =
+                "The node is still looking for a direct or relayed path. No content is available yet.",
         )
 
     private fun degradedSnapshot(): DemoNetworkSnapshot =
         DemoNetworkSnapshot(
             state = PreviewNetworkState.DEGRADED,
+            connectivity = DemoConnectivity.RELAY,
+            natStatus = DemoNatStatus.PRIVATE,
+            natPublicAddress = null,
+            relayFallbackEnabled = true,
             peerCount = 2,
+            directConnections = 1,
+            relayedConnections = 1,
+            fallbackAttempts = 4,
+            fallbackSuccesses = 1,
+            relayDataLimitLabel = "128 KiB per circuit",
+            relayDurationLimitLabel = "2 min per circuit",
+            relayPaths = demoRelayPaths(BootstrapPathState.CONNECTED, BootstrapPathState.UNREACHABLE),
             bootstrapPaths =
                 bootstrapPaths(
                     BootstrapPathState.CONNECTED,
@@ -391,6 +428,10 @@ public object DemoCatalog {
             recentErrors =
                 listOf(
                     DemoNetworkError(
+                        code = DemoNetworkErrorCode.RELAY_RESERVATION_FAILED,
+                        occurredLabel = "1 min ago",
+                    ),
+                    DemoNetworkError(
                         code = DemoNetworkErrorCode.BOOTSTRAP_UNREACHABLE,
                         occurredLabel = "2 min ago",
                     ),
@@ -399,12 +440,25 @@ public object DemoCatalog {
                         occurredLabel = "6 min ago",
                     ),
                 ),
+            troubleshootingHint =
+                "One relay refused a reservation. Remaining direct and relayed paths may still work.",
         )
 
     private fun offlineSnapshot(): DemoNetworkSnapshot =
         DemoNetworkSnapshot(
             state = PreviewNetworkState.OFFLINE,
+            connectivity = DemoConnectivity.NO_PEERS,
+            natStatus = DemoNatStatus.UNKNOWN,
+            natPublicAddress = null,
+            relayFallbackEnabled = true,
             peerCount = 0,
+            directConnections = 0,
+            relayedConnections = 0,
+            fallbackAttempts = 2,
+            fallbackSuccesses = 0,
+            relayDataLimitLabel = null,
+            relayDurationLimitLabel = null,
+            relayPaths = demoRelayPaths(BootstrapPathState.UNREACHABLE, BootstrapPathState.UNREACHABLE),
             bootstrapPaths =
                 bootstrapPaths(
                     BootstrapPathState.UNREACHABLE,
@@ -415,9 +469,34 @@ public object DemoCatalog {
                 listOf(
                     DemoNetworkError(
                         code = DemoNetworkErrorCode.NO_USABLE_PATH,
+                        occurredLabel = "1 min ago",
+                    ),
+                    DemoNetworkError(
+                        code = DemoNetworkErrorCode.RELAY_UNAVAILABLE,
                         occurredLabel = "5 min ago",
                     ),
                 ),
+            troubleshootingHint =
+                "No direct or relayed path is available. Add a reachable community relay or check firewall rules.",
+        )
+
+    private fun demoRelayPaths(
+        first: BootstrapPathState,
+        second: BootstrapPathState,
+    ): List<DemoRelayPath> =
+        listOf(
+            DemoRelayPath(
+                label = "Community Relay A",
+                endpoint = "/ip4/203.0.113.10/tcp/4001",
+                state = first,
+                detail = "Reservation active; 128 KiB and 2 min per circuit",
+            ),
+            DemoRelayPath(
+                label = "Community Relay B",
+                endpoint = "/dns4/relay-b.example/tcp/4001",
+                state = second,
+                detail = "Reservation not granted yet",
+            ),
         )
 
     private fun bootstrapPaths(

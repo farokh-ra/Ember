@@ -56,6 +56,18 @@ pub enum NetError {
     /// The peer is not currently connected.
     #[error("the peer is not connected")]
     NotConnected,
+    /// No configured relay is connected or reachable.
+    #[error("no relay is available")]
+    RelayUnavailable,
+    /// A relay reservation was denied or timed out.
+    #[error("the relay reservation failed")]
+    RelayReservationFailed,
+    /// A relayed connection could not be upgraded to a direct path.
+    #[error("the hole punch failed")]
+    HolePunchFailed,
+    /// Direct and relayed attempts both failed.
+    #[error("no direct or relay path is available")]
+    NoViablePath,
     /// A transport-check message exceeded its size limit.
     #[error("the message exceeds the transport-check limit")]
     MessageTooLarge,
@@ -104,6 +116,10 @@ impl NetError {
             Self::UnsupportedProtocol => "unsupported_protocol",
             Self::PeerNotFound => "not_found",
             Self::NotConnected => "not_connected",
+            Self::RelayUnavailable => "relay_unavailable",
+            Self::RelayReservationFailed => "relay_reservation_failed",
+            Self::HolePunchFailed => "hole_punch_failed",
+            Self::NoViablePath => "no_viable_path",
             Self::MessageTooLarge => "message_too_large",
             Self::InvalidRecord => "invalid_record",
             Self::InvalidKey => "invalid_key",
@@ -120,7 +136,14 @@ impl NetError {
     pub const fn retryable(&self) -> bool {
         matches!(
             self,
-            Self::Busy | Self::Unavailable | Self::Timeout | Self::ConnectionFailed | Self::NotRunning
+            Self::Busy
+                | Self::Unavailable
+                | Self::Timeout
+                | Self::ConnectionFailed
+                | Self::RelayUnavailable
+                | Self::RelayReservationFailed
+                | Self::NoViablePath
+                | Self::NotRunning
         )
     }
 }

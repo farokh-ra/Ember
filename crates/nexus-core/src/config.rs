@@ -29,6 +29,10 @@ pub struct CoreConfig {
     pub network_enabled: bool,
     /// Kademlia role: `client` for ordinary devices, `server` for bootstrap nodes.
     pub dht_mode: DhtMode,
+    /// Whether a failed direct dial may fall back to a connected community relay.
+    pub relay_fallback: bool,
+    /// Whether this node also serves as a community relay.
+    pub relay_server: bool,
     /// Managed storage quota.
     pub quota_bytes: u64,
     /// Whether `test.*` debug methods are enabled.
@@ -194,6 +198,8 @@ impl CoreConfig {
         if !(MIN_QUOTA_BYTES..=MAX_QUOTA_BYTES).contains(&quota_bytes) {
             return Err(ConfigError::Invalid("quota_bytes"));
         }
+        let relay_fallback = optional_bool(&value, "relay_fallback")?.unwrap_or(true);
+        let relay_server = optional_bool(&value, "relay_server")?.unwrap_or(false);
         let enable_test_methods = optional_bool(&value, "enable_test_methods")?.unwrap_or(false);
 
         Ok(Self {
@@ -203,6 +209,8 @@ impl CoreConfig {
             log_level,
             network_enabled,
             dht_mode,
+            relay_fallback,
+            relay_server,
             quota_bytes,
             enable_test_methods,
         })
@@ -285,6 +293,8 @@ mod tests {
             ("network_enabled", Value::Bool(false)),
             ("dht_mode", Value::Text("server".to_owned())),
             ("quota_bytes", Value::Unsigned(nexus_store::MIN_QUOTA_BYTES)),
+            ("relay_fallback", Value::Bool(false)),
+            ("relay_server", Value::Bool(true)),
             ("enable_test_methods", Value::Bool(true)),
         ]
     }
@@ -299,6 +309,8 @@ mod tests {
         assert_eq!(config.log_level, LogLevel::Debug);
         assert!(!config.network_enabled);
         assert_eq!(config.dht_mode, DhtMode::Server);
+        assert!(!config.relay_fallback);
+        assert!(config.relay_server);
         assert_eq!(config.quota_bytes, nexus_store::MIN_QUOTA_BYTES);
         assert!(config.enable_test_methods);
     }
@@ -316,6 +328,8 @@ mod tests {
         assert_eq!(config.log_level, LogLevel::Info);
         assert!(!config.network_enabled);
         assert_eq!(config.dht_mode, DhtMode::Client);
+        assert!(config.relay_fallback);
+        assert!(!config.relay_server);
         assert!(!config.enable_test_methods);
     }
 

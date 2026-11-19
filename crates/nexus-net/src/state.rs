@@ -81,6 +81,10 @@ pub struct PeerSnapshot {
     pub agent_version: Option<String>,
     /// Number of established connections to this peer.
     pub connections: u32,
+    /// Preferred data path: `direct` or `relay`.
+    pub path: Option<String>,
+    /// Relay peer ID when the preferred path is relayed.
+    pub relay_peer_id: Option<String>,
     /// Stable failure code from the last failed attempt.
     pub error: Option<String>,
 }
@@ -138,11 +142,86 @@ pub struct NetworkStatus {
     pub dht_publish_successes: u64,
     /// Local record publications that failed or timed out.
     pub dht_publish_failures: u64,
+    /// Estimated reachability: `unknown`, `public`, `private`, or `disabled`.
+    pub nat_status: String,
+    /// Address a remote AutoNAT server confirmed, when public.
+    pub nat_public_address: Option<String>,
+    /// AutoNAT dial-back probes sent since start.
+    pub nat_probes: u64,
+    /// Whether relay reservations and circuits are enabled.
+    pub relay_client_enabled: bool,
+    /// Whether a failed direct dial falls back to a relay.
+    pub relay_fallback_enabled: bool,
+    /// Configured community relays.
+    pub relays_configured: usize,
+    /// Configured relays with an active connection.
+    pub relays_connected: usize,
+    /// Active relay reservations.
+    pub relay_reservations: usize,
+    /// Reservation requests denied or timed out since start.
+    pub relay_reservation_failures: u64,
+    /// Relayed circuits established since start.
+    pub relay_circuits_established: u64,
+    /// Negotiated reservation data cap in bytes, when the relay advertises one.
+    pub relay_data_limit_bytes: Option<u64>,
+    /// Negotiated reservation duration cap in seconds, when the relay advertises one.
+    pub relay_duration_limit_secs: Option<u64>,
+    /// Direct dials that needed a relay fallback.
+    pub fallback_attempts: u64,
+    /// Relayed fallback attempts that connected successfully.
+    pub fallback_successes: u64,
+    /// Established direct connections.
+    pub direct_connections: usize,
+    /// Established relayed connections.
+    pub relayed_connections: usize,
+    /// DCUtR upgrades from a relayed to a direct connection.
+    pub direct_upgrades: u64,
+    /// DCUtR hole punches that failed.
+    pub hole_punch_failures: u64,
+    /// Whether this node advertises itself as a community relay.
+    pub relay_server_enabled: bool,
+    /// Active reservations accepted by this relay server.
+    pub relay_server_reservations: usize,
+    /// Active circuits served by this relay server.
+    pub relay_server_circuits: usize,
+    /// Circuits accepted by this relay server since start.
+    pub relay_server_circuits_accepted: u64,
+    /// Circuits closed by this relay server since start.
+    pub relay_server_circuits_closed: u64,
+    /// Reservation or circuit requests denied by this relay server.
+    pub relay_server_denied: u64,
+    /// Per-circuit byte cap advertised by this relay server.
+    pub relay_server_max_circuit_bytes: Option<u64>,
+    /// Per-circuit duration cap advertised by this relay server.
+    pub relay_server_max_circuit_duration_secs: Option<u64>,
+    /// Most recent successful connection path: `direct` or `relay`.
+    pub last_path: Option<String>,
     /// Stable code for the most recent failure.
     pub last_error: Option<String>,
 }
 
 impl NetworkStatus {
+    /// Compact connectivity classification for diagnostics and UI.
+    ///
+    /// This never claims reachability that was not observed: a public NAT
+    /// status is reported separately from established direct connections.
+    #[must_use]
+    pub fn connectivity(&self) -> &'static str {
+        if self.state == NetworkState::Disabled {
+            return "disabled";
+        }
+        if self.state == NetworkState::Starting {
+            return "connecting";
+        }
+        if self.relayed_connections > 0 {
+            return "relay";
+        }
+        if self.direct_connections > 0 {
+            return "direct";
+        }
+        "no_peers"
+    }
+
     /// Creates the disabled status.
     #[must_use]
     pub fn disabled() -> Self {
@@ -172,6 +251,33 @@ impl NetworkStatus {
             dht_providers_rejected: 0,
             dht_publish_successes: 0,
             dht_publish_failures: 0,
+            nat_status: "disabled".to_owned(),
+            nat_public_address: None,
+            nat_probes: 0,
+            relay_client_enabled: false,
+            relay_fallback_enabled: false,
+            relays_configured: 0,
+            relays_connected: 0,
+            relay_reservations: 0,
+            relay_reservation_failures: 0,
+            relay_circuits_established: 0,
+            relay_data_limit_bytes: None,
+            relay_duration_limit_secs: None,
+            fallback_attempts: 0,
+            fallback_successes: 0,
+            direct_connections: 0,
+            relayed_connections: 0,
+            direct_upgrades: 0,
+            hole_punch_failures: 0,
+            relay_server_enabled: false,
+            relay_server_reservations: 0,
+            relay_server_circuits: 0,
+            relay_server_circuits_accepted: 0,
+            relay_server_circuits_closed: 0,
+            relay_server_denied: 0,
+            relay_server_max_circuit_bytes: None,
+            relay_server_max_circuit_duration_secs: None,
+            last_path: None,
             last_error: None,
         }
     }
@@ -205,6 +311,33 @@ impl NetworkStatus {
             dht_providers_rejected: 0,
             dht_publish_successes: 0,
             dht_publish_failures: 0,
+            nat_status: "unknown".to_owned(),
+            nat_public_address: None,
+            nat_probes: 0,
+            relay_client_enabled: false,
+            relay_fallback_enabled: false,
+            relays_configured: 0,
+            relays_connected: 0,
+            relay_reservations: 0,
+            relay_reservation_failures: 0,
+            relay_circuits_established: 0,
+            relay_data_limit_bytes: None,
+            relay_duration_limit_secs: None,
+            fallback_attempts: 0,
+            fallback_successes: 0,
+            direct_connections: 0,
+            relayed_connections: 0,
+            direct_upgrades: 0,
+            hole_punch_failures: 0,
+            relay_server_enabled: false,
+            relay_server_reservations: 0,
+            relay_server_circuits: 0,
+            relay_server_circuits_accepted: 0,
+            relay_server_circuits_closed: 0,
+            relay_server_denied: 0,
+            relay_server_max_circuit_bytes: None,
+            relay_server_max_circuit_duration_secs: None,
+            last_path: None,
             last_error: None,
         }
     }
@@ -227,6 +360,10 @@ pub struct ConnectedPeer {
     pub remote_address: String,
     /// Time from dial start to established connection.
     pub established_ms: u64,
+    /// Selected path: `direct` or `relay`.
+    pub path: String,
+    /// Relay peer ID when the selected path is relayed.
+    pub relay_peer_id: Option<String>,
 }
 
 /// Result of one transport-check exchange.
@@ -321,6 +458,10 @@ pub enum NetworkEvent {
         direction: Option<String>,
         /// `quic` or `tcp` when known.
         transport: Option<String>,
+        /// `direct` or `relay` when known.
+        path: Option<String>,
+        /// Relay peer ID when the path is relayed.
+        relay_peer_id: Option<String>,
         /// Stable reason code for failures and disconnections.
         reason: Option<String>,
     },
