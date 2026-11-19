@@ -46,6 +46,8 @@ fn config(root: &Path, server: bool) -> CoreConfig {
         } else {
             nexus_core::DhtMode::Client
         },
+        relay_fallback: true,
+        relay_server: false,
         quota_bytes: 1024 * 1024 * 1024,
         enable_test_methods: false,
     }

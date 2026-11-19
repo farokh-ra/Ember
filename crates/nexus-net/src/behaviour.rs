@@ -6,15 +6,16 @@ use std::time::Duration;
 
 use libp2p::identity::Keypair;
 use libp2p::kad::store::{MemoryStore, MemoryStoreConfig};
+use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::{NetworkBehaviour, StreamProtocol};
-use libp2p::{connection_limits, identify, kad, ping, request_response};
+use libp2p::{Multiaddr, autonat, connection_limits, dcutr, identify, kad, ping, relay, request_response};
 use nexus_protocol::DHT_MAX_VALUE_BYTES;
 
 use crate::codec::{TestCodec, test_protocol};
 use crate::config::{DhtMode, NetworkConfig};
 
 /// Protocol version advertised through identify.
-pub const IDENTIFY_PROTOCOL_VERSION: &str = "/nexus/0.1.0-stage-10";
+pub const IDENTIFY_PROTOCOL_VERSION: &str = "/nexus/0.1.0-stage-11";
 /// Agent string advertised through identify.
 pub const IDENTIFY_AGENT_VERSION: &str = "ember/0.1.0";
 /// Identify exchange interval.
@@ -35,6 +36,14 @@ pub const KAD_QUERY_PARALLELISM: usize = 3;
 pub const KAD_MAX_PACKET_BYTES: usize = 80 * 1024;
 /// Rebootstrap interval for a node that stays online.
 pub const KAD_BOOTSTRAP_INTERVAL: Duration = Duration::from_secs(5 * 60);
+/// How long AutoNAT waits for one dial-back probe.
+pub const AUTONAT_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+/// Delay before the first AutoNAT probe.
+pub const AUTONAT_BOOT_DELAY: Duration = Duration::from_secs(5);
+/// Retry interval while AutoNAT reachability is unknown.
+pub const AUTONAT_RETRY_INTERVAL: Duration = Duration::from_secs(60);
+/// Refresh interval once AutoNAT reachability is established.
+pub const AUTONAT_REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 #[derive(NetworkBehaviour)]
 pub(crate) struct Behaviour {
@@ -42,11 +51,15 @@ pub(crate) struct Behaviour {
     pub(crate) identify: identify::Behaviour,
     pub(crate) ping: ping::Behaviour,
     pub(crate) kademlia: kad::Behaviour<MemoryStore>,
+    pub(crate) relay_server: relay::Behaviour,
+    pub(crate) relay_client: relay::client::Behaviour,
+    pub(crate) dcutr: Toggle<dcutr::Behaviour>,
+    pub(crate) autonat: Toggle<autonat::v1::Behaviour>,
     pub(crate) test: request_response::Behaviour<TestCodec>,
 }
 
 impl Behaviour {
-    pub(crate) fn new(key: &Keypair, config: &NetworkConfig) -> Self {
+    pub(crate) fn new(key: &Keypair, config: &NetworkConfig, relay_client: relay::client::Behaviour) -> Self {
         let limits = connection_limits::Behaviour::new(
             connection_limits::ConnectionLimits::default()
                 .with_max_established(Some(config.max_established))
@@ -107,14 +120,60 @@ impl Behaviour {
                 .with_max_concurrent_streams(config.max_concurrent_streams),
         );
 
+        let relay_config = relay::Config {
+            max_reservations: config.relay_max_reservations,
+            max_circuits: config.relay_max_circuits,
+            max_circuits_per_peer: config.relay_max_circuits_per_peer,
+            max_circuit_duration: config.relay_max_circuit_duration,
+            max_circuit_bytes: config.relay_max_circuit_bytes,
+            ..Default::default()
+        };
+        let mut relay_server = relay::Behaviour::new(local_peer_id, relay_config);
+        relay_server.set_status(Some(if config.relay_server_enabled {
+            relay::Status::Enable
+        } else {
+            relay::Status::Disable
+        }));
+
+        let dcutr = Toggle::from(config.dcutr_enabled.then(|| dcutr::Behaviour::new(local_peer_id)));
+
+        let autonat = Toggle::from(config.autonat_enabled.then(|| {
+            let autonat_config = autonat::v1::Config {
+                timeout: AUTONAT_PROBE_TIMEOUT,
+                boot_delay: AUTONAT_BOOT_DELAY,
+                retry_interval: AUTONAT_RETRY_INTERVAL,
+                refresh_interval: AUTONAT_REFRESH_INTERVAL,
+                use_connected: true,
+                ..Default::default()
+            };
+            let mut behaviour = autonat::v1::Behaviour::new(local_peer_id, autonat_config);
+            for address in &config.relays {
+                if let Ok((peer_id, plain)) = crate::config::split_peer_address(address) {
+                    behaviour.add_server(peer_id, Some(strip_peer_suffix(plain)));
+                }
+            }
+            behaviour
+        }));
+
         Self {
             limits,
             identify,
             ping,
             kademlia,
+            relay_server,
+            relay_client,
+            dcutr,
+            autonat,
             test,
         }
     }
+}
+
+fn strip_peer_suffix(mut address: Multiaddr) -> Multiaddr {
+    if matches!(address.iter().last(), Some(libp2p::multiaddr::Protocol::P2p(_))) {
+        address.pop();
+    }
+    address
 }
 
 fn nonzero(value: usize) -> NonZeroUsize {
@@ -127,7 +186,7 @@ mod tests {
 
     #[test]
     fn protocol_names_are_versioned_and_private() {
-        assert_eq!(IDENTIFY_PROTOCOL_VERSION, "/nexus/0.1.0-stage-10");
+        assert_eq!(IDENTIFY_PROTOCOL_VERSION, "/nexus/0.1.0-stage-11");
         assert_eq!(KAD_PROTOCOL_NAME, "/nexus/kad/1.0.0");
         assert!(!KAD_PROTOCOL_NAME.contains("ipfs"));
     }

@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-FFI-001 |
-| Version | 1.3.0 (ABI 1) |
-| Status | Implemented through Stage 10; Android runtime verification deferred |
-| Date | 2026-11-18 |
+| Version | 1.4.0 (ABI 1) |
+| Status | Implemented through Stage 11; Android runtime verification deferred |
+| Date | 2026-11-19 |
 | Header | [nexus_core.h](nexus_core.h) |
 | Related | [ADR-0003](../decisions/ADR-0003-ffi-c-abi-jni-jna.md), [Architecture](../ARCHITECTURE.md) |
 
@@ -105,6 +105,8 @@ The create-time config is a canonical CBOR text-keyed map with a maximum of 64 K
 | `log_level` | text | No | `trace`, `debug`, `info`, `warn`, or `error`; defaults to `info`. |
 | `network_enabled` | bool | No | Starts QUIC and TCP/Noise/Yamux transports with the core. A start failure never fails `start`; it is reported through `network.status`. Defaults to `false`. |
 | `dht_mode` | text | No | `client` or `server`; defaults to `client`. A bootstrap node uses `server`. |
+| `relay_fallback` | bool | No | Allows a failed direct dial to fall back to a connected community relay. Defaults to `true`. |
+| `relay_server` | bool | No | Serves bounded Circuit Relay v2 circuits for other peers. Defaults to `false`. |
 | `quota_bytes` | uint | No | 1-500 GiB; defaults to 10 GiB. |
 | `enable_test_methods` | bool | No | Exposes `test.*`; defaults to `false`. Release callers must leave this false. |
 
@@ -234,6 +236,10 @@ All production methods are available on both Android and Windows. Method IDs are
 | 0x0607 | `network.connect` | A | `multiaddr` | `network.connect_completed` with peer ID, transport, and address. |
 | 0x0608 | `network.send_test` | A | `peer_id`, `payload` (bytes) | `network.test_message` with echoed payload and round-trip time. |
 | 0x0609 | `network.discover` | A | `target?` (32-byte key) | `network.discovery_completed` with bounded peer hints, routing count, and elapsed time. |
+| 0x060A | `network.relay_list` | S | none | Configured community relays. |
+| 0x060B | `network.relay_add` | S | `multiaddr` | Validated and persisted relay address; updated list. |
+| 0x060C | `network.relay_remove` | S | `multiaddr` | Updated relay list. |
+| 0x060D | `network.connectivity` | S | none | Connectivity classification, NAT status, relay counts and limits, fallback counters, and a troubleshooting hint. |
 | 0x0701 | `discovery.explore` | A | `category?`, `sort`, `cursor`, `limit` | `discovery.page` and `discovery.completed` with coverage. |
 | 0x0702 | `search.query` | A | `query`, `filters`, `cursor`, `limit` | `search.page` and `search.completed` with coverage. |
 | 0x0703 | `search.cancel` | S | `op_id` | Cancellation accepted. |
@@ -257,7 +263,7 @@ All production methods are available on both Android and Windows. Method IDs are
 
 Method IDs are grouped by domain. A future minor ABI may add methods in unused IDs; a released ID is never renumbered. Unknown IDs return `NEXUS_STATUS_UNSUPPORTED` with a domain error.
 
-Stage 10 implements fifteen callable methods: `system.info`, `system.health`, `system.snapshot`, `store.usage`, the nine `network.*` methods above, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
+Stage 11 implements nineteen callable methods: `system.info`, `system.health`, `system.snapshot`, `store.usage`, the thirteen `network.*` methods above, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
 
 ### 6.1 Network method semantics
 
@@ -267,12 +273,17 @@ Stage 10 implements fifteen callable methods: `system.info`, `system.health`, `s
 - `bootstrap_add` requires a complete `/p2p/<peer-id>` multiaddr, persists the list in the data root, and dials with exponential backoff from 1 s to 60 s. `bootstrap_remove` removes it. Both return the updated `{bootstrap: [...]}` list.
 - `network.reconnect` without `peer_id` re-dials every bootstrap target; with `peer_id` it retries that peer if it is known. `network.connect` dials one explicit multiaddr. `network.send_test` sends the bounded `/nexus/test/1` payload to one connected peer.
 - `network.discover` runs one bounded Kademlia peer-routing query. `target` is optional: a 32-byte key routes around that point, and an omitted target samples a random key. The terminal event carries at most 32 peers (sorted by peer ID, at most 8 addresses each), `routing_peers`, and `elapsed_ms`. It returns peer hints only; a caller must not treat a returned address as verified or publicly reachable.
+- `network.connect` tries a direct dial first and only then a connected relay. `network.connect_completed` reports `path` = `direct` or `relay` and, for a relayed path, `relay_peer_id`. A direct connection is never replaced by a relay while it works. If every direct and relay attempt fails, the terminal event is `network.connect_failed` with `path`, optional `relay_peer_id`, and an `error` map containing `code`, `message`, and `retryable`.
+- `network.relay_list` returns the merged compiled, configured, and persisted relay list. `network.relay_add` and `network.relay_remove` require a complete `/p2p/<peer-id>` multiaddr, persist the change in `network/relays.list`, and return the updated `{relays: [...]}` list. The list is bounded to 16 entries and 64 KiB.
+- `network.connectivity` returns the single-word classification `disabled`, `connecting`, `relay`, `direct`, or `no_peers`, plus NAT status, relay counts, reservation/circuit limits, fallback and hole-punch counters, and a short `hint`. Relayed data connections take precedence over a direct connection to relay infrastructure.
+- Relay and NAT status fields are available from `network.status`: `connectivity`, `nat_status`, `nat_public_address`, `nat_probes`, `relay_client_enabled`, `relay_fallback_enabled`, `relays_configured`, `relays_connected`, `relay_reservations`, `relay_reservation_failures`, `relay_circuits_established`, `relay_data_limit_bytes`, `relay_duration_limit_secs`, `fallback_attempts`, `fallback_successes`, `direct_connections`, `relayed_connections`, `hole_punch_failures`, `direct_upgrades`, `relay_server_enabled`, `relay_server_reservations`, `relay_server_circuits`, `relay_server_circuits_accepted`, `relay_server_circuits_closed`, `relay_server_denied`, `relay_server_max_circuit_bytes`, and `relay_server_max_circuit_duration_secs`.
+- `network.peers` reports `path` = `direct` or `relay`, and `relay_peer_id` when the path is relayed.
 - DHT status fields are available from `network.status`: `dht_mode`, `dht_routing_peers`, `dht_bootstrapped`, `dht_queries_started`, `dht_queries_failed`, `dht_records_accepted`, `dht_records_rejected`, `dht_providers_accepted`, `dht_providers_rejected`, `dht_publish_successes`, and `dht_publish_failures`.
 - Each dial is bounded by the configured connect timeout (10 s by default) and each test exchange by the request timeout (8 s by default). A failed dial or exchange never stops the core or any other peer connection.
 - A dial that authenticates to a different peer identity than the one in the multiaddr fails with `verification_failed` and details `net_code` = `wrong_peer_id`; the mismatched peer is never recorded as connected.
 - Operational network failures (`disabled`, `unavailable`, `timeout`, `connection_failed`, `wrong_peer_id`, `peer_not_found`, `not_connected`, `rejected`, `message_too_large`) return domain failures. Malformed parameters, such as a missing `multiaddr` field or a payload of the wrong type, remain ABI-level `NEXUS_STATUS_INVALID_ARGUMENT`.
 - `network.status.last_error` and every network domain error carry small stable codes (`net_code`) without socket details, addresses of unrelated peers, or key material.
-- The Stage 09 stack listens on QUIC v1 and TCP with Noise and Yamux. Stage 10 adds `/nexus/kad/1.0.0` in client mode by default; `dht_mode: "server"` is for bootstrap nodes. mDNS is disabled in v1; discovery uses bootstrap addresses, Kademlia routing, and explicit connects.
+- The Stage 09 stack listens on QUIC v1 and TCP with Noise and Yamux. Stage 10 adds `/nexus/kad/1.0.0` in client mode by default; `dht_mode: "server"` is for bootstrap nodes. Stage 11 adds Circuit Relay v2 fallback, DCUtR hole punching, and AutoNAT v1. mDNS is disabled in v1; discovery uses bootstrap addresses, Kademlia routing, and explicit connects.
 
 ### 6.2 Async operation semantics
 
@@ -378,7 +389,7 @@ NexusStatus nexus_core_export_close(
 
 Events use the envelope in section 5.4.
 
-Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
+Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
 
 | Event | Meaning | Data |
 |---|---|---|
@@ -388,12 +399,12 @@ Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stop
 | `identity.backup_ready` | Backup export completed. | `backup_bytes`, `format_version` |
 | `identity.restored` | Backup restore completed. | `identity_id` |
 | `network.state` | Network state changed. | `state`, `peer_count`, `transports`, `reason?` |
-| `network.peer_event` | Peer connected, disconnected, or failed. | `peer_id`, `event`, `direction?`, `transport?`, `reason?` |
+| `network.peer_event` | Peer connected, disconnected, or failed. | `peer_id`, `event`, `direction?`, `transport?`, `path?`, `relay_peer_id?`, `reason?` |
 | `network.reconnect_completed` | Reconnect request finished. | `peer_id` (null for all bootstrap targets) |
 | `network.reconnect_failed` | Reconnect request failed. | `peer_id`, `error` |
 | `network.reconnect_cancelled` | Reconnect request cancelled. | `peer_id` |
-| `network.connect_completed` | Direct connection established and authenticated. | `peer_id`, `transport`, `remote_address`, `established_ms`, `multiaddr` |
-| `network.connect_failed` | Direct connection failed or identity did not match. | `multiaddr`, `error` |
+| `network.connect_completed` | Connection established and authenticated. | `peer_id`, `transport`, `remote_address`, `established_ms`, `multiaddr`, `path`, `relay_peer_id?` |
+| `network.connect_failed` | Direct and relay attempts failed or identity did not match. | `multiaddr`, `path?`, `relay_peer_id?`, `error` |
 | `network.connect_cancelled` | Direct connection cancelled. | `multiaddr` |
 | `network.test_message` | Transport-check exchange completed. | `peer_id`, `payload`, `round_trip_ms` |
 | `network.test_failed` | Transport-check exchange failed. | `peer_id`, `error` |
@@ -519,9 +530,12 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 | 09 | Unreachable peers, a peer restart, and repeatable start/stop do not crash or hang the node. | Passed in the `nexus-net` Stage 09 suite. |
 | 10 | A fresh node joins through bootstrap, discovers peers, and publishes/looks up a signed record and provider. | Passed in the `nexus-net` and `nexus-core` Stage 10 suites. |
 | 10 | Losing one bootstrap peer does not disable discovery, and churn does not disable the entry point. | Passed in the `nexus-net` Stage 10 suite. |
+| 11 | Direct connections are preferred, a failed direct dial falls back to a reachable relay, and no path reports `NoViablePath`. | Passed in the `nexus-net` and `nexus-core` Stage 11 suites. |
+| 11 | Relay reservations report negotiated limits, relay lists persist across restart, and `network.connectivity` reports the expected classification and hint. | Passed in the `nexus-net` and `nexus-core` Stage 11 suites. |
 | 12 | Import/export streaming handles a 4 GiB file with bounded memory. | Not yet exercised at that size. |
 | 19 | Fuzzing covers malformed CBOR, oversized buffers, invalid handles, and cancellation races. | Not yet implemented. |
 
 The detailed evidence, commands, and test counts are in
 [STAGE_08.md](../progress/STAGE_08.md), [STAGE_09.md](../progress/STAGE_09.md),
-and [STAGE_10.md](../progress/STAGE_10.md).
+[STAGE_10.md](../progress/STAGE_10.md), and
+[STAGE_11.md](../progress/STAGE_11.md).

@@ -21,6 +21,7 @@ pub(crate) struct Shared {
     status: RwLock<NetworkStatus>,
     peers: RwLock<BTreeMap<String, PeerSnapshot>>,
     bootstrap: RwLock<Vec<String>>,
+    relays: RwLock<Vec<String>>,
     observer: Arc<dyn NetworkObserver>,
     started_at: Instant,
 }
@@ -32,6 +33,7 @@ impl Shared {
             status: RwLock::new(status),
             peers: RwLock::new(BTreeMap::new()),
             bootstrap: RwLock::new(Vec::new()),
+            relays: RwLock::new(Vec::new()),
             observer,
             started_at: Instant::now(),
         }
@@ -67,6 +69,44 @@ impl Shared {
         status.bootstrap_configured = bootstrap.len();
     }
 
+    pub(crate) fn relays(&self) -> Vec<String> {
+        self.relays
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    pub(crate) fn set_relays(&self, addresses: Vec<String>) {
+        let mut relays = self.relays.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *relays = addresses;
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.relays_configured = relays.len();
+    }
+
+    pub(crate) fn configure_relay(
+        &self,
+        client: bool,
+        fallback: bool,
+        server: bool,
+        max_bytes: u64,
+        max_duration: Duration,
+    ) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.relay_client_enabled = client;
+        status.relay_fallback_enabled = fallback;
+        status.relay_server_enabled = server;
+        status.relay_server_max_circuit_bytes = server.then_some(max_bytes);
+        status.relay_server_max_circuit_duration_secs = server.then_some(max_duration.as_secs());
+        if client && !status.transports.iter().any(|transport| transport == "relay") {
+            status.transports.push("relay".to_owned());
+        }
+    }
+
+    pub(crate) fn set_relay_server_status(&self, enabled: bool) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.relay_server_enabled = enabled;
+    }
+
     pub(crate) fn is_connected(&self, peer_id: &str) -> bool {
         self.peers
             .read()
@@ -89,6 +129,8 @@ impl Shared {
             agent_version: None,
             error: None,
             connections: 0,
+            path: None,
+            relay_peer_id: None,
         });
         peer.state = PeerState::Connecting;
         peer.error = None;
@@ -97,10 +139,11 @@ impl Shared {
         drop(peers);
 
         self.record_dial_attempt();
-        self.emit_peer(peer_id, PeerEventKind::Dialing, None, None, None);
+        self.emit_peer(peer_id, PeerEventKind::Dialing, None, None, None, None, None);
         self.recompute(None);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn record_connected(
         &self,
         peer_id: &str,
@@ -108,8 +151,11 @@ impl Shared {
         transport: String,
         remote: &Multiaddr,
         established_in: Duration,
+        path: &'static str,
+        relay_peer_id: Option<&str>,
     ) -> ConnectedPeer {
         let mut peers = self.peers.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let relay_text = relay_peer_id.map(str::to_owned);
         let peer = peers.entry(peer_id.to_owned()).or_insert_with(|| PeerSnapshot {
             peer_id: peer_id.to_owned(),
             state: PeerState::Connected,
@@ -122,6 +168,8 @@ impl Shared {
             agent_version: None,
             error: None,
             connections: 0,
+            path: Some(path.to_owned()),
+            relay_peer_id: relay_text.clone(),
         });
         peer.state = PeerState::Connected;
         peer.direction = Some(direction.to_owned());
@@ -130,8 +178,22 @@ impl Shared {
         peer.last_seen_ms = now_ms();
         peer.error = None;
         peer.connections = peer.connections.saturating_add(1);
+        if path == "direct" || peer.path.as_deref() != Some("direct") {
+            peer.path = Some(path.to_owned());
+            peer.relay_peer_id = relay_text.clone();
+        }
         trim_peers(&mut peers);
         drop(peers);
+
+        {
+            let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if path == "relay" {
+                status.relayed_connections = status.relayed_connections.saturating_add(1);
+            } else {
+                status.direct_connections = status.direct_connections.saturating_add(1);
+            }
+            status.last_path = Some(path.to_owned());
+        }
 
         self.recompute(None);
         self.emit_peer(
@@ -139,6 +201,8 @@ impl Shared {
             PeerEventKind::Connected,
             Some(direction),
             Some(transport.clone()),
+            Some(path),
+            relay_peer_id,
             None,
         );
         ConnectedPeer {
@@ -146,11 +210,13 @@ impl Shared {
             transport,
             remote_address: remote.to_string(),
             established_ms: u64::try_from(established_in.as_millis()).unwrap_or(u64::MAX),
+            path: path.to_owned(),
+            relay_peer_id: relay_text,
         }
     }
 
-    pub(crate) fn record_disconnected(&self, peer_id: &str, reason: Option<&str>) {
-        let removed = {
+    pub(crate) fn record_disconnected(&self, peer_id: &str, reason: Option<&str>, path: &'static str) {
+        let (remaining, known) = {
             let mut peers = self.peers.write().unwrap_or_else(|poisoned| poisoned.into_inner());
             match peers.get_mut(peer_id) {
                 Some(peer) => {
@@ -160,15 +226,25 @@ impl Shared {
                         peer.direction = None;
                         peer.transport = None;
                         peer.remote_address = None;
+                        peer.path = None;
+                        peer.relay_peer_id = None;
                         peer.last_seen_ms = now_ms();
                     }
-                    peer.connections
+                    (peer.connections, true)
                 }
-                None => 0,
+                None => (0, false),
             }
         };
-        self.emit_peer(peer_id, PeerEventKind::Disconnected, None, None, reason);
-        if removed == 0 {
+        if known {
+            let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if path == "relay" {
+                status.relayed_connections = status.relayed_connections.saturating_sub(1);
+            } else {
+                status.direct_connections = status.direct_connections.saturating_sub(1);
+            }
+        }
+        self.emit_peer(peer_id, PeerEventKind::Disconnected, None, None, None, None, reason);
+        if remaining == 0 {
             self.recompute(reason);
         }
     }
@@ -188,17 +264,21 @@ impl Shared {
                 agent_version: None,
                 error: Some(code.to_owned()),
                 connections: 0,
+                path: None,
+                relay_peer_id: None,
             });
             if peer.state != PeerState::Connected {
                 peer.state = PeerState::Failed;
                 peer.connections = 0;
+                peer.path = None;
+                peer.relay_peer_id = None;
             }
             peer.last_seen_ms = now_ms();
             peer.error = Some(code.to_owned());
             trim_peers(&mut peers);
         }
         self.record_dial_failure(code);
-        self.emit_peer(peer_id, PeerEventKind::Failed, None, None, Some(code));
+        self.emit_peer(peer_id, PeerEventKind::Failed, None, None, None, None, Some(code));
         self.recompute(Some(code));
     }
 
@@ -211,10 +291,18 @@ impl Shared {
     }
 
     /// Drops one connection record without emitting a peer-state event.
-    pub(crate) fn record_connection_removed(&self, peer_id: &str) {
-        let mut peers = self.peers.write().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(peer) = peers.get_mut(peer_id) {
-            peer.connections = peer.connections.saturating_sub(1);
+    pub(crate) fn record_connection_removed(&self, peer_id: &str, path: &'static str) {
+        {
+            let mut peers = self.peers.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(peer) = peers.get_mut(peer_id) {
+                peer.connections = peer.connections.saturating_sub(1);
+            }
+        }
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if path == "relay" {
+            status.relayed_connections = status.relayed_connections.saturating_sub(1);
+        } else {
+            status.direct_connections = status.direct_connections.saturating_sub(1);
         }
     }
 
@@ -332,6 +420,103 @@ impl Shared {
         }
     }
 
+    pub(crate) fn set_nat_status(&self, status_text: &str, public_address: Option<&Multiaddr>) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.nat_status = status_text.to_owned();
+        status.nat_public_address = public_address.map(ToString::to_string);
+    }
+
+    pub(crate) fn record_nat_probe(&self) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.nat_probes = status.nat_probes.saturating_add(1);
+    }
+
+    pub(crate) fn set_relay_counts(&self, connected: usize, reservations: usize) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.relays_connected = connected;
+        status.relay_reservations = reservations;
+    }
+
+    pub(crate) fn record_relay_reservation(&self, success: bool) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !success {
+            status.relay_reservation_failures = status.relay_reservation_failures.saturating_add(1);
+            status.last_error = Some("relay_reservation_failed".to_owned());
+        }
+    }
+
+    pub(crate) fn set_relay_limits(&self, duration: Option<Duration>, bytes: Option<u64>) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.relay_duration_limit_secs = duration.map(|value| value.as_secs());
+        status.relay_data_limit_bytes = bytes;
+    }
+
+    pub(crate) fn record_relay_circuit(&self) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.relay_circuits_established = status.relay_circuits_established.saturating_add(1);
+    }
+
+    pub(crate) fn record_fallback_attempt(&self) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.fallback_attempts = status.fallback_attempts.saturating_add(1);
+    }
+
+    pub(crate) fn record_fallback_success(&self) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.fallback_successes = status.fallback_successes.saturating_add(1);
+    }
+
+    pub(crate) fn record_hole_punch(&self, success: bool) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if success {
+            status.direct_upgrades = status.direct_upgrades.saturating_add(1);
+            status.last_path = Some("direct".to_owned());
+        } else {
+            status.hole_punch_failures = status.hole_punch_failures.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn record_direct_upgrade(&self, peer_id: &str) {
+        {
+            let mut peers = self.peers.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(peer) = peers.get_mut(peer_id) {
+                peer.path = Some("direct".to_owned());
+                peer.relay_peer_id = None;
+                peer.last_seen_ms = now_ms();
+            }
+        }
+        self.record_hole_punch(true);
+    }
+
+    pub(crate) fn record_hole_punch_failure(&self) {
+        self.record_hole_punch(false);
+    }
+
+    pub(crate) fn record_relay_server_reservation(&self, opened: bool) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if opened {
+            status.relay_server_reservations = status.relay_server_reservations.saturating_add(1);
+        } else {
+            status.relay_server_reservations = status.relay_server_reservations.saturating_sub(1);
+        }
+    }
+
+    pub(crate) fn record_relay_server_circuit(&self, opened: bool) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if opened {
+            status.relay_server_circuits = status.relay_server_circuits.saturating_add(1);
+            status.relay_server_circuits_accepted = status.relay_server_circuits_accepted.saturating_add(1);
+        } else {
+            status.relay_server_circuits = status.relay_server_circuits.saturating_sub(1);
+            status.relay_server_circuits_closed = status.relay_server_circuits_closed.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn record_relay_server_denied(&self) {
+        let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        status.relay_server_denied = status.relay_server_denied.saturating_add(1);
+    }
+
     pub(crate) fn record_last_error(&self, code: &str) {
         let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
         status.last_error = Some(code.to_owned());
@@ -426,12 +611,15 @@ impl Shared {
         status.last_error = Some(code.to_owned());
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit_peer(
         &self,
         peer_id: &str,
         event: PeerEventKind,
         direction: Option<&str>,
         transport: Option<String>,
+        path: Option<&str>,
+        relay_peer_id: Option<&str>,
         reason: Option<&str>,
     ) {
         self.observer.on_event(NetworkEvent::Peer {
@@ -439,6 +627,8 @@ impl Shared {
             event,
             direction: direction.map(str::to_owned),
             transport,
+            path: path.map(str::to_owned),
+            relay_peer_id: relay_peer_id.map(str::to_owned),
             reason: reason.map(str::to_owned),
         });
     }

@@ -42,6 +42,8 @@ fn config(root: &Path) -> CoreConfig {
         log_level: LogLevel::Info,
         network_enabled: true,
         dht_mode: nexus_core::DhtMode::Client,
+        relay_fallback: true,
+        relay_server: false,
         quota_bytes: 1024 * 1024 * 1024,
         enable_test_methods: false,
     }
@@ -270,7 +272,7 @@ fn two_cores_exchange_a_test_message_over_quic_and_tcp() {
     let status = status(&a);
     assert_eq!(unsigned_field(&status, "peer_count"), 1);
     assert!(unsigned_field(&status, "connection_count") >= 2);
-    assert_eq!(text_array(&status, "transports"), vec!["quic", "tcp"]);
+    assert_eq!(text_array(&status, "transports"), vec!["quic", "tcp", "relay"]);
     assert!(text_array(&status, "confirmed_addresses").is_empty());
 
     let health = success(invoke(&a, 0x0102, empty_params()));

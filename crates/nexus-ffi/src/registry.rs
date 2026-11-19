@@ -69,6 +69,8 @@ mod tests {
             log_level: nexus_core::LogLevel::Error,
             network_enabled: false,
             dht_mode: nexus_core::DhtMode::Client,
+            relay_fallback: true,
+            relay_server: false,
             quota_bytes: nexus_store::MIN_QUOTA_BYTES,
             enable_test_methods: true,
         };

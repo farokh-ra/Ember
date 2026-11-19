@@ -404,6 +404,36 @@ public interface NexusStrings {
     public val networkExportUnavailable: String
     public val networkSeparateTitle: String
     public val networkSeparateBody: String
+    public val networkPathTitle: String
+    public val networkPathBody: String
+    public val networkConnectivityDirect: String
+    public val networkConnectivityRelay: String
+    public val networkConnectivityConnecting: String
+    public val networkConnectivityNoPeers: String
+    public val networkConnectivityDisabled: String
+    public val networkNatLabel: String
+    public val networkNatPublic: String
+    public val networkNatPrivate: String
+    public val networkNatUnknown: String
+    public val networkNatDisabled: String
+    public val networkRelayFallbackOn: String
+    public val networkRelayFallbackOff: String
+    public val networkRelayTitle: String
+    public val networkRelayBody: String
+    public val networkRelayNoRelays: String
+    public val networkRelayConfigured: String
+    public val networkRelayConnected: String
+    public val networkRelayReservations: String
+    public val networkRelayDataLimit: String
+    public val networkRelayDurationLimit: String
+    public val networkRelayLimitUnknown: String
+    public val networkDirectConnections: String
+    public val networkRelayedConnections: String
+    public val networkFallbackAttempts: String
+    public val networkFallbackSuccesses: String
+    public val networkHolePunchFailures: String
+    public val networkErrorRelayUnavailable: String
+    public val networkErrorRelayReservation: String
     public val networkPreviewTitle: String
     public val networkPreviewBody: String
 }
@@ -876,6 +906,39 @@ public object EnglishNexusStrings : NexusStrings {
     override val networkSeparateBody: String =
         "A file can be record-only while the node is online, or seen recently while the node is degraded. " +
             "Check both before expecting a download to work."
+    override val networkPathTitle: String = "Path and NAT"
+    override val networkPathBody: String =
+        "The best available route to another peer. Relay fallback is tried only after a direct path fails."
+    override val networkConnectivityDirect: String = "Direct"
+    override val networkConnectivityRelay: String = "Relayed"
+    override val networkConnectivityConnecting: String = "Connecting"
+    override val networkConnectivityNoPeers: String = "No peers"
+    override val networkConnectivityDisabled: String = "Disabled"
+    override val networkNatLabel: String = "NAT reachability"
+    override val networkNatPublic: String = "Public"
+    override val networkNatPrivate: String = "Behind NAT"
+    override val networkNatUnknown: String = "Unknown"
+    override val networkNatDisabled: String = "Disabled"
+    override val networkRelayFallbackOn: String = "Relay fallback on"
+    override val networkRelayFallbackOff: String = "Relay fallback off"
+    override val networkRelayTitle: String = "Community relays"
+    override val networkRelayBody: String =
+        "Optional relay nodes forward traffic when direct connections fail. Each circuit is bounded."
+    override val networkRelayNoRelays: String = "No community relay is configured."
+    override val networkRelayConfigured: String = "Configured"
+    override val networkRelayConnected: String = "Connected"
+    override val networkRelayReservations: String = "Reservations"
+    override val networkRelayDataLimit: String = "Circuit data limit"
+    override val networkRelayDurationLimit: String = "Circuit time limit"
+    override val networkRelayLimitUnknown: String = "Not reported"
+    override val networkDirectConnections: String = "Direct connections"
+    override val networkRelayedConnections: String = "Relayed connections"
+    override val networkFallbackAttempts: String = "Fallback attempts"
+    override val networkFallbackSuccesses: String = "Fallback successes"
+    override val networkHolePunchFailures: String = "Hole punch failures"
+    override val networkErrorRelayUnavailable: String = "No community relay was reachable."
+    override val networkErrorRelayReservation: String =
+        "A relay reservation was refused or timed out."
     override val networkPreviewTitle: String = "Demo network state"
     override val networkPreviewBody: String =
         "Switch the simulated global state. This does not change a real network or file availability."

@@ -16,8 +16,8 @@ use crate::envelope::{MAX_RESPONSE_BYTES, Request, encode_failure, encode_succes
 use crate::error::{CoreError, DomainCode, DomainError};
 use crate::event::{EventQueue, PendingEvent};
 use crate::network::{
-    CoreNetworkObserver, connected_peer_value, domain_error as network_domain_error, peer_value, status_value,
-    test_reply_value,
+    CoreNetworkObserver, connected_peer_value, connectivity_value, domain_error as network_domain_error, peer_value,
+    status_value, test_reply_value,
 };
 use crate::ops::{CancelOutcome, CancelToken, OPERATION_WORKERS, OperationRegistry, WorkerPool};
 use crate::streaming::{ExportCursor, FinishedImport, ImportError, ImportSession, MAX_STREAM_CHUNK};
@@ -491,6 +491,10 @@ impl Engine {
             0x0607 => self.network_connect(&params),
             0x0608 => self.network_send_test(&params),
             0x0609 => self.network_discover(&params),
+            0x060A => self.network_relay_list().map(MethodOutcome::Result),
+            0x060B => self.network_relay_add(&params),
+            0x060C => self.network_relay_remove(&params),
+            0x060D => self.network_connectivity().map(MethodOutcome::Result),
             0x0B01 => Ok(MethodOutcome::Result(self.test_echo(&params)?)),
             0x0B02 => self.test_fault(&params),
             _ => Err(CoreError::Unsupported(method_id)),
@@ -512,6 +516,10 @@ impl Engine {
             "network.connect",
             "network.send_test",
             "network.discover",
+            "network.relay_list",
+            "network.relay_add",
+            "network.relay_remove",
+            "network.connectivity",
         ]
         .into_iter()
         .chain(
@@ -848,6 +856,8 @@ impl Engine {
         ));
         let mut config = NetworkConfig::new(self.config.data_root.clone());
         config.dht_mode = self.config.dht_mode;
+        config.relay_fallback = self.config.relay_fallback;
+        config.relay_server_enabled = self.config.relay_server;
         match Network::start(config, &key, observer) {
             Ok(network) => {
                 let status = network.status();
@@ -982,6 +992,43 @@ impl Engine {
             Ok(()) => Ok(MethodOutcome::Result(bootstrap_value(&network.bootstrap_list()))),
             Err(error) => Ok(MethodOutcome::Domain(network_domain_error(&error))),
         }
+    }
+
+    fn network_relay_list(&self) -> Result<Value, CoreError> {
+        let addresses = self
+            .network_snapshot()
+            .map_or_else(Vec::new, |network| network.relay_list());
+        Ok(relay_value(&addresses))
+    }
+
+    fn network_relay_add(&self, params: &Value) -> Result<MethodOutcome, CoreError> {
+        self.require_running()?;
+        let multiaddr = required_multiaddr(params)?;
+        let network = match self.require_network() {
+            Ok(network) => network,
+            Err(error) => return Ok(MethodOutcome::Domain(error)),
+        };
+        match network.relay_add(&multiaddr) {
+            Ok(()) => Ok(MethodOutcome::Result(relay_value(&network.relay_list()))),
+            Err(error) => Ok(MethodOutcome::Domain(network_domain_error(&error))),
+        }
+    }
+
+    fn network_relay_remove(&self, params: &Value) -> Result<MethodOutcome, CoreError> {
+        self.require_running()?;
+        let multiaddr = required_multiaddr(params)?;
+        let network = match self.require_network() {
+            Ok(network) => network,
+            Err(error) => return Ok(MethodOutcome::Domain(error)),
+        };
+        match network.relay_remove(&multiaddr) {
+            Ok(()) => Ok(MethodOutcome::Result(relay_value(&network.relay_list()))),
+            Err(error) => Ok(MethodOutcome::Domain(network_domain_error(&error))),
+        }
+    }
+
+    fn network_connectivity(&self) -> Result<Value, CoreError> {
+        Ok(connectivity_value(&self.network_status()))
     }
 
     fn network_reconnect(&self, params: &Value) -> Result<MethodOutcome, CoreError> {
@@ -1184,6 +1231,13 @@ fn op_accepted(op_id: u64) -> Value {
 fn bootstrap_value(addresses: &[String]) -> Value {
     Value::Map(vec![(
         Value::Text("bootstrap".to_owned()),
+        Value::Array(addresses.iter().cloned().map(Value::Text).collect()),
+    )])
+}
+
+fn relay_value(addresses: &[String]) -> Value {
+    Value::Map(vec![(
+        Value::Text("relays".to_owned()),
         Value::Array(addresses.iter().cloned().map(Value::Text).collect()),
     )])
 }

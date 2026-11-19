@@ -52,11 +52,30 @@ public enum class BootstrapPathState {
     UNREACHABLE,
 }
 
+/** Simulated best-path classification shown by Network status. */
+public enum class DemoConnectivity {
+    DIRECT,
+    RELAY,
+    CONNECTING,
+    NO_PEERS,
+    DISABLED,
+}
+
+/** Simulated NAT reachability estimate. */
+public enum class DemoNatStatus {
+    PUBLIC,
+    PRIVATE,
+    UNKNOWN,
+    DISABLED,
+}
+
 /** User-safe demo error categories used by Network status. */
 public enum class DemoNetworkErrorCode {
     NO_USABLE_PATH,
     BOOTSTRAP_UNREACHABLE,
     PEER_TIMEOUT,
+    RELAY_UNAVAILABLE,
+    RELAY_RESERVATION_FAILED,
 }
 
 /** A known source for a demo publication. */
@@ -135,6 +154,14 @@ public data class DemoBootstrapPath(
     public val state: BootstrapPathState,
 )
 
+/** One configured community relay. */
+public data class DemoRelayPath(
+    public val label: String,
+    public val endpoint: String,
+    public val state: BootstrapPathState,
+    public val detail: String,
+)
+
 /** A redacted demo network error. */
 public data class DemoNetworkError(
     public val code: DemoNetworkErrorCode,
@@ -144,8 +171,20 @@ public data class DemoNetworkError(
 /** Simulated global network snapshot. */
 public data class DemoNetworkSnapshot(
     public val state: PreviewNetworkState,
+    public val connectivity: DemoConnectivity,
+    public val natStatus: DemoNatStatus,
+    public val natPublicAddress: String?,
+    public val relayFallbackEnabled: Boolean,
     public val peerCount: Int,
+    public val directConnections: Int,
+    public val relayedConnections: Int,
+    public val fallbackAttempts: Int,
+    public val fallbackSuccesses: Int,
+    public val relayDataLimitLabel: String?,
+    public val relayDurationLimitLabel: String?,
+    public val relayPaths: List<DemoRelayPath>,
     public val bootstrapPaths: List<DemoBootstrapPath>,
     public val recentErrors: List<DemoNetworkError>,
+    public val troubleshootingHint: String,
     public val isDemo: Boolean = true,
 )

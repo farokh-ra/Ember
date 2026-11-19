@@ -60,6 +60,8 @@ impl NetworkObserver for CoreNetworkObserver {
                 event,
                 direction,
                 transport,
+                path,
+                relay_peer_id,
                 reason,
             } => {
                 let mut entries = vec![
@@ -71,6 +73,12 @@ impl NetworkObserver for CoreNetworkObserver {
                 }
                 if let Some(transport) = transport {
                     entries.push((Value::Text("transport".to_owned()), Value::Text(transport)));
+                }
+                if let Some(path) = path {
+                    entries.push((Value::Text("path".to_owned()), Value::Text(path)));
+                }
+                if let Some(relay_peer_id) = relay_peer_id {
+                    entries.push((Value::Text("relay_peer_id".to_owned()), Value::Text(relay_peer_id)));
                 }
                 if let Some(reason) = reason {
                     entries.push((
@@ -93,6 +101,10 @@ pub(crate) fn status_value(status: &NetworkStatus) -> Value {
         (
             Value::Text("state".to_owned()),
             Value::Text(status.state.as_str().to_owned()),
+        ),
+        (
+            Value::Text("connectivity".to_owned()),
+            Value::Text(status.connectivity().to_owned()),
         ),
         (Value::Text("peer_id".to_owned()), Value::Text(status.peer_id.clone())),
         (
@@ -185,6 +197,115 @@ pub(crate) fn status_value(status: &NetworkStatus) -> Value {
             Value::Unsigned(status.dht_publish_failures),
         ),
         (
+            Value::Text("nat_status".to_owned()),
+            Value::Text(status.nat_status.clone()),
+        ),
+        (
+            Value::Text("nat_public_address".to_owned()),
+            optional_text(status.nat_public_address.as_deref()),
+        ),
+        (Value::Text("nat_probes".to_owned()), Value::Unsigned(status.nat_probes)),
+        (
+            Value::Text("relay_client_enabled".to_owned()),
+            Value::Bool(status.relay_client_enabled),
+        ),
+        (
+            Value::Text("relay_fallback_enabled".to_owned()),
+            Value::Bool(status.relay_fallback_enabled),
+        ),
+        (
+            Value::Text("relays_configured".to_owned()),
+            Value::Unsigned(u64::try_from(status.relays_configured).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("relays_connected".to_owned()),
+            Value::Unsigned(u64::try_from(status.relays_connected).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("relay_reservations".to_owned()),
+            Value::Unsigned(u64::try_from(status.relay_reservations).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("relay_reservation_failures".to_owned()),
+            Value::Unsigned(status.relay_reservation_failures),
+        ),
+        (
+            Value::Text("relay_circuits_established".to_owned()),
+            Value::Unsigned(status.relay_circuits_established),
+        ),
+        (
+            Value::Text("relay_data_limit_bytes".to_owned()),
+            status.relay_data_limit_bytes.map_or(Value::Null, Value::Unsigned),
+        ),
+        (
+            Value::Text("relay_duration_limit_secs".to_owned()),
+            status.relay_duration_limit_secs.map_or(Value::Null, Value::Unsigned),
+        ),
+        (
+            Value::Text("fallback_attempts".to_owned()),
+            Value::Unsigned(status.fallback_attempts),
+        ),
+        (
+            Value::Text("fallback_successes".to_owned()),
+            Value::Unsigned(status.fallback_successes),
+        ),
+        (
+            Value::Text("direct_connections".to_owned()),
+            Value::Unsigned(u64::try_from(status.direct_connections).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("relayed_connections".to_owned()),
+            Value::Unsigned(u64::try_from(status.relayed_connections).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("direct_upgrades".to_owned()),
+            Value::Unsigned(status.direct_upgrades),
+        ),
+        (
+            Value::Text("hole_punch_failures".to_owned()),
+            Value::Unsigned(status.hole_punch_failures),
+        ),
+        (
+            Value::Text("relay_server_enabled".to_owned()),
+            Value::Bool(status.relay_server_enabled),
+        ),
+        (
+            Value::Text("relay_server_reservations".to_owned()),
+            Value::Unsigned(u64::try_from(status.relay_server_reservations).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("relay_server_circuits".to_owned()),
+            Value::Unsigned(u64::try_from(status.relay_server_circuits).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("relay_server_circuits_accepted".to_owned()),
+            Value::Unsigned(status.relay_server_circuits_accepted),
+        ),
+        (
+            Value::Text("relay_server_circuits_closed".to_owned()),
+            Value::Unsigned(status.relay_server_circuits_closed),
+        ),
+        (
+            Value::Text("relay_server_denied".to_owned()),
+            Value::Unsigned(status.relay_server_denied),
+        ),
+        (
+            Value::Text("relay_server_max_circuit_bytes".to_owned()),
+            status
+                .relay_server_max_circuit_bytes
+                .map_or(Value::Null, Value::Unsigned),
+        ),
+        (
+            Value::Text("relay_server_max_circuit_duration_secs".to_owned()),
+            status
+                .relay_server_max_circuit_duration_secs
+                .map_or(Value::Null, Value::Unsigned),
+        ),
+        (
+            Value::Text("last_path".to_owned()),
+            optional_text(status.last_path.as_deref()),
+        ),
+        (
             Value::Text("last_error".to_owned()),
             status
                 .last_error
@@ -192,6 +313,119 @@ pub(crate) fn status_value(status: &NetworkStatus) -> Value {
                 .map_or(Value::Null, |code| Value::Text(nexus_observability::text(code))),
         ),
     ])
+}
+
+/// Renders the compact connectivity diagnosis returned by
+/// `network.connectivity`.
+pub(crate) fn connectivity_value(status: &NetworkStatus) -> Value {
+    Value::Map(vec![
+        (
+            Value::Text("connectivity".to_owned()),
+            Value::Text(status.connectivity().to_owned()),
+        ),
+        (
+            Value::Text("state".to_owned()),
+            Value::Text(status.state.as_str().to_owned()),
+        ),
+        (
+            Value::Text("nat_status".to_owned()),
+            Value::Text(status.nat_status.clone()),
+        ),
+        (
+            Value::Text("nat_public_address".to_owned()),
+            optional_text(status.nat_public_address.as_deref()),
+        ),
+        (
+            Value::Text("relay_fallback_enabled".to_owned()),
+            Value::Bool(status.relay_fallback_enabled),
+        ),
+        (
+            Value::Text("relays_configured".to_owned()),
+            Value::Unsigned(u64::try_from(status.relays_configured).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("relays_connected".to_owned()),
+            Value::Unsigned(u64::try_from(status.relays_connected).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("relay_reservations".to_owned()),
+            Value::Unsigned(u64::try_from(status.relay_reservations).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("relay_reservation_failures".to_owned()),
+            Value::Unsigned(status.relay_reservation_failures),
+        ),
+        (
+            Value::Text("relay_circuits_established".to_owned()),
+            Value::Unsigned(status.relay_circuits_established),
+        ),
+        (
+            Value::Text("relay_data_limit_bytes".to_owned()),
+            status.relay_data_limit_bytes.map_or(Value::Null, Value::Unsigned),
+        ),
+        (
+            Value::Text("relay_duration_limit_secs".to_owned()),
+            status.relay_duration_limit_secs.map_or(Value::Null, Value::Unsigned),
+        ),
+        (
+            Value::Text("direct_connections".to_owned()),
+            Value::Unsigned(u64::try_from(status.direct_connections).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("relayed_connections".to_owned()),
+            Value::Unsigned(u64::try_from(status.relayed_connections).unwrap_or(u64::MAX)),
+        ),
+        (
+            Value::Text("fallback_attempts".to_owned()),
+            Value::Unsigned(status.fallback_attempts),
+        ),
+        (
+            Value::Text("fallback_successes".to_owned()),
+            Value::Unsigned(status.fallback_successes),
+        ),
+        (
+            Value::Text("direct_upgrades".to_owned()),
+            Value::Unsigned(status.direct_upgrades),
+        ),
+        (
+            Value::Text("hole_punch_failures".to_owned()),
+            Value::Unsigned(status.hole_punch_failures),
+        ),
+        (
+            Value::Text("last_path".to_owned()),
+            optional_text(status.last_path.as_deref()),
+        ),
+        (
+            Value::Text("last_error".to_owned()),
+            status
+                .last_error
+                .as_ref()
+                .map_or(Value::Null, |code| Value::Text(nexus_observability::text(code))),
+        ),
+        (
+            Value::Text("hint".to_owned()),
+            Value::Text(connectivity_hint(status).to_owned()),
+        ),
+    ])
+}
+
+fn connectivity_hint(status: &NetworkStatus) -> &'static str {
+    match status.connectivity() {
+        "direct" => "A direct path is available.",
+        "relay" => "Traffic uses a community relay. Each circuit is bounded by the relay's data and time limits.",
+        "connecting" => "The node is still looking for a path.",
+        "disabled" => "Networking is disabled; enable it in settings.",
+        _ if status.relays_configured == 0 => {
+            "No direct path is available and no community relay is configured. Add a relay or check the peer address."
+        }
+        _ if status.relays_connected == 0 => {
+            "No direct path is available and configured relays are not connected. Check relay reachability and firewall rules."
+        }
+        _ if status.relay_reservations == 0 => {
+            "Relays are connected but no reservation is active yet. Check the relay's reservation limits."
+        }
+        _ => "No peer is connected. A relay path is ready; retry the connection.",
+    }
 }
 
 /// Renders one observed peer for `network.peers`.
@@ -234,6 +468,11 @@ pub(crate) fn peer_value(peer: &PeerSnapshot) -> Value {
             Value::Text("connections".to_owned()),
             Value::Unsigned(u64::from(peer.connections)),
         ),
+        (Value::Text("path".to_owned()), optional_text(peer.path.as_deref())),
+        (
+            Value::Text("relay_peer_id".to_owned()),
+            optional_text(peer.relay_peer_id.as_deref()),
+        ),
         (Value::Text("error".to_owned()), optional_text(peer.error.as_deref())),
     ])
 }
@@ -250,6 +489,11 @@ pub(crate) fn connected_peer_value(peer: &ConnectedPeer, multiaddr: &str) -> Val
         (
             Value::Text("established_ms".to_owned()),
             Value::Unsigned(peer.established_ms),
+        ),
+        (Value::Text("path".to_owned()), Value::Text(peer.path.clone())),
+        (
+            Value::Text("relay_peer_id".to_owned()),
+            optional_text(peer.relay_peer_id.as_deref()),
         ),
         (Value::Text("multiaddr".to_owned()), Value::Text(multiaddr.to_owned())),
     ])
@@ -310,6 +554,22 @@ pub(crate) fn domain_error(error: &NetError) -> DomainError {
         NetError::Rejected => (DomainCode::NetworkUnavailable, "The remote peer rejected the request."),
         NetError::Io(_) => (DomainCode::IoError, "A local network operation failed."),
         NetError::DriverFailed => (DomainCode::NetworkUnavailable, "The network driver could not start."),
+        NetError::RelayUnavailable => (
+            DomainCode::NetworkUnavailable,
+            "No community relay is configured or reachable.",
+        ),
+        NetError::RelayReservationFailed => (
+            DomainCode::NetworkUnavailable,
+            "The relay did not grant a circuit reservation.",
+        ),
+        NetError::HolePunchFailed => (
+            DomainCode::NetworkUnavailable,
+            "Neither a direct path nor a relay path could be established.",
+        ),
+        NetError::NoViablePath => (
+            DomainCode::NetworkUnavailable,
+            "No direct or relayed path to the peer is available.",
+        ),
     };
     DomainError::new(code, message).with_details(Value::Map(vec![(
         Value::Text("net_code".to_owned()),

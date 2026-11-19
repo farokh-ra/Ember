@@ -16,6 +16,7 @@ mod config;
 mod driver;
 mod error;
 mod peer_key;
+mod relay;
 mod shared;
 mod state;
 
@@ -33,16 +34,21 @@ pub use config::{
     DEFAULT_DHT_STORE_MAX_PROVIDED_KEYS, DEFAULT_DHT_STORE_MAX_PROVIDERS, DEFAULT_DHT_STORE_MAX_RECORDS,
     DEFAULT_IDLE_CONNECTION_TIMEOUT, DEFAULT_MAX_CONCURRENT_STREAMS, DEFAULT_MAX_ESTABLISHED,
     DEFAULT_MAX_ESTABLISHED_PER_PEER, DEFAULT_MAX_PENDING_INCOMING, DEFAULT_MAX_REQUESTS_PER_PEER_PER_MINUTE,
-    DEFAULT_RECONNECT_BASE_DELAY, DEFAULT_RECONNECT_MAX_DELAY, DEFAULT_REQUEST_TIMEOUT, DhtMode, MAX_BOOTSTRAP_PEERS,
-    MAX_CONNECTION_LIMIT, MAX_DHT_PROVIDED_KEYS, MAX_DHT_QUERY_TIMEOUT, MAX_DHT_RECORD_TTL, MAX_DHT_STORE_PROVIDERS,
-    MAX_DHT_STORE_RECORDS, MAX_LISTEN_ADDRESSES, NetworkConfig, QUIC_LISTEN_ADDRESS, TCP_LISTEN_ADDRESS,
-    require_peer_id,
+    DEFAULT_RECONNECT_BASE_DELAY, DEFAULT_RECONNECT_MAX_DELAY, DEFAULT_RELAY_MAX_CIRCUIT_BYTES,
+    DEFAULT_RELAY_MAX_CIRCUIT_DURATION, DEFAULT_RELAY_MAX_CIRCUITS, DEFAULT_RELAY_MAX_CIRCUITS_PER_PEER,
+    DEFAULT_RELAY_MAX_RESERVATIONS, DEFAULT_RELAY_RESERVATION_TIMEOUT, DEFAULT_REQUEST_TIMEOUT, DhtMode,
+    MAX_BOOTSTRAP_PEERS, MAX_CONNECTION_LIMIT, MAX_DHT_PROVIDED_KEYS, MAX_DHT_QUERY_TIMEOUT, MAX_DHT_RECORD_TTL,
+    MAX_DHT_STORE_PROVIDERS, MAX_DHT_STORE_RECORDS, MAX_EXTERNAL_ADDRESSES, MAX_LISTEN_ADDRESSES,
+    MAX_RELAY_CIRCUIT_BYTES, MAX_RELAY_CIRCUIT_DURATION, MAX_RELAY_CIRCUITS, MAX_RELAY_RESERVATION_TIMEOUT,
+    MAX_RELAY_RESERVATIONS, MAX_RELAYS, MIN_RELAY_CIRCUIT_BYTES, NetworkConfig, QUIC_LISTEN_ADDRESS,
+    TCP_LISTEN_ADDRESS, require_peer_id,
 };
 pub use error::NetError;
 pub use peer_key::{
     NETWORK_DIRECTORY, PEER_KEY_FILE_NAME, PEER_KEY_FORMAT_VERSION, PEER_KEY_HEADER_LENGTH, PEER_KEY_KDF_HKDF_SHA256,
     PEER_KEY_MAGIC, PEER_KEY_MAX_FILE_LENGTH, PEER_KEY_SALT_LENGTH, PEER_KEY_SEED_LENGTH, PeerKey,
 };
+pub use relay::{RELAY_ENV_VAR, RELAY_FILE_NAME, RELAY_MAX_FILE_LENGTH};
 pub use state::{
     ConnectedPeer, DhtValue, DiscoveredPeer, NetworkEvent, NetworkObserver, NetworkState, NetworkStatus, PeerDiscovery,
     PeerEventKind, PeerSnapshot, PeerState, TestReply, transports,
@@ -89,16 +95,31 @@ impl Network {
             }
         }
         config.bootstrap = merged;
+
+        let mut relays = relay::compiled()?;
+        for address in config.relays.drain(..) {
+            if !relays.contains(&address) {
+                relays.push(address);
+            }
+        }
+        for address in relay::load(&config.data_root)? {
+            if !relays.contains(&address) {
+                relays.push(address);
+            }
+        }
+        config.relays = relays;
         config.validate()?;
 
         let peer_key = PeerKey::load_or_create(&config.data_root, local_key)?;
         let peer_id = peer_key.peer_id();
         let keypair = peer_key.keypair().clone();
         let address_texts: Vec<String> = config.bootstrap.iter().map(ToString::to_string).collect();
+        let relay_texts: Vec<String> = config.relays.iter().map(ToString::to_string).collect();
 
         let status = NetworkStatus::starting(peer_id.to_string());
         let shared = Arc::new(Shared::new(status, observer));
         shared.set_bootstrap(address_texts);
+        shared.set_relays(relay_texts);
 
         let config = Arc::new(config);
         let (commands, receiver) = mpsc::channel(COMMAND_CAPACITY);
@@ -265,6 +286,28 @@ impl Network {
         let (_, address) = parse_peer_address(address)?;
         let (respond, receiver) = oneshot::channel();
         self.send(Command::BootstrapRemove { address, respond })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Persisted community relay addresses.
+    #[must_use]
+    pub fn relay_list(&self) -> Vec<String> {
+        self.shared.relays()
+    }
+
+    /// Adds a community relay and persists the list.
+    pub fn relay_add(&self, address: &str) -> Result<(), NetError> {
+        let (_, address) = parse_peer_address(address)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::RelayAdd { address, respond })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Removes a community relay and persists the list.
+    pub fn relay_remove(&self, address: &str) -> Result<(), NetError> {
+        let (_, address) = parse_peer_address(address)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::RelayRemove { address, respond })?;
         receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
     }
 

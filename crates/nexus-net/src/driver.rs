@@ -4,17 +4,20 @@
 //! Synchronous callers submit bounded commands and block on a one-shot reply;
 //! the driver never blocks the swarm loop on a caller.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
+use libp2p::core::ConnectedPoint;
+use libp2p::core::transport::ListenerId;
 use libp2p::kad::store::RecordStore;
 use libp2p::kad::{self, ProgressStep, ProviderRecord, Quorum, Record, RecordKey};
+use libp2p::multiaddr::Protocol;
 use libp2p::request_response::{self, OutboundFailure, OutboundRequestId, ResponseChannel};
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use libp2p::swarm::{DialError, SwarmEvent};
-use libp2p::{Multiaddr, PeerId, Swarm, identify, ping};
+use libp2p::{Multiaddr, PeerId, Swarm, autonat, identify, ping, relay};
 use nexus_protocol::{
     DHT_KEY_BYTES, DHT_MAX_VALUE_BYTES, DhtRecord, DhtRecordDecision, TestResponse, decode_test_request,
     decode_test_response, encode_test_request, encode_test_response, validate_provider_addresses,
@@ -26,6 +29,7 @@ use crate::behaviour::{Behaviour, BehaviourEvent};
 use crate::bootstrap;
 use crate::config::{NetworkConfig, split_peer_address};
 use crate::error::NetError;
+use crate::relay as relay_list;
 use crate::shared::Shared;
 use crate::state::{ConnectedPeer, DhtValue, DiscoveredPeer, NetworkState, PeerDiscovery, TestReply};
 
@@ -43,6 +47,8 @@ const BOOTSTRAP_RETRY: Duration = Duration::from_secs(10);
 const MAX_DISCOVERED_PEERS: usize = 32;
 /// Maximum addresses retained for one discovered peer.
 const MAX_DISCOVERED_ADDRESSES: usize = 8;
+/// Minimum delay before retrying a refused relay reservation.
+const RELAY_RETRY: Duration = Duration::from_secs(5);
 
 pub(crate) enum Command {
     Dial {
@@ -84,6 +90,14 @@ pub(crate) enum Command {
         address: Multiaddr,
         respond: oneshot::Sender<Result<(), NetError>>,
     },
+    RelayAdd {
+        address: Multiaddr,
+        respond: oneshot::Sender<Result<(), NetError>>,
+    },
+    RelayRemove {
+        address: Multiaddr,
+        respond: oneshot::Sender<Result<(), NetError>>,
+    },
     Reconnect {
         peer_id: Option<PeerId>,
         respond: oneshot::Sender<Result<(), NetError>>,
@@ -96,9 +110,34 @@ pub(crate) enum Command {
     },
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum DialPhase {
+    Direct,
+    Relay,
+}
+
 struct PendingDial {
     respond: oneshot::Sender<Result<ConnectedPeer, NetError>>,
+    relay_candidates: VecDeque<Multiaddr>,
+    phase: DialPhase,
     deadline: Instant,
+    direct_code: Option<&'static str>,
+    relay_attempted: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+struct RelayLimit {
+    duration: Option<Duration>,
+    bytes: Option<u64>,
+}
+
+#[derive(Default)]
+struct RelayState {
+    reservation: bool,
+    listener: Option<ListenerId>,
+    pending_since: Option<Instant>,
+    retry_at: Option<Instant>,
+    limit: RelayLimit,
 }
 
 struct PendingRequest {
@@ -167,6 +206,9 @@ pub(crate) struct Driver {
     pending_queries: HashMap<kad::QueryId, PendingQuery>,
     backoff: HashMap<PeerId, Backoff>,
     targets: BTreeMap<PeerId, Vec<Multiaddr>>,
+    relays: BTreeMap<PeerId, Multiaddr>,
+    relay_state: HashMap<PeerId, RelayState>,
+    background_relay_attempted: HashSet<PeerId>,
     rate: HashMap<PeerId, RateWindow>,
     dht_bootstrapped: bool,
     last_bootstrap: Option<Instant>,
@@ -186,6 +228,12 @@ impl Driver {
             let (peer_id, address) = split_peer_address(address)?;
             targets.entry(peer_id).or_default().push(address);
         }
+        let mut relays: BTreeMap<PeerId, Multiaddr> = BTreeMap::new();
+        for address in &config.relays {
+            let (peer_id, _) = split_peer_address(address)?;
+            relays.insert(peer_id, address.clone());
+            targets.entry(peer_id).or_default().push(address.clone());
+        }
 
         let idle_timeout = config.idle_connection_timeout;
         let behaviour_config = Arc::clone(&config);
@@ -204,8 +252,14 @@ impl Driver {
             })
             .with_dns()
             .map_err(|_| NetError::DriverFailed)?
-            .with_behaviour(|key| {
-                Ok::<Behaviour, Box<dyn std::error::Error + Send + Sync>>(Behaviour::new(key, &behaviour_config))
+            .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)
+            .map_err(|_| NetError::DriverFailed)?
+            .with_behaviour(|key, relay_client| {
+                Ok::<Behaviour, Box<dyn std::error::Error + Send + Sync>>(Behaviour::new(
+                    key,
+                    &behaviour_config,
+                    relay_client,
+                ))
             })
             .map_err(|_| NetError::DriverFailed)?
             .with_swarm_config(|swarm| swarm.with_idle_connection_timeout(idle_timeout))
@@ -221,6 +275,12 @@ impl Driver {
         if listeners == 0 {
             return Err(NetError::Unavailable);
         }
+        // A relay server is advertised only once libp2p knows a reachable
+        // external address. Operators supply those explicitly; loopback
+        // listen addresses are registered locally in `NewListenAddr`.
+        for address in &config.external_addresses {
+            swarm.add_external_address(address.clone());
+        }
 
         let mut driver = Self {
             swarm,
@@ -232,12 +292,22 @@ impl Driver {
             pending_queries: HashMap::new(),
             backoff: HashMap::new(),
             targets,
+            relays,
+            relay_state: HashMap::new(),
+            background_relay_attempted: HashSet::new(),
             rate: HashMap::new(),
             dht_bootstrapped: false,
             last_bootstrap: None,
             routing_peers: 0,
         };
         driver.shared.set_dht_mode(driver.config.dht_mode.as_str());
+        driver.shared.configure_relay(
+            driver.config.relay_client_enabled,
+            driver.config.relay_fallback,
+            driver.config.relay_server_enabled,
+            driver.config.relay_max_circuit_bytes,
+            driver.config.relay_max_circuit_duration,
+        );
 
         let peers: Vec<PeerId> = driver.targets.keys().copied().collect();
         for peer_id in peers {
@@ -299,6 +369,8 @@ impl Driver {
             Command::DhtFindProviders { key, respond } => self.dht_find_providers(key, respond),
             Command::BootstrapAdd { address, respond } => self.bootstrap_add(address, respond),
             Command::BootstrapRemove { address, respond } => self.bootstrap_remove(&address, respond),
+            Command::RelayAdd { address, respond } => self.relay_add(address, respond),
+            Command::RelayRemove { address, respond } => self.relay_remove(&address, respond),
             Command::Reconnect { peer_id, respond } => {
                 let result = self.reconnect(peer_id);
                 let _ = respond.send(result);
@@ -323,6 +395,7 @@ impl Driver {
             let _ = respond.send(Err(NetError::Busy));
             return;
         }
+        let relay_candidates = self.relay_candidates(peer_id);
         self.shared.record_dialing(&peer_id.to_string());
         self.swarm.add_peer_address(peer_id, address.clone());
         let options = DialOpts::peer_id(peer_id)
@@ -337,7 +410,11 @@ impl Driver {
                     peer_id,
                     PendingDial {
                         respond,
+                        relay_candidates,
+                        phase: DialPhase::Direct,
                         deadline: Instant::now() + self.config.connect_timeout,
+                        direct_code: None,
+                        relay_attempted: false,
                     },
                 );
             }
@@ -362,6 +439,265 @@ impl Driver {
             let (code, _) = map_dial_error(&error);
             self.shared.record_failed(&peer_id.to_string(), code);
             self.schedule_retry(&peer_id);
+        }
+    }
+
+    /// Relayed circuit addresses for one target, using relays that are
+    /// currently connected. A relay never relays to itself.
+    fn relay_candidates(&self, peer_id: PeerId) -> VecDeque<Multiaddr> {
+        if !self.config.relay_client_enabled || !self.config.relay_fallback {
+            return VecDeque::new();
+        }
+        self.relays
+            .iter()
+            .filter(|(relay, _)| **relay != peer_id && self.swarm.is_connected(relay))
+            .take(crate::config::MAX_RELAYS)
+            .map(|(_, address)| {
+                let mut circuit = address.clone();
+                circuit.push(Protocol::P2pCircuit);
+                circuit.push(Protocol::P2p(peer_id));
+                circuit
+            })
+            .collect()
+    }
+
+    fn start_relay_phase(&mut self, peer_id: PeerId, direct_code: &'static str) {
+        let relay_available = {
+            let candidates = self.relay_candidates(peer_id);
+            let Some(pending) = self.pending_dials.get_mut(&peer_id) else {
+                return;
+            };
+            if pending.relay_candidates.is_empty() {
+                pending.relay_candidates = candidates;
+            }
+            if pending.relay_candidates.is_empty() {
+                false
+            } else {
+                pending.phase = DialPhase::Relay;
+                pending.direct_code = Some(direct_code);
+                pending.relay_attempted = true;
+                pending.deadline = Instant::now() + self.config.relay_reservation_timeout;
+                true
+            }
+        };
+        if !relay_available {
+            self.fail_direct_dial(peer_id, direct_code);
+            return;
+        }
+        self.shared.record_fallback_attempt();
+        if !self.dial_next_relay(peer_id) {
+            self.fail_no_viable_path(peer_id);
+        }
+    }
+
+    /// Dials the next relayed candidate. Returns false when none are left.
+    fn dial_next_relay(&mut self, peer_id: PeerId) -> bool {
+        loop {
+            let address = self
+                .pending_dials
+                .get_mut(&peer_id)
+                .and_then(|pending| pending.relay_candidates.pop_front());
+            let Some(address) = address else {
+                return false;
+            };
+            self.swarm.add_peer_address(peer_id, address.clone());
+            let options = DialOpts::peer_id(peer_id)
+                .addresses(vec![address])
+                .condition(PeerCondition::Always)
+                .build();
+            match self.swarm.dial(options) {
+                Ok(()) => {
+                    if let Some(pending) = self.pending_dials.get_mut(&peer_id) {
+                        pending.deadline = Instant::now() + self.config.relay_reservation_timeout;
+                    }
+                    return true;
+                }
+                Err(error) => {
+                    let (code, _) = map_dial_error(&error);
+                    self.shared.record_last_error(code);
+                }
+            }
+        }
+    }
+
+    fn fail_direct_dial(&mut self, peer_id: PeerId, code: &'static str) {
+        let Some(pending) = self.pending_dials.remove(&peer_id) else {
+            return;
+        };
+        let error = error_for_dial_code(code);
+        self.shared.record_failed(&peer_id.to_string(), code);
+        let _ = pending.respond.send(Err(error));
+        self.schedule_retry(&peer_id);
+    }
+
+    fn fail_no_viable_path(&mut self, peer_id: PeerId) {
+        let Some(pending) = self.pending_dials.remove(&peer_id) else {
+            return;
+        };
+        self.shared.record_failed(&peer_id.to_string(), "no_viable_path");
+        let _ = pending.respond.send(Err(NetError::NoViablePath));
+        self.schedule_retry(&peer_id);
+    }
+
+    fn background_relay_fallback(&mut self, peer_id: PeerId) {
+        if !self.config.relay_fallback
+            || !self.config.relay_client_enabled
+            || self.relays.contains_key(&peer_id)
+            || !self.targets.contains_key(&peer_id)
+            || self.pending_dials.contains_key(&peer_id)
+            || !self.background_relay_attempted.insert(peer_id)
+        {
+            return;
+        }
+        let candidates = self.relay_candidates(peer_id);
+        if candidates.is_empty() {
+            self.background_relay_attempted.remove(&peer_id);
+            return;
+        }
+        let addresses: Vec<Multiaddr> = candidates.into_iter().collect();
+        for address in &addresses {
+            self.swarm.add_peer_address(peer_id, address.clone());
+        }
+        self.shared.record_fallback_attempt();
+        let options = DialOpts::peer_id(peer_id).addresses(addresses).build();
+        if self.swarm.dial(options).is_err() {
+            self.shared.record_last_error("relay_fallback_failed");
+            self.background_relay_attempted.remove(&peer_id);
+        }
+    }
+
+    /// Publishes the number of connected relays and active reservations.
+    fn refresh_relay_counts(&self) {
+        let connected = self
+            .relays
+            .keys()
+            .filter(|peer_id| self.swarm.is_connected(peer_id))
+            .count();
+        let reservations = self.relay_state.values().filter(|state| state.reservation).count();
+        self.shared.set_relay_counts(connected, reservations);
+    }
+
+    /// Requests our own reservation on a connected relay.
+    ///
+    /// libp2p renews the reservation for as long as the listener lives, so a
+    /// reservation is requested once per connection and retried only after a
+    /// bounded failure delay.
+    fn ensure_relay_reservation(&mut self, relay_peer_id: PeerId) {
+        if !self.config.relay_client_enabled || !self.swarm.is_connected(&relay_peer_id) {
+            return;
+        }
+        let Some(address) = self.relays.get(&relay_peer_id).cloned() else {
+            return;
+        };
+        if self
+            .relay_state
+            .get(&relay_peer_id)
+            .is_some_and(|state| state.listener.is_some())
+        {
+            return;
+        }
+        let circuit = {
+            let mut circuit = address;
+            circuit.push(Protocol::P2pCircuit);
+            circuit
+        };
+        let now = Instant::now();
+        match self.swarm.listen_on(circuit) {
+            Ok(listener) => {
+                let state = self.relay_state.entry(relay_peer_id).or_default();
+                state.listener = Some(listener);
+                state.pending_since = Some(now);
+                state.retry_at = None;
+            }
+            Err(_) => {
+                let state = self.relay_state.entry(relay_peer_id).or_default();
+                state.pending_since = None;
+                state.retry_at = Some(now + RELAY_RETRY);
+                self.shared.record_relay_reservation(false);
+                self.shared.record_last_error("relay_reservation_failed");
+            }
+        }
+        self.refresh_relay_counts();
+    }
+
+    /// Fails reservations that did not complete within the configured deadline.
+    fn expire_relay_reservations(&mut self, now: Instant) {
+        let timeout = self.config.relay_reservation_timeout;
+        let expired: Vec<PeerId> = self
+            .relay_state
+            .iter()
+            .filter(|(_, state)| {
+                state
+                    .pending_since
+                    .is_some_and(|started| now.saturating_duration_since(started) >= timeout)
+            })
+            .map(|(relay, _)| *relay)
+            .collect();
+        for relay_peer_id in expired {
+            let listener = self.relay_state.get_mut(&relay_peer_id).and_then(|state| {
+                state.pending_since = None;
+                state.retry_at = Some(now + RELAY_RETRY);
+                state.listener.take()
+            });
+            if let Some(listener) = listener {
+                let _ = self.swarm.remove_listener(listener);
+            }
+            self.shared.record_relay_reservation(false);
+            self.shared.record_last_error("relay_reservation_timeout");
+        }
+    }
+
+    /// Retries reservations after a bounded delay once the relay is connected.
+    fn retry_relay_reservations(&mut self, now: Instant) {
+        let due: Vec<PeerId> = self
+            .relay_state
+            .iter()
+            .filter(|(relay, state)| {
+                state.listener.is_none()
+                    && state.retry_at.is_some_and(|retry_at| retry_at <= now)
+                    && self.swarm.is_connected(relay)
+            })
+            .map(|(relay, _)| *relay)
+            .collect();
+        for relay_peer_id in due {
+            if let Some(state) = self.relay_state.get_mut(&relay_peer_id) {
+                state.retry_at = None;
+            }
+            self.ensure_relay_reservation(relay_peer_id);
+        }
+    }
+
+    /// Relay peer ID encoded before `/p2p-circuit` in a relayed address.
+    fn relay_for_circuit(address: &Multiaddr) -> Option<PeerId> {
+        let mut previous = None;
+        for protocol in address.iter() {
+            if protocol == Protocol::P2pCircuit {
+                return previous;
+            }
+            previous = match protocol {
+                Protocol::P2p(peer_id) => Some(peer_id),
+                _ => None,
+            };
+        }
+        None
+    }
+
+    fn handle_outgoing_error(&mut self, peer_id: PeerId, error: &DialError) {
+        let (code, _) = map_dial_error(error);
+        self.shared.record_failed(&peer_id.to_string(), code);
+        match self.pending_dials.get(&peer_id).map(|pending| pending.phase) {
+            Some(DialPhase::Direct) => self.start_relay_phase(peer_id, code),
+            Some(DialPhase::Relay) => {
+                if !self.dial_next_relay(peer_id) {
+                    self.fail_no_viable_path(peer_id);
+                }
+            }
+            None => {
+                if self.targets.contains_key(&peer_id) {
+                    self.background_relay_fallback(peer_id);
+                    self.schedule_retry(&peer_id);
+                }
+            }
         }
     }
 
@@ -580,6 +916,92 @@ impl Driver {
         }
     }
 
+    fn relay_add(&mut self, address: Multiaddr, respond: oneshot::Sender<Result<(), NetError>>) {
+        let mut addresses: Vec<Multiaddr> = self
+            .shared
+            .relays()
+            .iter()
+            .filter_map(|candidate| candidate.parse().ok())
+            .collect();
+        if !addresses.iter().any(|candidate| candidate == &address) {
+            addresses.push(address.clone());
+        }
+        if addresses.len() > crate::config::MAX_RELAYS {
+            let _ = respond.send(Err(NetError::InvalidConfig("relays")));
+            return;
+        }
+        match relay_list::save(&self.config.data_root, &addresses) {
+            Ok(()) => {
+                self.shared
+                    .set_relays(addresses.iter().map(ToString::to_string).collect());
+                if let Ok((peer_id, full_address)) = split_peer_address(&address) {
+                    self.relays.insert(peer_id, full_address.clone());
+                    let targets = self.targets.entry(peer_id).or_default();
+                    if !targets.contains(&full_address) {
+                        targets.push(full_address.clone());
+                    }
+                    self.swarm.add_peer_address(peer_id, full_address.clone());
+                    self.dial_background(peer_id, self.targets.get(&peer_id).cloned().unwrap_or_default());
+                }
+                self.refresh_relay_counts();
+                let _ = respond.send(Ok(()));
+            }
+            Err(error) => {
+                let _ = respond.send(Err(error));
+            }
+        }
+    }
+
+    fn relay_remove(&mut self, address: &Multiaddr, respond: oneshot::Sender<Result<(), NetError>>) {
+        let text = address.to_string();
+        let current: Vec<Multiaddr> = self
+            .shared
+            .relays()
+            .iter()
+            .filter_map(|candidate| candidate.parse().ok())
+            .collect();
+        if !current.iter().any(|candidate| candidate.to_string() == text) {
+            let _ = respond.send(Err(NetError::PeerNotFound));
+            return;
+        }
+        let addresses: Vec<Multiaddr> = current
+            .into_iter()
+            .filter(|candidate| candidate.to_string() != text)
+            .collect();
+        match relay_list::save(&self.config.data_root, &addresses) {
+            Ok(()) => {
+                self.shared
+                    .set_relays(addresses.iter().map(ToString::to_string).collect());
+                if let Ok((peer_id, full_address)) = split_peer_address(address) {
+                    self.relays.remove(&peer_id);
+                    let empty = if let Some(targets) = self.targets.get_mut(&peer_id) {
+                        targets.retain(|candidate| candidate != &full_address);
+                        targets.is_empty()
+                    } else {
+                        false
+                    };
+                    if empty {
+                        self.targets.remove(&peer_id);
+                        self.backoff.remove(&peer_id);
+                        let _ = self.swarm.disconnect_peer_id(peer_id);
+                    }
+                    if let Some(listener) = self
+                        .relay_state
+                        .remove(&peer_id)
+                        .and_then(|mut state| state.listener.take())
+                    {
+                        let _ = self.swarm.remove_listener(listener);
+                    }
+                }
+                self.refresh_relay_counts();
+                let _ = respond.send(Ok(()));
+            }
+            Err(error) => {
+                let _ = respond.send(Err(error));
+            }
+        }
+    }
+
     fn reconnect(&mut self, peer_id: Option<PeerId>) -> Result<(), NetError> {
         match peer_id {
             Some(peer_id) => {
@@ -636,12 +1058,21 @@ impl Driver {
             .map(|(peer_id, _)| *peer_id)
             .collect();
         for peer_id in expired {
-            if let Some(pending) = self.pending_dials.remove(&peer_id) {
-                let _ = pending.respond.send(Err(NetError::Timeout));
-                self.shared.record_failed(&peer_id.to_string(), "timeout");
-                self.schedule_retry(&peer_id);
+            let Some(pending) = self.pending_dials.get(&peer_id) else {
+                continue;
+            };
+            match pending.phase {
+                DialPhase::Direct => self.start_relay_phase(peer_id, "timeout"),
+                DialPhase::Relay => {
+                    if !self.dial_next_relay(peer_id) {
+                        self.fail_no_viable_path(peer_id);
+                    }
+                }
             }
         }
+
+        self.expire_relay_reservations(now);
+        self.retry_relay_reservations(now);
 
         let expired: Vec<OutboundRequestId> = self
             .pending_requests
@@ -679,7 +1110,10 @@ impl Driver {
             .backoff
             .iter()
             .filter(|(peer_id, backoff)| {
-                backoff.next_at <= now && !self.pending_dials.contains_key(peer_id) && !self.swarm.is_connected(peer_id)
+                backoff.next_at <= now
+                    && !self.pending_dials.contains_key(peer_id)
+                    && !self.background_relay_attempted.contains(peer_id)
+                    && !self.swarm.is_connected(peer_id)
             })
             .map(|(peer_id, _)| *peer_id)
             .collect();
@@ -1062,9 +1496,54 @@ impl Driver {
 
     fn on_swarm_event(&mut self, event: SwarmEvent<BehaviourEvent>) {
         match event {
-            SwarmEvent::NewListenAddr { address, .. } => self.shared.add_listen(address),
-            SwarmEvent::ExpiredListenAddr { address, .. } => self.shared.remove_listen(&address),
-            SwarmEvent::ListenerClosed { addresses, reason, .. } => {
+            SwarmEvent::NewListenAddr { address, .. } => {
+                if let Some(relay_peer_id) = Self::relay_for_circuit(&address) {
+                    if let Some(state) = self.relay_state.get_mut(&relay_peer_id) {
+                        state.reservation = true;
+                        state.pending_since = None;
+                        state.retry_at = None;
+                    }
+                    self.refresh_relay_counts();
+                } else if self.config.relay_server_enabled && is_loopback(&address) {
+                    // Local relay nodes have no public address. Advertising the
+                    // loopback listener keeps reservations working in tests and
+                    // on a single machine without pretending to be public.
+                    self.swarm.add_external_address(address.clone());
+                }
+                self.shared.add_listen(address);
+            }
+            SwarmEvent::ExpiredListenAddr { address, .. } => {
+                if let Some(relay_peer_id) = Self::relay_for_circuit(&address) {
+                    if let Some(state) = self.relay_state.get_mut(&relay_peer_id) {
+                        state.reservation = false;
+                    }
+                    self.refresh_relay_counts();
+                }
+                self.shared.remove_listen(&address);
+            }
+            SwarmEvent::ListenerClosed {
+                listener_id,
+                addresses,
+                reason,
+            } => {
+                let closed_relay = self
+                    .relay_state
+                    .iter()
+                    .find(|(_, state)| state.listener == Some(listener_id))
+                    .map(|(relay, _)| *relay);
+                if let Some(relay_peer_id) = closed_relay {
+                    if let Some(state) = self.relay_state.get_mut(&relay_peer_id) {
+                        state.listener = None;
+                        state.reservation = false;
+                        state.pending_since = None;
+                        if state.retry_at.is_none() {
+                            state.retry_at = Some(Instant::now() + RELAY_RETRY);
+                        }
+                    }
+                    self.shared.record_relay_reservation(false);
+                    self.shared.record_last_error("relay_reservation_closed");
+                    self.refresh_relay_counts();
+                }
                 for address in addresses {
                     self.shared.remove_listen(&address);
                 }
@@ -1072,7 +1551,18 @@ impl Driver {
                     self.shared.record_last_error("listener_closed");
                 }
             }
-            SwarmEvent::ListenerError { .. } => self.shared.record_last_error("listener_error"),
+            SwarmEvent::ListenerError { listener_id, .. } => {
+                if self
+                    .relay_state
+                    .values()
+                    .any(|state| state.listener == Some(listener_id))
+                {
+                    self.shared.record_relay_reservation(false);
+                    self.shared.record_last_error("relay_listener_error");
+                } else {
+                    self.shared.record_last_error("listener_error");
+                }
+            }
             SwarmEvent::ConnectionEstablished {
                 peer_id,
                 endpoint,
@@ -1081,55 +1571,84 @@ impl Driver {
                 ..
             } => {
                 let direction = if endpoint.is_dialer() { "outbound" } else { "inbound" };
-                let remote_address = endpoint.get_remote_address().clone();
-                let transport = transport_label(&remote_address);
+                let relayed = endpoint.is_relayed();
+                let path = if relayed { "relay" } else { "direct" };
+                let endpoint_address = match &endpoint {
+                    ConnectedPoint::Dialer { address, .. } => address.clone(),
+                    ConnectedPoint::Listener { local_addr, .. } => local_addr.clone(),
+                };
+                let relay_peer_id = relayed.then(|| Self::relay_for_circuit(&endpoint_address)).flatten();
+                let relay_text = relay_peer_id.map(|relay| relay.to_string());
+                let transport = transport_label(&endpoint_address);
                 let connected = self.shared.record_connected(
                     &peer_id.to_string(),
                     direction,
                     transport,
-                    &remote_address,
+                    &endpoint_address,
                     established_in,
+                    path,
+                    relay_text.as_deref(),
                 );
-                self.swarm
-                    .behaviour_mut()
-                    .kademlia
-                    .add_address(&peer_id, remote_address);
+                if !relayed {
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .add_address(&peer_id, endpoint_address);
+                }
                 if num_established.get() == 1 {
                     self.backoff.remove(&peer_id);
                 }
+                if self.relays.contains_key(&peer_id) && !relayed {
+                    self.ensure_relay_reservation(peer_id);
+                }
+                self.background_relay_attempted.remove(&peer_id);
                 if let Some(pending) = self.pending_dials.remove(&peer_id) {
+                    if pending.phase == DialPhase::Relay {
+                        self.shared.record_fallback_success();
+                    }
                     let _ = pending.respond.send(Ok(connected));
                 }
+                self.refresh_relay_counts();
             }
             SwarmEvent::ConnectionClosed {
                 peer_id,
+                endpoint,
                 num_established,
                 cause,
                 ..
             } => {
+                let path = if endpoint.is_relayed() { "relay" } else { "direct" };
                 if num_established == 0 {
                     let reason = if cause.is_some() {
                         "connection_closed"
                     } else {
                         "peer_closed"
                     };
-                    self.shared.record_disconnected(&peer_id.to_string(), Some(reason));
+                    self.shared
+                        .record_disconnected(&peer_id.to_string(), Some(reason), path);
+                    if self.relays.contains_key(&peer_id) {
+                        if let Some(listener) = self
+                            .relay_state
+                            .remove(&peer_id)
+                            .and_then(|mut state| state.listener.take())
+                        {
+                            let _ = self.swarm.remove_listener(listener);
+                        }
+                        self.refresh_relay_counts();
+                    }
+                    self.background_relay_attempted.remove(&peer_id);
                     if self.targets.contains_key(&peer_id) {
                         self.schedule_retry(&peer_id);
                     }
                 } else {
-                    self.shared.record_connection_removed(&peer_id.to_string());
+                    self.shared.record_connection_removed(&peer_id.to_string(), path);
                 }
             }
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                 let (code, _) = map_dial_error(&error);
                 self.shared.record_last_error(code);
                 if let Some(peer_id) = peer_id {
-                    self.shared.record_failed(&peer_id.to_string(), code);
-                    if let Some(pending) = self.pending_dials.remove(&peer_id) {
-                        let _ = pending.respond.send(Err(map_dial_error(&error).1));
-                    }
-                    self.schedule_retry(&peer_id);
+                    self.handle_outgoing_error(peer_id, &error);
                 }
             }
             SwarmEvent::IncomingConnectionError { .. } => {
@@ -1188,8 +1707,107 @@ impl Driver {
                 self.shared.record_request(false);
                 self.shared.record_last_error(map_inbound_failure(&error));
             }
+            BehaviourEvent::Autonat(event) => self.on_autonat_event(event),
+            BehaviourEvent::Dcutr(event) => match event.result {
+                Ok(_) => self.shared.record_direct_upgrade(&event.remote_peer_id.to_string()),
+                Err(_) => {
+                    self.shared.record_hole_punch_failure();
+                    self.shared.record_last_error("hole_punch_failed");
+                }
+            },
+            BehaviourEvent::RelayClient(event) => self.on_relay_client_event(event),
+            BehaviourEvent::RelayServer(event) => self.on_relay_server_event(event),
             _ => {}
         }
+    }
+
+    fn on_autonat_event(&mut self, event: autonat::v1::Event) {
+        match event {
+            autonat::v1::Event::StatusChanged { new, .. } => match new {
+                autonat::v1::NatStatus::Public(address) => {
+                    self.shared.set_nat_status("public", Some(&address));
+                }
+                autonat::v1::NatStatus::Private => self.shared.set_nat_status("private", None),
+                autonat::v1::NatStatus::Unknown => self.shared.set_nat_status("unknown", None),
+            },
+            autonat::v1::Event::OutboundProbe(_) => self.shared.record_nat_probe(),
+            autonat::v1::Event::InboundProbe(_) => {}
+        }
+    }
+
+    fn on_relay_client_event(&mut self, event: relay::client::Event) {
+        match event {
+            relay::client::Event::ReservationReqAccepted {
+                relay_peer_id,
+                renewal,
+                limit,
+            } => {
+                if let Some(limit) = limit {
+                    self.apply_relay_limit(relay_peer_id, limit.duration(), limit.data_in_bytes());
+                }
+                if let Some(state) = self.relay_state.get_mut(&relay_peer_id) {
+                    state.reservation = true;
+                    state.pending_since = None;
+                    state.retry_at = None;
+                } else {
+                    self.relay_state.insert(
+                        relay_peer_id,
+                        RelayState {
+                            reservation: true,
+                            ..RelayState::default()
+                        },
+                    );
+                }
+                if !renewal {
+                    self.shared.record_relay_reservation(true);
+                }
+                self.refresh_relay_counts();
+            }
+            relay::client::Event::OutboundCircuitEstablished { relay_peer_id, limit } => {
+                if let Some(limit) = limit {
+                    self.apply_relay_limit(relay_peer_id, limit.duration(), limit.data_in_bytes());
+                }
+                self.shared.record_relay_circuit();
+            }
+            relay::client::Event::InboundCircuitEstablished { src_peer_id, limit } => {
+                let _ = src_peer_id;
+                if let Some(limit) = limit {
+                    self.shared.set_relay_limits(limit.duration(), limit.data_in_bytes());
+                }
+                self.shared.record_relay_circuit();
+            }
+        }
+    }
+
+    fn on_relay_server_event(&mut self, event: relay::Event) {
+        match event {
+            relay::Event::ReservationReqAccepted { renewed, .. } => {
+                if !renewed {
+                    self.shared.record_relay_server_reservation(true);
+                }
+            }
+            relay::Event::ReservationReqDenied { .. } => self.shared.record_relay_server_denied(),
+            relay::Event::ReservationClosed { .. } | relay::Event::ReservationTimedOut { .. } => {
+                self.shared.record_relay_server_reservation(false);
+            }
+            relay::Event::CircuitReqAccepted { .. } => {
+                self.shared.record_relay_server_circuit(true);
+            }
+            relay::Event::CircuitReqDenied { .. } => self.shared.record_relay_server_denied(),
+            relay::Event::CircuitClosed { .. } => self.shared.record_relay_server_circuit(false),
+            relay::Event::StatusChanged { status } => {
+                self.shared.set_relay_server_status(status == relay::Status::Enable);
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_relay_limit(&mut self, relay_peer_id: PeerId, duration: Option<Duration>, bytes: Option<u64>) {
+        let applied = RelayLimit { duration, bytes };
+        if let Some(state) = self.relay_state.get_mut(&relay_peer_id) {
+            state.limit = applied;
+        }
+        self.shared.set_relay_limits(applied.duration, applied.bytes);
     }
 
     fn on_inbound_request(&mut self, peer: PeerId, request: Vec<u8>, channel: ResponseChannel<Vec<u8>>) {
@@ -1274,6 +1892,15 @@ pub(crate) fn transport_label(address: &Multiaddr) -> String {
     }
 }
 
+/// Whether an address names a loopback interface.
+fn is_loopback(address: &Multiaddr) -> bool {
+    address.iter().any(|protocol| match protocol {
+        Protocol::Ip4(ip) => ip.is_loopback(),
+        Protocol::Ip6(ip) => ip.is_loopback(),
+        _ => false,
+    })
+}
+
 fn map_dial_error(error: &DialError) -> (&'static str, NetError) {
     match error {
         DialError::WrongPeerId { .. } => ("wrong_peer_id", NetError::WrongPeerId),
@@ -1283,6 +1910,16 @@ fn map_dial_error(error: &DialError) -> (&'static str, NetError) {
         DialError::Aborted => ("dial_aborted", NetError::ConnectionFailed),
         DialError::Denied { .. } => ("dial_denied", NetError::Unavailable),
         DialError::Transport(_) => ("transport_failure", NetError::ConnectionFailed),
+    }
+}
+
+fn error_for_dial_code(code: &'static str) -> NetError {
+    match code {
+        "wrong_peer_id" => NetError::WrongPeerId,
+        "no_addresses" | "local_peer_id" => NetError::InvalidAddress,
+        "timeout" => NetError::Timeout,
+        "dial_denied" => NetError::Unavailable,
+        _ => NetError::ConnectionFailed,
     }
 }
 
