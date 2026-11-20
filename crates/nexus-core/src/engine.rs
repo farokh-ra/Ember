@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nexus_crypto::Value;
 use nexus_identity::{Identity, IdentityVault, LocalEncryptionKey};
@@ -12,6 +12,7 @@ use nexus_net::{Network, NetworkConfig, NetworkState, NetworkStatus, PeerDiscove
 use nexus_store::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage, Store, StoreConfig, StoreError, safe_display_name};
 
 use crate::config::CoreConfig;
+use crate::downloads::{CoreFileProvider, DOWNLOAD_WORKERS};
 use crate::envelope::{MAX_RESPONSE_BYTES, Request, encode_failure, encode_success, error_value};
 use crate::error::{CoreError, DomainCode, DomainError};
 use crate::event::{EventQueue, PendingEvent};
@@ -94,7 +95,7 @@ impl IdentitySlot {
     }
 }
 
-enum MethodOutcome {
+pub(crate) enum MethodOutcome {
     Result(Value),
     Domain(DomainError),
 }
@@ -102,19 +103,22 @@ enum MethodOutcome {
 /// One core instance. The FFI registry owns it through an `Arc`.
 pub struct Engine {
     config: CoreConfig,
-    store: Store,
+    pub(crate) store: Arc<Store>,
     state: Mutex<LifecycleState>,
     identity: Mutex<IdentitySlot>,
     secret: zeroize::Zeroizing<Vec<u8>>,
-    events: Arc<EventQueue>,
-    ops: Arc<OperationRegistry>,
+    pub(crate) events: Arc<EventQueue>,
+    pub(crate) ops: Arc<OperationRegistry>,
     pool: WorkerPool,
+    pub(crate) download_pool: WorkerPool,
+    pub(crate) downloads: Arc<Mutex<HashMap<String, Arc<crate::downloads::DownloadControl>>>>,
     imports: Mutex<HashMap<u64, ImportSession>>,
     exports: Mutex<HashMap<u64, ExportCursor>>,
     network: Mutex<Option<Arc<Network>>>,
     network_error: Mutex<Option<&'static str>>,
     next_import: AtomicU64,
     next_export: AtomicU64,
+    pub(crate) next_download: AtomicU64,
     dropped_events: Arc<AtomicU64>,
     shutting_down: AtomicBool,
 }
@@ -135,22 +139,27 @@ impl Engine {
             ..StoreConfig::default()
         };
         let store = Store::open_with_config(&config.data_root, store_config)?;
+        store.pause_interrupted_downloads()?;
         let pool = WorkerPool::new("nexus-core-op", OPERATION_WORKERS)?;
+        let download_pool = WorkerPool::new("nexus-core-download", DOWNLOAD_WORKERS)?;
         Ok(Self {
             config,
-            store,
+            store: Arc::new(store),
             state: Mutex::new(LifecycleState::Created),
             identity: Mutex::new(IdentitySlot::absent()),
             secret: zeroize::Zeroizing::new(secret.to_vec()),
             events: Arc::new(EventQueue::new()),
             ops: Arc::new(OperationRegistry::new()),
             pool,
+            download_pool,
+            downloads: Arc::new(Mutex::new(HashMap::new())),
             imports: Mutex::new(HashMap::new()),
             exports: Mutex::new(HashMap::new()),
             network: Mutex::new(None),
             network_error: Mutex::new(None),
             next_import: AtomicU64::new(1),
             next_export: AtomicU64::new(1),
+            next_download: AtomicU64::new(1),
             dropped_events: Arc::new(AtomicU64::new(0)),
             shutting_down: AtomicBool::new(false),
         })
@@ -251,6 +260,7 @@ impl Engine {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();
+        self.pause_active_downloads();
 
         let network = self
             .network
@@ -264,6 +274,8 @@ impl Engine {
         if let Some(network) = network {
             network.shutdown();
         }
+        self.wait_for_downloads_to_stop(Duration::from_secs(5));
+        let pause_result = self.store.pause_interrupted_downloads();
 
         let checkpoint = self.store.checkpoint();
         {
@@ -286,7 +298,38 @@ impl Engine {
             )]),
         ));
         checkpoint?;
+        pause_result?;
         Ok(())
+    }
+
+    /// Asks every running download to pause at its next safe boundary.
+    fn pause_active_downloads(&self) {
+        let controls: Vec<_> = self
+            .downloads
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .values()
+            .cloned()
+            .collect();
+        for control in controls {
+            control.request_pause();
+        }
+    }
+
+    /// Waits a bounded time for download workers to checkpoint and exit.
+    fn wait_for_downloads_to_stop(&self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if self
+                .downloads
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_empty()
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Stops the core and closes the event queue for final handle release.
@@ -495,6 +538,12 @@ impl Engine {
             0x060B => self.network_relay_add(&params),
             0x060C => self.network_relay_remove(&params),
             0x060D => self.network_connectivity().map(MethodOutcome::Result),
+            0x0801 => self.download_start(&params),
+            0x0802 => self.download_list(&params).map(MethodOutcome::Result),
+            0x0803 => self.download_pause(&params),
+            0x0804 => self.download_resume(&params),
+            0x0805 => self.download_cancel(&params),
+            0x0806 => self.download_remove(&params),
             0x0B01 => Ok(MethodOutcome::Result(self.test_echo(&params)?)),
             0x0B02 => self.test_fault(&params),
             _ => Err(CoreError::Unsupported(method_id)),
@@ -520,6 +569,12 @@ impl Engine {
             "network.relay_add",
             "network.relay_remove",
             "network.connectivity",
+            "download.start",
+            "download.list",
+            "download.pause",
+            "download.resume",
+            "download.cancel",
+            "download.remove",
         ]
         .into_iter()
         .chain(
@@ -807,7 +862,7 @@ impl Engine {
             .clone()
     }
 
-    fn network_snapshot(&self) -> Option<Arc<Network>> {
+    pub(crate) fn network_snapshot(&self) -> Option<Arc<Network>> {
         self.network
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -858,7 +913,8 @@ impl Engine {
         config.dht_mode = self.config.dht_mode;
         config.relay_fallback = self.config.relay_fallback;
         config.relay_server_enabled = self.config.relay_server;
-        match Network::start(config, &key, observer) {
+        let provider = Arc::new(CoreFileProvider::new(Arc::clone(&self.store)));
+        match Network::start_with_provider(config, &key, observer, provider) {
             Ok(network) => {
                 let status = network.status();
                 *self.network.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(network));
@@ -902,7 +958,7 @@ impl Engine {
         self.try_emit(PendingEvent::durable("network.state", Value::Map(entries)));
     }
 
-    fn require_network(&self) -> Result<Arc<Network>, DomainError> {
+    pub(crate) fn require_network(&self) -> Result<Arc<Network>, DomainError> {
         if !self.config.network_enabled {
             return Err(network_domain_error(&nexus_net::NetError::Disabled));
         }
@@ -1131,7 +1187,7 @@ impl Engine {
         Ok(MethodOutcome::Result(op_accepted(op_id)))
     }
 
-    fn require_running(&self) -> Result<(), CoreError> {
+    pub(crate) fn require_running(&self) -> Result<(), CoreError> {
         if self.state() == LifecycleState::Running {
             Ok(())
         } else {
@@ -1140,7 +1196,7 @@ impl Engine {
     }
 
     /// Emits a lifecycle or identity event without ever blocking the caller.
-    fn try_emit(&self, event: PendingEvent) {
+    pub(crate) fn try_emit(&self, event: PendingEvent) {
         if self.events.try_push(event).is_err() {
             self.dropped_events.fetch_add(1, Ordering::Relaxed);
         }

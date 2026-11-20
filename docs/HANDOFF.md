@@ -1,88 +1,99 @@
 # Ember Project Handoff
 
-**Current stage:** 11 - NAT traversal, relays and difficult networks
+**Current stage:** 12 - direct file transfer
 **Stage status:** Complete
-**Last updated:** 2026-11-19
-**Branch:** `feat/11-nat-traversal`
-**Next stage:** 12 - streaming transfer, chunk verification, pause/resume, and process-death recovery (waiting for user permission)
+**Last updated:** 2026-11-20
+**Branch:** `feat/12-streaming-transfer`
+**Next stage:** 13 - profiles and signed public metadata (waiting for user permission)
 
 ## What was implemented
 
-Stage 11 adds the difficult-network layer required by ADR-0005 and ADR-0007
-on top of the Stage 09 transports and the Stage 10 DHT:
+Stage 12 adds direct peer-to-peer file transfer on top of the Stage 09
+transports and the Stage 11 relay fallback:
 
-- A documented NAT traversal and relay design in
-  `docs/architecture/NAT_TRAVERSAL.md`.
-- Circuit Relay v2 through the pinned libp2p `0.57.1` `relay` feature. Ember is
-  a relay client by default and a bounded relay server only when configured.
-- DCUtR hole punching through the `dcutr` feature.
-- AutoNAT v1 reachability through the `autonat` feature.
-- Direct-first connection fallback to connected relays with bounded deadlines.
-  A failed direct dial tries each connected relay in order; exhausted
-  candidates return `NoViablePath`.
-- Relay reservations with a 30 s default deadline and a 5 s retry after a
-  refused, closed, or timed-out reservation.
-- Optional community relay nodes with operator guidance in
-  `docs/operations/RELAY_NODES.md`.
-- Relay lists merged at startup from compile-time `EMBER_RELAY_NODES`, runtime
-  configuration, and persisted `network/relays.list`, deduplicated and bounded
-  to 16 entries.
-- Four new core methods: `network.relay_list` (0x060A),
-  `network.relay_add` (0x060B), `network.relay_remove` (0x060C), and
-  `network.connectivity` (0x060D).
-- NAT, relay, path, fallback, hole-punch, and relay-server fields in
-  `network.status`, `network.peers`, `network.connect_*`, and
-  `network.peer_event`.
-- Connectivity classification `disabled`, `connecting`, `relay`, `direct`, or
-  `no_peers`, with a troubleshooting hint that distinguishes missing relays,
-  disconnected relays, missing reservations, and a ready-but-idle path.
-- A demo-only Network status section for relay usage, NAT reachability, path
-  counters, circuit limits, and troubleshooting. It remains visibly simulated.
-- 15 new Rust tests, for 229 total.
+- A bounded `/nexus/file/1` request/response protocol for metadata and chunk
+  slices, with canonical CBOR, exact field sets, and a 512 KiB message cap.
+- A `FileProvider` contract in `nexus-net` and a storage-backed
+  `CoreFileProvider` in the core that serves only verified content.
+- Direct transfer from one connected peer at a time, with up to 8 ordered
+  fallback sources and 4 attempts per chunk.
+- Per-chunk SHA-256 verification before any bytes are written.
+- Manifest, signed-publication, content-ID, and whole-file verification before
+  promotion into the managed library.
+- Pause, resume, retry, cancellation with optional partial retention, and
+  source failover.
+- Durable verified-prefix checkpoints and process-death recovery: interrupted
+  downloads become `paused` on start and resume from the last complete chunk.
+  A graceful stop also pauses active downloads before networking shuts down.
+- Quota and free-space checks at registration and after every verified chunk.
+- Bounded memory: 64 KiB wire slices and one 1 MiB chunk assembled at a time.
+- Safe display names and generated partial paths that cannot traverse or
+  overwrite.
+- Six new core methods: `download.start` (0x0801), `download.list` (0x0802),
+  `download.pause` (0x0803), `download.resume` (0x0804),
+  `download.cancel` (0x0805), and `download.remove` (0x0806).
+- Eight transfer events: `download.started`, `download.progress`,
+  `download.resumed`, `download.paused`, `download.completed`,
+  `download.failed`, `download.cancelled`, and `download.removed`.
+- Schema version 5 with `manifest_root` and `source_peer` on downloads.
+- A demo Downloads card that shows speed and the serving peer alongside
+  progress, status, source count, and verification state. It remains visibly
+  simulated.
+- 22 new Rust tests, for 251 total.
 
 ## Files changed
+
+Protocol crate:
+
+- `crates/nexus-protocol/src/file.rs` (new)
+- `crates/nexus-protocol/src/lib.rs`
 
 Network crate:
 
 - `crates/nexus-net/src/behaviour.rs`
-- `crates/nexus-net/src/config.rs`
+- `crates/nexus-net/src/codec.rs`
 - `crates/nexus-net/src/driver.rs`
 - `crates/nexus-net/src/error.rs`
+- `crates/nexus-net/src/file.rs` (new)
 - `crates/nexus-net/src/lib.rs`
-- `crates/nexus-net/src/relay.rs` (new)
-- `crates/nexus-net/src/shared.rs`
-- `crates/nexus-net/src/state.rs`
-- `crates/nexus-net/tests/stage09.rs`
-- `crates/nexus-net/tests/stage11.rs` (new)
+- `crates/nexus-net/tests/stage12.rs` (new)
 
 Core crate:
 
-- `crates/nexus-core/src/config.rs`
+- `crates/nexus-core/src/downloads.rs` (new)
 - `crates/nexus-core/src/engine.rs`
+- `crates/nexus-core/src/error.rs`
+- `crates/nexus-core/src/lib.rs`
 - `crates/nexus-core/src/network.rs`
-- `crates/nexus-core/tests/stage09.rs`
-- `crates/nexus-core/tests/stage10.rs`
-- `crates/nexus-core/tests/stage11.rs` (new)
+- `crates/nexus-core/tests/stage12.rs` (new)
+
+Store crate:
+
+- `crates/nexus-store/migrations/0005_download_transfer_metadata.sql` (new)
+- `crates/nexus-store/src/migrations.rs`
+- `crates/nexus-store/src/model.rs`
+- `crates/nexus-store/src/store.rs`
+- `crates/nexus-store/tests/local_import.rs`
+- `crates/nexus-store/tests/storage.rs`
 
 FFI and workspace:
 
-- `crates/nexus-ffi/src/registry.rs`
-- `Cargo.toml`, `Cargo.lock`
+- `crates/nexus-ffi/tests/c_abi.rs`
+- `.gitignore`
+- `build.gradle.kts`
 
 Shared Kotlin:
 
 - `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/demo/DemoModels.kt`
 - `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/demo/DemoCatalog.kt`
+- `shared/ui/src/commonMain/kotlin/io/nexus/ui/components/Cards.kt`
 - `shared/ui/src/commonMain/kotlin/io/nexus/ui/resources/NexusStrings.kt`
-- `shared/ui/src/commonMain/kotlin/io/nexus/ui/screens/NetworkStatusScreen.kt`
 
 Documentation:
 
-- `docs/architecture/NAT_TRAVERSAL.md` (new)
-- `docs/operations/RELAY_NODES.md` (new)
-- `docs/architecture/FFI_INTERFACE.md` (version 1.4.0)
-- `docs/architecture/DEPENDENCY_LICENSE_INVENTORY.md` (version 1.8.0)
-- `docs/progress/STAGE_11.md` (new)
+- `docs/architecture/FILE_TRANSFER.md` (new)
+- `docs/progress/STAGE_12.md` (new)
+- `docs/architecture/FFI_INTERFACE.md` (version 1.5.0)
 - `docs/HANDOFF.md`
 - `README.md`, `CHANGELOG.md`
 
@@ -94,25 +105,26 @@ Documentation:
 cargo test --workspace -- --test-threads=1
 ```
 
-Result: PASS, 229 tests, 0 failures.
+Result: PASS, 251 tests, 0 failures.
 
-Stage 11-specific suites:
+Stage 12-specific suites:
 
 ```text
-cargo test -p nexus-net --test stage11 -- --test-threads=1
-cargo test -p nexus-core --test stage11 -- --test-threads=1
+cargo test -p nexus-net --test stage12 -- --test-threads=1
+cargo test -p nexus-core --test stage12 -- --test-threads=1
 ```
 
-Result: PASS, 5 and 4 tests respectively.
+Result: PASS, 2 and 1 tests respectively.
 
 ### Test breakdown
 
 | Suite | Tests | Failures |
 |---|---:|---:|
-| `nexus-core` unit tests | 28 | 0 |
+| `nexus-core` unit tests | 41 | 0 |
 | `nexus-core` Stage 09 tests | 4 | 0 |
 | `nexus-core` Stage 10 tests | 2 | 0 |
 | `nexus-core` Stage 11 tests | 4 | 0 |
+| `nexus-core` Stage 12 tests | 1 | 0 |
 | `nexus-crypto` unit tests | 24 | 0 |
 | `nexus-ffi` unit tests | 4 | 0 |
 | `nexus-ffi` C ABI tests | 6 | 0 |
@@ -122,8 +134,9 @@ Result: PASS, 5 and 4 tests respectively.
 | `nexus-net` Stage 09 tests | 8 | 0 |
 | `nexus-net` Stage 10 tests | 4 | 0 |
 | `nexus-net` Stage 11 tests | 5 | 0 |
+| `nexus-net` Stage 12 tests | 2 | 0 |
 | `nexus-observability` unit tests | 3 | 0 |
-| `nexus-protocol` unit tests | 25 | 0 |
+| `nexus-protocol` unit tests | 31 | 0 |
 | `nexus-protocol` signed-record tests | 9 | 0 |
 | `nexus-protocol` Stage 07 tests | 8 | 0 |
 | `nexus-store` unit tests | 17 | 0 |
@@ -133,12 +146,15 @@ Result: PASS, 5 and 4 tests respectively.
 | `nexus-transfer` unit tests | 7 | 0 |
 | `nexus-transfer` integration tests | 7 | 0 |
 | `nexus-types` unit tests | 1 | 0 |
-| **Rust total** | **229** | **0** |
+| **Rust total** | **251** | **0** |
+
+Stage 11 had 229 tests. Stage 12 adds 13 core download-manager tests, 6 protocol
+wire tests, 2 network Stage 12 tests, and 1 core Stage 12 test.
 
 ### Kotlin checks
 
 ```text
-gradlew spotlessCheck detekt :shared:presentation:jvmTest :shared:ui:jvmTest
+gradle spotlessCheck detekt :shared:presentation:jvmTest :shared:ui:jvmTest
 ```
 
 Result: PASS.
@@ -158,72 +174,61 @@ cargo audit
   (`RUSTSEC-2024-0436`) remains documented in `deny.toml`.
 - `cargo audit`: 411 dependencies scanned; no vulnerabilities and one allowed
   warning.
-- `Cargo.lock` resolves 411 packages; the dependency inventory is at version
-  1.8.0. Stage 11 adds `libp2p-autonat` 0.16.0, `libp2p-dcutr` 0.15.0, and
-  `libp2p-relay` 0.22.0. `libp2p-upnp` 0.7.0 is present in the optional graph
-  but is not enabled.
+- `Cargo.lock` remains at 411 packages. Stage 12 adds no dependency.
 - The native artifact build was not re-run because the ABI and exported surface
   did not change. The six C ABI tests still pass in the workspace suite.
 
 ## Errors and failed attempts
 
-1. Relay serving requires a confirmed external address. Without one, libp2p
-   does not advertise HOP and loopback reservations fail. The driver now
-   registers operator `external_addresses` and auto-advertises loopback
-   listeners when relay serving is enabled.
-2. Clippy rejected the first relay configuration with
-   `field_reassign_with_default`, two `collapsible_if` cases, two
-   `useless_conversion` cases, and two `too_many_arguments` functions. The
-   configuration uses struct initialization, collapsed conditions, direct
-   `as_secs()`, and two documented internal allows.
-3. DCUtR can promote a circuit to a direct connection immediately after the
-   connect event. The core relay test accepts a relay or direct path in the
-   snapshot while still proving fallback through the connect event and relay
-   status.
-4. Deterministic relay-fallback measurements required disabling DCUtR and
-   AutoNAT in the test fixtures. Production defaults leave both enabled.
-5. `libp2p-relay` does not export its `Limit` type. The driver reads
-   `limit.duration()` and `limit.data_in_bytes()` inline.
-6. The Stage 09 transport assertion expected exactly `quic` and `tcp`. A relay
-   client now also advertises `relay`; the assertion was updated to
-   `["quic", "tcp", "relay"]`.
-7. `network.connect_failed` initially lost the typed error and emitted only a
-   string. The driver now preserves `NetError`, and the core renders the
-   `code`/`message`/`retryable` map.
+1. Migration tests still asserted schema version 4 after migration 5 was added.
+   They now assert `LATEST_VERSION`, and the checkpoint test asserts the
+   current version.
+2. `mixed_or_unknown_shapes_are_rejected` changed a valid content-ID byte
+   instead of testing truncation and trailing bytes. It now truncates and
+   appends bytes.
+3. Clippy rejected `i64::from(LATEST_VERSION)` as a useless conversion. The
+   assertion now compares the integer directly.
+4. Spotless walked the local Gradle cache inside `NeededToolsHere` and tried to
+   format generated Kotlin DSL accessors. The directory is excluded from
+   Spotless and ignored by Git.
+5. `download.started` needed more fields for the UI than the reserved contract,
+   so it also carries `total_bytes`, `source_peer`, `publication_id`, and
+   `display_name`.
+6. A pause can race a chunk failure. The worker re-reads the control before
+   recording a failure, so the persisted state and terminal event match the
+   user's action.
 
 ## Decisions and unresolved questions
 
-- Stage 11 was explicitly approved by the project owner.
-- Circuit Relay v2 is the relay mechanism. No TURN or custom relay protocol is
-  added.
-- DCUtR and AutoNAT v1 are enabled by default. Relay serving is off by default.
-- Direct dials always run first. Relay fallback is sequential and bounded; the
-  node does not race relay and direct dials.
-- A relay is optional infrastructure, not an authority. It forwards
-  Noise-encrypted bytes and cannot read content.
-- The relay list merges compiled, configured, and persisted sources and is
-  bounded to 16 entries.
-- Connectivity reports `relay` when any data connection is relayed, even if a
-  direct connection to relay infrastructure exists.
-- UPnP/NAT-PMP port mapping is deferred. `libp2p-upnp` is not enabled.
-- Raw relayed byte accounting is not exposed by libp2p. Negotiated circuit
-  limits and circuit counters are the supported cost signal.
-- The Kotlin troubleshooting UI remains labeled demo data; core wiring is a
-  later UI stage.
-- The ABI remains 1; the protocol version is `0.1.0-stage-11`.
-- Android runtime relay evidence is deferred because no emulator or device is
-  available.
-- Remote GitHub Actions execution has not run for Stage 11.
-- PR #9 (Stage 10) remains open on `main`; Stage 11 is based on the Stage 10
-  head and should be rebased after PR #9 merges.
+- Stage 12 was explicitly authorized by the project owner after Stage 11 was
+  approved.
+- One source is used at a time. Parallel chunk swarms and erasure coding are
+  deferred.
+- A source must already be connected; the download manager does not dial.
+- Chunk slices are 64 KiB on the wire even though chunks are 1 MiB. This keeps
+  each frame small enough for a relayed circuit.
+- Only complete chunks are checkpointed. A mid-chunk prefix is rejected on
+  resume rather than re-verified in place.
+- The manifest root and source peer are persisted so a restart can resume
+  without trusting a fresh metadata response.
+- Completed downloads leave the download queue and become verified content with
+  a `retained_download` reference.
+- The ABI remains 1; the protocol version is `0.1.0-stage-12`, and the identify
+  protocol is `/nexus/0.1.0-stage-12`.
+- The Kotlin Downloads UI remains labeled demo data; core wiring is a later UI
+  stage.
+- Android runtime transfer evidence is deferred because no emulator or device
+  is available.
+- Remote GitHub Actions execution has not run for Stage 12.
 
 ## Exact next action
 
-1. Review `docs/progress/STAGE_11.md`,
-   `docs/architecture/NAT_TRAVERSAL.md`,
-   `docs/operations/RELAY_NODES.md`, the updated
-   `docs/architecture/FFI_INTERFACE.md`, and the `nexus-net`/`nexus-core`
-   Stage 11 tests.
-2. Give explicit approval to start Stage 12.
-3. Stage 12 adds streaming transfer, chunk verification, pause/resume, and
-   process-death recovery. Do not begin it before that approval.
+1. Review `docs/progress/STAGE_12.md`,
+   `docs/architecture/FILE_TRANSFER.md`, the updated
+   `docs/architecture/FFI_INTERFACE.md`, and the `nexus-protocol`,
+   `nexus-net`, `nexus-store`, and `nexus-core` Stage 12 changes.
+2. Give explicit approval to start Stage 13.
+3. Stage 13 adds profiles and signed public metadata: the public profile schema,
+   username collision behavior without a central registry, signed profile
+   publication and retrieval, stale-record handling, and profile pages. Do not
+   begin it before that approval.

@@ -288,6 +288,8 @@ public interface NexusStrings {
     public val downloadsProgressLabel: String
     public val downloadsVerified: String
     public val downloadsNotVerified: String
+    public val downloadsSpeedLabel: (String) -> String
+    public val downloadsSourcePeerLabel: (String) -> String
     public val downloadsPausedNote: String
     public val downloadsDelete: String
     public val downloadsDeleteDialogTitle: String
@@ -759,6 +761,8 @@ public object EnglishNexusStrings : NexusStrings {
     override val downloadsProgressLabel: String = "Progress"
     override val downloadsVerified: String = "Content verified"
     override val downloadsNotVerified: String = "Not verified yet"
+    override val downloadsSpeedLabel: (String) -> String = { speed -> "Speed: $speed" }
+    override val downloadsSourcePeerLabel: (String) -> String = { peer -> "Serving peer: $peer" }
     override val downloadsPausedNote: String = "Transfer controls are not active in this preview."
     override val downloadsDelete: String = "Delete download"
     override val downloadsDeleteDialogTitle: String = "Delete this demo download?"

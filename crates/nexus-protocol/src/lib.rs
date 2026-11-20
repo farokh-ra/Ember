@@ -8,6 +8,7 @@ mod dht;
 mod envelope;
 mod error;
 mod fields;
+mod file;
 mod manifest;
 mod profile;
 mod publication;
@@ -21,6 +22,11 @@ pub use dht::{
 };
 pub use envelope::{MAX_SIGNED_BODY_BYTES, MAX_SIGNED_RECORD_BYTES, SignedRecord};
 pub use error::ProtocolError;
+pub use file::{
+    ChunkRequest, FILE_WIRE_VERSION, FileRequest, FileResponse, FileSelector, MAX_CHUNK_SLICE_BYTES,
+    MAX_FILE_ERROR_BYTES, MAX_FILE_MESSAGE_BYTES, decode_file_request, decode_file_response, encode_file_request,
+    encode_file_response,
+};
 pub use manifest::{ChunkEntry, MANIFEST_SCHEMA_VERSION, MAX_CHUNKS, MAX_MANIFEST_BYTES, ManifestV1, manifest_root};
 pub use profile::{
     MAX_BIO_CHARS, MAX_DISPLAY_NAME_CHARS, MAX_PROFILE_PUBLICATION_REFS, MAX_USERNAME_CHARS, MIN_DISPLAY_NAME_CHARS,

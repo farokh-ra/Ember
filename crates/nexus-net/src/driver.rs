@@ -19,8 +19,9 @@ use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use libp2p::swarm::{DialError, SwarmEvent};
 use libp2p::{Multiaddr, PeerId, Swarm, autonat, identify, ping, relay};
 use nexus_protocol::{
-    DHT_KEY_BYTES, DHT_MAX_VALUE_BYTES, DhtRecord, DhtRecordDecision, TestResponse, decode_test_request,
-    decode_test_response, encode_test_request, encode_test_response, validate_provider_addresses,
+    DHT_KEY_BYTES, DHT_MAX_VALUE_BYTES, DhtRecord, DhtRecordDecision, FileRequest, FileResponse, FileSelector,
+    TestResponse, decode_file_request, decode_file_response, decode_test_request, decode_test_response,
+    encode_file_request, encode_file_response, encode_test_request, encode_test_response, validate_provider_addresses,
     validate_provider_key,
 };
 use tokio::sync::{mpsc, oneshot};
@@ -29,6 +30,7 @@ use crate::behaviour::{Behaviour, BehaviourEvent};
 use crate::bootstrap;
 use crate::config::{NetworkConfig, split_peer_address};
 use crate::error::NetError;
+use crate::file::{FileMetadata, FileProvider};
 use crate::relay as relay_list;
 use crate::shared::Shared;
 use crate::state::{ConnectedPeer, DhtValue, DiscoveredPeer, NetworkState, PeerDiscovery, TestReply};
@@ -49,6 +51,9 @@ const MAX_DISCOVERED_PEERS: usize = 32;
 const MAX_DISCOVERED_ADDRESSES: usize = 8;
 /// Minimum delay before retrying a refused relay reservation.
 const RELAY_RETRY: Duration = Duration::from_secs(5);
+/// Inbound file requests allowed per peer per minute. A 64 KiB slice means
+/// this permits roughly 12 MiB/s per peer while still bounding abuse.
+const MAX_FILE_REQUESTS_PER_PEER_PER_MINUTE: u32 = 12_000;
 
 pub(crate) enum Command {
     Dial {
@@ -60,6 +65,19 @@ pub(crate) enum Command {
         peer_id: PeerId,
         payload: Vec<u8>,
         respond: oneshot::Sender<Result<TestReply, NetError>>,
+    },
+    FetchFileMetadata {
+        peer_id: PeerId,
+        selector: FileSelector,
+        respond: oneshot::Sender<Result<FileMetadata, NetError>>,
+    },
+    FetchFileChunk {
+        peer_id: PeerId,
+        content_id: [u8; 32],
+        index: u32,
+        offset: u32,
+        length: u32,
+        respond: oneshot::Sender<Result<Vec<u8>, NetError>>,
     },
     DhtDiscover {
         target: Option<[u8; DHT_KEY_BYTES]>,
@@ -147,6 +165,25 @@ struct PendingRequest {
     deadline: Instant,
 }
 
+enum PendingFileRequest {
+    Metadata {
+        respond: oneshot::Sender<Result<FileMetadata, NetError>>,
+        deadline: Instant,
+    },
+    Chunk {
+        respond: oneshot::Sender<Result<Vec<u8>, NetError>>,
+        deadline: Instant,
+    },
+}
+
+impl PendingFileRequest {
+    fn deadline(&self) -> Instant {
+        match self {
+            Self::Metadata { deadline, .. } | Self::Chunk { deadline, .. } => *deadline,
+        }
+    }
+}
+
 enum PendingQuery {
     Discover {
         respond: oneshot::Sender<Result<PeerDiscovery, NetError>>,
@@ -203,6 +240,7 @@ pub(crate) struct Driver {
     commands: mpsc::Receiver<Command>,
     pending_dials: HashMap<PeerId, PendingDial>,
     pending_requests: HashMap<OutboundRequestId, PendingRequest>,
+    pending_file_requests: HashMap<OutboundRequestId, PendingFileRequest>,
     pending_queries: HashMap<kad::QueryId, PendingQuery>,
     backoff: HashMap<PeerId, Backoff>,
     targets: BTreeMap<PeerId, Vec<Multiaddr>>,
@@ -210,6 +248,8 @@ pub(crate) struct Driver {
     relay_state: HashMap<PeerId, RelayState>,
     background_relay_attempted: HashSet<PeerId>,
     rate: HashMap<PeerId, RateWindow>,
+    file_rate: HashMap<PeerId, RateWindow>,
+    file_provider: Arc<dyn FileProvider>,
     dht_bootstrapped: bool,
     last_bootstrap: Option<Instant>,
     routing_peers: usize,
@@ -222,6 +262,7 @@ impl Driver {
         keypair: libp2p::identity::Keypair,
         shared: Arc<Shared>,
         commands: mpsc::Receiver<Command>,
+        file_provider: Arc<dyn FileProvider>,
     ) -> Result<Self, NetError> {
         let mut targets: BTreeMap<PeerId, Vec<Multiaddr>> = BTreeMap::new();
         for address in &config.bootstrap {
@@ -289,6 +330,7 @@ impl Driver {
             commands,
             pending_dials: HashMap::new(),
             pending_requests: HashMap::new(),
+            pending_file_requests: HashMap::new(),
             pending_queries: HashMap::new(),
             backoff: HashMap::new(),
             targets,
@@ -296,6 +338,8 @@ impl Driver {
             relay_state: HashMap::new(),
             background_relay_attempted: HashSet::new(),
             rate: HashMap::new(),
+            file_rate: HashMap::new(),
+            file_provider,
             dht_bootstrapped: false,
             last_bootstrap: None,
             routing_peers: 0,
@@ -338,6 +382,7 @@ impl Driver {
                         self.shared.force_state(NetworkState::Stopping, Some("shutdown"));
                         self.pending_dials.clear();
                         self.pending_requests.clear();
+                        self.pending_file_requests.clear();
                         self.pending_queries.clear();
                         let _ = respond.send(());
                         return;
@@ -362,6 +407,19 @@ impl Driver {
                 payload,
                 respond,
             } => self.send_test(peer_id, payload, respond),
+            Command::FetchFileMetadata {
+                peer_id,
+                selector,
+                respond,
+            } => self.fetch_file_metadata(peer_id, selector, respond),
+            Command::FetchFileChunk {
+                peer_id,
+                content_id,
+                index,
+                offset,
+                length,
+                respond,
+            } => self.fetch_file_chunk(peer_id, content_id, index, offset, length, respond),
             Command::DhtDiscover { target, respond } => self.dht_discover(target, respond),
             Command::DhtPublish { key, value, respond } => self.dht_publish(key, value, respond),
             Command::DhtLookup { key, respond } => self.dht_lookup(key, respond),
@@ -699,6 +757,71 @@ impl Driver {
                 }
             }
         }
+    }
+
+    fn fetch_file_metadata(
+        &mut self,
+        peer_id: PeerId,
+        selector: FileSelector,
+        respond: oneshot::Sender<Result<FileMetadata, NetError>>,
+    ) {
+        if !self.shared.is_connected(&peer_id.to_string()) {
+            let _ = respond.send(Err(NetError::NotConnected));
+            return;
+        }
+        let request = match encode_file_request(&FileRequest::Metadata(selector)) {
+            Ok(request) => request,
+            Err(_) => {
+                let _ = respond.send(Err(NetError::MessageTooLarge));
+                return;
+            }
+        };
+        let now = Instant::now();
+        let request_id = self.swarm.behaviour_mut().file.send_request(&peer_id, request);
+        self.pending_file_requests.insert(
+            request_id,
+            PendingFileRequest::Metadata {
+                respond,
+                deadline: now + self.config.request_timeout + REQUEST_GRACE,
+            },
+        );
+    }
+
+    fn fetch_file_chunk(
+        &mut self,
+        peer_id: PeerId,
+        content_id: [u8; 32],
+        index: u32,
+        offset: u32,
+        length: u32,
+        respond: oneshot::Sender<Result<Vec<u8>, NetError>>,
+    ) {
+        if !self.shared.is_connected(&peer_id.to_string()) {
+            let _ = respond.send(Err(NetError::NotConnected));
+            return;
+        }
+        let request = FileRequest::Chunk(nexus_protocol::ChunkRequest {
+            content_id,
+            index,
+            offset,
+            length,
+        });
+        let request = match encode_file_request(&request) {
+            Ok(request) => request,
+            Err(_) => {
+                let _ = respond.send(Err(NetError::MessageTooLarge));
+                return;
+            }
+        };
+        let now = Instant::now();
+        let request_id = self.swarm.behaviour_mut().file.send_request(&peer_id, request);
+        self.pending_file_requests.insert(
+            request_id,
+            PendingFileRequest::Chunk {
+                respond,
+                deadline: now + self.config.request_timeout + REQUEST_GRACE,
+            },
+        );
     }
 
     fn send_test(&mut self, peer_id: PeerId, payload: Vec<u8>, respond: oneshot::Sender<Result<TestReply, NetError>>) {
@@ -1083,6 +1206,24 @@ impl Driver {
         for request_id in expired {
             if let Some(pending) = self.pending_requests.remove(&request_id) {
                 let _ = pending.respond.send(Err(NetError::Timeout));
+            }
+        }
+
+        let expired: Vec<OutboundRequestId> = self
+            .pending_file_requests
+            .iter()
+            .filter(|(_, pending)| pending.deadline() <= now)
+            .map(|(request_id, _)| *request_id)
+            .collect();
+        for request_id in expired {
+            match self.pending_file_requests.remove(&request_id) {
+                Some(PendingFileRequest::Metadata { respond, .. }) => {
+                    let _ = respond.send(Err(NetError::Timeout));
+                }
+                Some(PendingFileRequest::Chunk { respond, .. }) => {
+                    let _ = respond.send(Err(NetError::Timeout));
+                }
+                None => {}
             }
         }
 
@@ -1707,6 +1848,30 @@ impl Driver {
                 self.shared.record_request(false);
                 self.shared.record_last_error(map_inbound_failure(&error));
             }
+            BehaviourEvent::File(request_response::Event::Message { peer, message, .. }) => match message {
+                request_response::Message::Request { request, channel, .. } => {
+                    self.on_inbound_file_request(peer, request, channel);
+                }
+                request_response::Message::Response { request_id, response } => {
+                    self.on_file_response(request_id, response);
+                }
+            },
+            BehaviourEvent::File(request_response::Event::OutboundFailure { request_id, error, .. }) => {
+                let (code, mapped) = map_outbound_failure(error);
+                self.shared.record_last_error(code);
+                match self.pending_file_requests.remove(&request_id) {
+                    Some(PendingFileRequest::Metadata { respond, .. }) => {
+                        let _ = respond.send(Err(mapped));
+                    }
+                    Some(PendingFileRequest::Chunk { respond, .. }) => {
+                        let _ = respond.send(Err(mapped));
+                    }
+                    None => {}
+                }
+            }
+            BehaviourEvent::File(request_response::Event::InboundFailure { error, .. }) => {
+                self.shared.record_last_error(map_inbound_failure(&error));
+            }
             BehaviourEvent::Autonat(event) => self.on_autonat_event(event),
             BehaviourEvent::Dcutr(event) => match event.result {
                 Ok(_) => self.shared.record_direct_upgrade(&event.remote_peer_id.to_string()),
@@ -1843,6 +2008,82 @@ impl Driver {
         }
     }
 
+    fn on_inbound_file_request(&mut self, peer: PeerId, request: Vec<u8>, channel: ResponseChannel<Vec<u8>>) {
+        if !self.allow_file_request(peer) {
+            let response = FileResponse {
+                error: Some("rate_limited".to_owned()),
+                ..FileResponse::default()
+            };
+            if let Ok(body) = encode_file_response(&response) {
+                let _ = self.swarm.behaviour_mut().file.send_response(channel, body);
+            }
+            return;
+        }
+        let response = match decode_file_request(&request) {
+            Ok(FileRequest::Metadata(selector)) => match self.file_provider.metadata(selector) {
+                Some(metadata) => FileResponse {
+                    manifest: Some(metadata.manifest),
+                    publication: metadata.publication,
+                    ..FileResponse::default()
+                },
+                None => unavailable_response(),
+            },
+            Ok(FileRequest::Chunk(chunk)) => {
+                match self
+                    .file_provider
+                    .chunk(&chunk.content_id, chunk.index, chunk.offset, chunk.length)
+                {
+                    Some(data) if data.len() == usize::try_from(chunk.length).unwrap_or(usize::MAX) => FileResponse {
+                        data: Some(data),
+                        ..FileResponse::default()
+                    },
+                    _ => unavailable_response(),
+                }
+            }
+            Err(_) => FileResponse {
+                error: Some("malformed".to_owned()),
+                ..FileResponse::default()
+            },
+        };
+        if let Ok(body) = encode_file_response(&response) {
+            let _ = self.swarm.behaviour_mut().file.send_response(channel, body);
+        }
+    }
+
+    fn on_file_response(&mut self, request_id: OutboundRequestId, response: Vec<u8>) {
+        let Some(pending) = self.pending_file_requests.remove(&request_id) else {
+            return;
+        };
+        let decoded = decode_file_response(&response);
+        match pending {
+            PendingFileRequest::Metadata { respond, .. } => {
+                let result = match decoded {
+                    Ok(response) => match (response.manifest, response.error) {
+                        (Some(manifest), None) => Ok(FileMetadata {
+                            manifest,
+                            publication: response.publication,
+                        }),
+                        (None, Some(error)) => Err(map_file_error(&error)),
+                        _ => Err(NetError::ConnectionFailed),
+                    },
+                    Err(_) => Err(NetError::ConnectionFailed),
+                };
+                let _ = respond.send(result);
+            }
+            PendingFileRequest::Chunk { respond, .. } => {
+                let result = match decoded {
+                    Ok(response) => match (response.data, response.error) {
+                        (Some(data), None) => Ok(data),
+                        (None, Some(error)) => Err(map_file_error(&error)),
+                        _ => Err(NetError::ConnectionFailed),
+                    },
+                    Err(_) => Err(NetError::ConnectionFailed),
+                };
+                let _ = respond.send(result);
+            }
+        }
+    }
+
     fn on_inbound_response(&mut self, request_id: OutboundRequestId, response: Vec<u8>) {
         let Some(pending) = self.pending_requests.remove(&request_id) else {
             return;
@@ -1863,7 +2104,18 @@ impl Driver {
 
     fn allow_request(&mut self, peer: PeerId) -> bool {
         let limit = self.config.max_requests_per_peer_per_minute;
-        let window = self.rate.entry(peer).or_insert(RateWindow {
+        Self::allow_window(&mut self.rate, peer, limit)
+    }
+
+    fn allow_file_request(&mut self, peer: PeerId) -> bool {
+        if self.file_rate.len() >= MAX_RATE_WINDOWS && !self.file_rate.contains_key(&peer) {
+            self.file_rate.clear();
+        }
+        Self::allow_window(&mut self.file_rate, peer, MAX_FILE_REQUESTS_PER_PEER_PER_MINUTE)
+    }
+
+    fn allow_window(windows: &mut HashMap<PeerId, RateWindow>, peer: PeerId, limit: u32) -> bool {
+        let window = windows.entry(peer).or_insert(RateWindow {
             started: Instant::now(),
             count: 0,
         });
@@ -1930,6 +2182,21 @@ fn map_outbound_failure(error: OutboundFailure) -> (&'static str, NetError) {
         OutboundFailure::Timeout => ("timeout", NetError::Timeout),
         OutboundFailure::UnsupportedProtocols => ("unsupported_protocol", NetError::UnsupportedProtocol),
         OutboundFailure::Io(_) => ("io_error", NetError::ConnectionFailed),
+    }
+}
+
+fn unavailable_response() -> FileResponse {
+    FileResponse {
+        error: Some("content_unavailable".to_owned()),
+        ..FileResponse::default()
+    }
+}
+
+fn map_file_error(code: &str) -> NetError {
+    match code {
+        "content_unavailable" => NetError::FileUnavailable,
+        "rate_limited" | "malformed" => NetError::Rejected,
+        _ => NetError::Rejected,
     }
 }
 

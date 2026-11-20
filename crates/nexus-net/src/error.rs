@@ -83,6 +83,9 @@ pub enum NetError {
     /// The remote peer rejected the request.
     #[error("the remote peer rejected the request")]
     Rejected,
+    /// The remote peer does not have the requested verified content.
+    #[error("the remote peer does not have the requested content")]
+    FileUnavailable,
     /// A local socket or file operation failed.
     #[error("local network I/O failed")]
     Io(#[source] io::Error),
@@ -125,6 +128,7 @@ impl NetError {
             Self::InvalidKey => "invalid_key",
             Self::RecordTooLarge => "record_too_large",
             Self::Rejected => "rejected",
+            Self::FileUnavailable => "content_unavailable",
             Self::Io(_) => "io_error",
             Self::Crypto(_) => "crypto_error",
             Self::DriverFailed => "driver_failed",

@@ -180,7 +180,7 @@ fn lifecycle_dispatch_and_errors_share_one_contract() {
     assert_eq!(map_get(&info, "abi_version").and_then(Value::as_unsigned), Some(1));
     assert_eq!(
         map_get(&info, "protocol_version").and_then(Value::as_text),
-        Some("0.1.0-stage-10")
+        Some(nexus_core::PROTOCOL_VERSION)
     );
 
     let (status, bytes) = invoke(
