@@ -236,7 +236,7 @@ impl DomainError {
         }
     }
 
-    fn from_store(error: &StoreError) -> Self {
+    pub(crate) fn from_store(error: &StoreError) -> Self {
         match error {
             StoreError::Io(_) | StoreError::Database(_) | StoreError::DatabaseWorkerStopped => {
                 Self::new(DomainCode::IoError, "A local storage operation failed.")

@@ -131,6 +131,8 @@ public data class DemoDownload(
     public val contentVerified: Boolean,
     public val sourceCount: Int,
     public val updatedLabel: String,
+    public val speedLabel: String? = null,
+    public val sourcePeer: String? = null,
     public val isDemo: Boolean = true,
 )
 

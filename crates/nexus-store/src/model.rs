@@ -293,6 +293,10 @@ pub struct DownloadRecord {
     pub updated_at: u64,
     /// Last error message, if any.
     pub last_error: Option<String>,
+    /// Trusted manifest root used to resume and verify a restart.
+    pub manifest_root: Option<String>,
+    /// Peer that served the verified prefix.
+    pub source_peer: Option<String>,
 }
 
 /// Replica lifecycle state.

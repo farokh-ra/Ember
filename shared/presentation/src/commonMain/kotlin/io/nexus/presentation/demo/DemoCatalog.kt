@@ -220,6 +220,8 @@ public object DemoCatalog {
                 contentVerified = false,
                 sourceCount = 2,
                 updatedLabel = "2 min ago",
+                speedLabel = "1.8 MB/s",
+                sourcePeer = "12D3KooW...4f8a",
             ),
             DemoDownload(
                 id = "download-type-specimen",
@@ -232,6 +234,7 @@ public object DemoCatalog {
                 contentVerified = false,
                 sourceCount = 1,
                 updatedLabel = "18 min ago",
+                sourcePeer = "12D3KooW...7c1d",
             ),
             DemoDownload(
                 id = "download-dawn-chorus",
@@ -244,6 +247,7 @@ public object DemoCatalog {
                 contentVerified = false,
                 sourceCount = 3,
                 updatedLabel = "Verifying chunks",
+                sourcePeer = "12D3KooW...2b9e",
             ),
             DemoDownload(
                 id = "download-coastal-notes",
@@ -256,6 +260,7 @@ public object DemoCatalog {
                 contentVerified = true,
                 sourceCount = 2,
                 updatedLabel = "Complete after verification",
+                sourcePeer = "12D3KooW...5a3f",
             ),
             DemoDownload(
                 id = "download-mutual-aid-map",

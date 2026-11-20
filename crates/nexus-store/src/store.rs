@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -24,7 +25,7 @@ use crate::quota::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage};
 use crate::util::{hex_lower, is_content_id, is_safe_id, now_secs};
 
 const CONTENT_COLUMNS: &str = "content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at";
-const DOWNLOAD_COLUMNS: &str = "download_id, content_id, display_name, expected_size, verified_prefix, state, partial_file, created_at, updated_at, last_error";
+const DOWNLOAD_COLUMNS: &str = "download_id, content_id, display_name, expected_size, verified_prefix, state, partial_file, created_at, updated_at, last_error, manifest_root, source_peer";
 
 /// Tunable storage limits.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -197,7 +198,7 @@ impl Store {
                 |row| row.get(0),
             )?;
             let partial: i64 = connection.query_row(
-                "SELECT COALESCE(SUM(verified_prefix), 0) FROM downloads WHERE state IN ('pending', 'downloading', 'paused', 'failed')",
+                "SELECT COALESCE(SUM(verified_prefix), 0) FROM downloads WHERE state IN ('pending', 'downloading', 'paused', 'failed', 'cancelled')",
                 [],
                 |row| row.get(0),
             )?;
@@ -634,8 +635,25 @@ impl Store {
         expected_size: u64,
         display_name: &str,
     ) -> StoreResult<DownloadRecord> {
+        self.begin_download_with_source(download_id, content_id, expected_size, display_name, None, None)
+    }
+
+    /// Registers a download and remembers its trusted manifest root and source.
+    pub fn begin_download_with_source(
+        &self,
+        download_id: &str,
+        content_id: &str,
+        expected_size: u64,
+        display_name: &str,
+        manifest_root: Option<&str>,
+        source_peer: Option<&str>,
+    ) -> StoreResult<DownloadRecord> {
         validate_store_component(download_id, "download ID")?;
         validate_content_id(content_id)?;
+        if let Some(root) = manifest_root {
+            validate_content_id(root)?;
+        }
+        let source_peer = validate_source_peer(source_peer)?;
         self.config
             .quota
             .check_file_size(expected_size, self.config.max_file_size)?;
@@ -644,21 +662,24 @@ impl Store {
         let download_id_owned = download_id.to_owned();
         let content_id_owned = content_id.to_owned();
         let display_name = safe_display_name(display_name);
+        let manifest_root = manifest_root.map(str::to_owned);
         let partial_file = ManagedStore::partial_relative_path(download_id)?;
         let now = now_secs();
         self.db.write(move |connection| {
             connection.execute(
                 "INSERT INTO downloads
                  (download_id, content_id, display_name, expected_size, verified_prefix, state,
-                  partial_file, created_at, updated_at, last_error)
-                 VALUES (?1, ?2, ?3, ?4, 0, 'downloading', ?5, ?6, ?6, NULL)",
+                  partial_file, created_at, updated_at, last_error, manifest_root, source_peer)
+                 VALUES (?1, ?2, ?3, ?4, 0, 'downloading', ?5, ?6, ?6, NULL, ?7, ?8)",
                 params![
                     download_id_owned,
                     content_id_owned,
                     display_name,
                     expected_size,
                     partial_file,
-                    now
+                    now,
+                    manifest_root,
+                    source_peer
                 ],
             )?;
             Ok(())
@@ -669,6 +690,127 @@ impl Store {
             return Err(error);
         }
         self.download(download_id)
+    }
+
+    /// Updates the trusted manifest root and preferred source for a download.
+    pub fn set_download_source(
+        &self,
+        download_id: &str,
+        manifest_root: Option<&str>,
+        source_peer: Option<&str>,
+    ) -> StoreResult<DownloadRecord> {
+        let record = self.download(download_id)?;
+        if matches!(record.state, DownloadState::Completed | DownloadState::Cancelled) {
+            return Err(StoreError::Unsupported("download is terminal".to_owned()));
+        }
+        if let Some(root) = manifest_root {
+            validate_content_id(root)?;
+        }
+        let source_peer = validate_source_peer(source_peer)?;
+        let download_id_owned = download_id.to_owned();
+        let manifest_root = manifest_root.map(str::to_owned);
+        let now = now_secs();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE downloads
+                 SET manifest_root = ?2, source_peer = ?3, updated_at = ?4
+                 WHERE download_id = ?1",
+                params![download_id_owned, manifest_root, source_peer, now],
+            )?;
+            Ok(())
+        })?;
+        self.download(download_id)
+    }
+
+    /// Marks a download paused without discarding verified bytes.
+    pub fn pause_download(&self, download_id: &str, reason: Option<&str>) -> StoreResult<DownloadRecord> {
+        let record = self.download(download_id)?;
+        if record.state == DownloadState::Completed {
+            return Err(StoreError::Unsupported("download is already complete".to_owned()));
+        }
+        let reason = reason.map(|value| value.chars().take(256).collect::<String>());
+        let download_id_owned = download_id.to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE downloads SET state = 'paused', last_error = ?2, updated_at = ?3
+                 WHERE download_id = ?1",
+                params![download_id_owned, reason, now],
+            )?;
+            Ok(())
+        })?;
+        self.download(download_id)
+    }
+
+    /// Marks a download failed and records a bounded error message.
+    pub fn fail_download(&self, download_id: &str, message: &str) -> StoreResult<DownloadRecord> {
+        let record = self.download(download_id)?;
+        if matches!(record.state, DownloadState::Completed | DownloadState::Cancelled) {
+            return Err(StoreError::Unsupported("download is terminal".to_owned()));
+        }
+        let message = message.chars().take(256).collect::<String>();
+        let download_id_owned = download_id.to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE downloads SET state = 'failed', last_error = ?2, updated_at = ?3
+                 WHERE download_id = ?1",
+                params![download_id_owned, message, now],
+            )?;
+            Ok(())
+        })?;
+        self.download(download_id)
+    }
+
+    /// Returns a paused, failed, or kept-cancelled download to `downloading`.
+    pub fn resume_download(&self, download_id: &str) -> StoreResult<DownloadRecord> {
+        let record = self.download(download_id)?;
+        if record.state == DownloadState::Completed {
+            return Err(StoreError::Unsupported("download is already complete".to_owned()));
+        }
+        let download_id_owned = download_id.to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE downloads SET state = 'downloading', last_error = NULL, updated_at = ?2
+                 WHERE download_id = ?1",
+                params![download_id_owned, now],
+            )?;
+            Ok(())
+        })?;
+        self.download(download_id)
+    }
+
+    /// Marks a download cancelled while keeping its verified partial bytes.
+    pub fn cancel_download_keep(&self, download_id: &str) -> StoreResult<DownloadRecord> {
+        let record = self.download(download_id)?;
+        if record.state == DownloadState::Completed {
+            return Err(StoreError::Unsupported("download is already complete".to_owned()));
+        }
+        let download_id_owned = download_id.to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE downloads SET state = 'cancelled', updated_at = ?2 WHERE download_id = ?1",
+                params![download_id_owned, now],
+            )?;
+            Ok(())
+        })?;
+        self.download(download_id)
+    }
+
+    /// Pauses every download left in `downloading` by a previous process.
+    pub fn pause_interrupted_downloads(&self) -> StoreResult<usize> {
+        let now = now_secs();
+        self.db.write(move |connection| {
+            let changed = connection.execute(
+                "UPDATE downloads
+                 SET state = 'paused', last_error = 'interrupted by restart', updated_at = ?1
+                 WHERE state = 'downloading'",
+                [now],
+            )?;
+            Ok(changed)
+        })
     }
 
     /// Returns one download record.
@@ -818,7 +960,7 @@ impl Store {
         let ids = self.db.read(move |connection| {
             let mut statement = connection.prepare(
                 "SELECT download_id FROM downloads
-                 WHERE state IN ('pending', 'downloading', 'paused', 'failed')
+                 WHERE state IN ('pending', 'downloading', 'paused', 'failed', 'cancelled')
                    AND updated_at <= ?1",
             )?;
             let rows = statement.query_map([cutoff], |row| row.get::<_, String>(0))?;
@@ -1021,21 +1163,7 @@ impl Store {
                         description, filename, published_at, updated_at, tombstoned
                  FROM publications ORDER BY published_at DESC",
             )?;
-            let rows = statement.query_map([], |row| {
-                Ok(PublicationRecord {
-                    publication_id: row.get(0)?,
-                    identity_id: row.get(1)?,
-                    content_id: row.get(2)?,
-                    revision: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
-                    record_bytes: row.get(4)?,
-                    title: row.get(5)?,
-                    description: row.get(6)?,
-                    filename: row.get(7)?,
-                    published_at: u64::try_from(row.get::<_, i64>(8)?).unwrap_or(0),
-                    updated_at: u64::try_from(row.get::<_, i64>(9)?).unwrap_or(0),
-                    tombstoned: row.get::<_, i64>(10)? != 0,
-                })
-            })?;
+            let rows = statement.query_map([], publication_from_row)?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
     }
@@ -1143,6 +1271,126 @@ impl Store {
         let bytes = self.managed.read_manifest(root)?;
         ManifestV1::parse_body(&bytes).map_err(|error| StoreError::InvalidRecord(error.to_string()))?;
         Ok(bytes)
+    }
+
+    /// Loads one stored publication record by its ID.
+    pub fn publication(&self, publication_id: &str) -> StoreResult<PublicationRecord> {
+        validate_content_id(publication_id)?;
+        let publication_id = publication_id.to_owned();
+        self.db.read(move |connection| {
+            connection
+                .query_row(
+                    "SELECT publication_id, identity_id, content_id, revision, record_bytes, title,
+                            description, filename, published_at, updated_at, tombstoned
+                     FROM publications WHERE publication_id = ?1",
+                    [&publication_id],
+                    publication_from_row,
+                )
+                .optional()?
+                .ok_or_else(|| StoreError::RecordNotFound(format!("unknown publication {publication_id}")))
+        })
+    }
+
+    /// Returns signed publication bytes for a content ID when one is stored.
+    pub fn publication_for_content(&self, content_id: &str) -> StoreResult<Option<Vec<u8>>> {
+        validate_content_id(content_id)?;
+        let content_id_owned = content_id.to_owned();
+        let records = self.db.read(move |connection| {
+            let mut statement = connection.prepare(
+                "SELECT record_bytes FROM publications WHERE content_id = ?1
+                 ORDER BY revision DESC LIMIT 16",
+            )?;
+            let rows = statement.query_map([content_id_owned], |row| row.get::<_, Vec<u8>>(0))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })?;
+        for bytes in records {
+            if let Ok(publication) = SignedPublication::parse(&bytes)
+                && hex_lower(&publication.publication().content_id) == content_id
+            {
+                return Ok(Some(bytes));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Reads one bounded slice of a verified content blob.
+    ///
+    /// Only verified content is served and the requested range must lie inside
+    /// the stored file. The caller verifies the resulting bytes against the
+    /// manifest chunk hash.
+    /// Removes only verified content and enforces the requested range.
+    pub fn read_content_slice(&self, content_id: &str, offset: u64, length: usize) -> StoreResult<Vec<u8>> {
+        validate_content_id(content_id)?;
+        if length == 0 || length > nexus_protocol::MAX_CHUNK_SLICE_BYTES {
+            return Err(StoreError::IntegrityMismatch(content_id.to_owned()));
+        }
+        let record = self.content(content_id)?;
+        if record.state != ContentState::Verified {
+            return Err(StoreError::ContentMissing(content_id.to_owned()));
+        }
+        let length_u64 = u64::try_from(length).unwrap_or(u64::MAX);
+        let end = offset
+            .checked_add(length_u64)
+            .ok_or_else(|| StoreError::IntegrityMismatch(content_id.to_owned()))?;
+        if end > record.size_bytes {
+            return Err(StoreError::IntegrityMismatch(content_id.to_owned()));
+        }
+        let path = self.managed.blob_path(content_id)?;
+        let metadata = fs::metadata(&path)?;
+        if metadata.len() != record.size_bytes {
+            return Err(StoreError::IntegrityMismatch(content_id.to_owned()));
+        }
+        let mut file = fs::File::open(path)?;
+        file.seek(SeekFrom::Start(offset))?;
+        let mut buffer = vec![0_u8; length];
+        file.read_exact(&mut buffer)?;
+        Ok(buffer)
+    }
+
+    /// Loads a verified manifest for a content ID from a local publication or
+    /// from the named manifest directory.
+    ///
+    /// This is the inbound-serving lookup: it only returns manifest bytes whose
+    /// canonical root and shape verify and whose content ID matches.
+    pub fn manifest_for_content(&self, content_id: &str) -> StoreResult<Vec<u8>> {
+        validate_content_id(content_id)?;
+        let content_id_owned = content_id.to_owned();
+        let records = self.db.read(move |connection| {
+            let mut statement = connection.prepare(
+                "SELECT record_bytes FROM publications WHERE content_id = ?1 ORDER BY revision DESC LIMIT 16",
+            )?;
+            let rows = statement.query_map([content_id_owned], |row| row.get::<_, Vec<u8>>(0))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })?;
+        for bytes in records {
+            let Ok(publication) = SignedPublication::parse(&bytes) else {
+                continue;
+            };
+            let root = hex_lower(&publication.publication().manifest_root);
+            if let Ok(manifest) = self.managed.read_manifest(&root)
+                && ManifestV1::parse_body(&manifest).is_ok_and(|parsed| {
+                    parsed.content_id == publication.publication().content_id
+                        && parsed.validate_for_publication(publication.publication()).is_ok()
+                })
+            {
+                return Ok(manifest);
+            }
+        }
+        for entry in self.managed.scan_manifests()? {
+            let Some(root) = entry.path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            if !is_content_id(root) {
+                continue;
+            }
+            let Ok(manifest) = self.managed.read_manifest(root) else {
+                continue;
+            };
+            if ManifestV1::parse_body(&manifest).is_ok_and(|parsed| hex_lower(&parsed.content_id) == content_id) {
+                return Ok(manifest);
+            }
+        }
+        Err(StoreError::ManifestMissing(content_id.to_owned()))
     }
 
     /// Loads and verifies the manifest referenced by a stored signed publication.
@@ -1632,6 +1880,18 @@ fn validate_content_id(content_id: &str) -> StoreResult<()> {
     }
 }
 
+fn validate_source_peer(source_peer: Option<&str>) -> StoreResult<Option<String>> {
+    let Some(source_peer) = source_peer else {
+        return Ok(None);
+    };
+    if source_peer.is_empty() || source_peer.len() > 128 || !source_peer.is_ascii() {
+        return Err(StoreError::InvalidId(
+            "source peer must be ASCII and at most 128 bytes".to_owned(),
+        ));
+    }
+    Ok(Some(source_peer.to_owned()))
+}
+
 fn validate_entity_id(value: &str, label: &str) -> StoreResult<()> {
     if is_safe_id(value) {
         Ok(())
@@ -1666,6 +1926,22 @@ fn content_from_row(row: &Row<'_>) -> rusqlite::Result<ContentRecord> {
     })
 }
 
+fn publication_from_row(row: &Row<'_>) -> rusqlite::Result<PublicationRecord> {
+    Ok(PublicationRecord {
+        publication_id: row.get(0)?,
+        identity_id: row.get(1)?,
+        content_id: row.get(2)?,
+        revision: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+        record_bytes: row.get(4)?,
+        title: row.get(5)?,
+        description: row.get(6)?,
+        filename: row.get(7)?,
+        published_at: u64::try_from(row.get::<_, i64>(8)?).unwrap_or(0),
+        updated_at: u64::try_from(row.get::<_, i64>(9)?).unwrap_or(0),
+        tombstoned: row.get::<_, i64>(10)? != 0,
+    })
+}
+
 fn download_from_row(row: &Row<'_>) -> rusqlite::Result<DownloadRecord> {
     let state: String = row.get(5)?;
     Ok(DownloadRecord {
@@ -1679,5 +1955,7 @@ fn download_from_row(row: &Row<'_>) -> rusqlite::Result<DownloadRecord> {
         created_at: u64::try_from(row.get::<_, i64>(7)?).unwrap_or(0),
         updated_at: u64::try_from(row.get::<_, i64>(8)?).unwrap_or(0),
         last_error: row.get(9)?,
+        manifest_root: row.get(10)?,
+        source_peer: row.get(11)?,
     })
 }

@@ -6,6 +6,7 @@
 //! only through `nexus-ffi`.
 
 mod config;
+mod downloads;
 mod engine;
 mod envelope;
 mod error;
@@ -33,7 +34,7 @@ use nexus_observability::LogInitError;
 pub const ABI_VERSION: u32 = 1;
 
 /// Protocol version implemented by this build.
-pub const PROTOCOL_VERSION: &str = "0.1.0-stage-10";
+pub const PROTOCOL_VERSION: &str = "0.1.0-stage-12";
 
 /// Static build information exposed to shells and diagnostics.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -83,7 +84,7 @@ mod tests {
     #[test]
     fn reports_abi_version() {
         assert_eq!(ABI_VERSION, info().abi_version);
-        assert_eq!("0.1.0-stage-10", info().protocol_version);
+        assert_eq!("0.1.0-stage-12", info().protocol_version);
     }
 
     #[test]

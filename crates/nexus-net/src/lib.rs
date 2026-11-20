@@ -15,6 +15,7 @@ mod codec;
 mod config;
 mod driver;
 mod error;
+mod file;
 mod peer_key;
 mod relay;
 mod shared;
@@ -44,6 +45,7 @@ pub use config::{
     TCP_LISTEN_ADDRESS, require_peer_id,
 };
 pub use error::NetError;
+pub use file::{FileMetadata, FileProvider};
 pub use peer_key::{
     NETWORK_DIRECTORY, PEER_KEY_FILE_NAME, PEER_KEY_FORMAT_VERSION, PEER_KEY_HEADER_LENGTH, PEER_KEY_KDF_HKDF_SHA256,
     PEER_KEY_MAGIC, PEER_KEY_MAX_FILE_LENGTH, PEER_KEY_SALT_LENGTH, PEER_KEY_SEED_LENGTH, PeerKey,
@@ -55,8 +57,9 @@ pub use state::{
 };
 
 use crate::driver::{COMMAND_CAPACITY, Command};
+use crate::file::EmptyFileProvider;
 use crate::shared::Shared;
-use nexus_protocol::{DHT_KEY_BYTES, DhtRecord};
+use nexus_protocol::{DHT_KEY_BYTES, DhtRecord, FileSelector};
 
 /// How long [`Network::start`] waits for the driver to build the swarm.
 pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -81,6 +84,17 @@ impl Network {
         config: NetworkConfig,
         local_key: &LocalEncryptionKey,
         observer: Arc<dyn NetworkObserver>,
+    ) -> Result<Self, NetError> {
+        Self::start_with_provider(config, local_key, observer, Arc::new(EmptyFileProvider))
+    }
+
+    /// Starts the driver with a storage-backed file provider for inbound
+    /// `/nexus/file/1` requests.
+    pub fn start_with_provider(
+        config: NetworkConfig,
+        local_key: &LocalEncryptionKey,
+        observer: Arc<dyn NetworkObserver>,
+        file_provider: Arc<dyn FileProvider>,
     ) -> Result<Self, NetError> {
         let mut config = config;
         let mut merged = bootstrap::compiled()?;
@@ -138,7 +152,13 @@ impl Network {
                     }
                 };
                 runtime.block_on(async move {
-                    match driver::Driver::start(thread_config, keypair, thread_shared, receiver) {
+                    match driver::Driver::start(
+                        thread_config,
+                        keypair,
+                        thread_shared,
+                        receiver,
+                        Arc::clone(&file_provider),
+                    ) {
                         Ok(driver) => {
                             let _ = startup_sender.send(Ok(()));
                             driver.run().await;
@@ -214,6 +234,43 @@ impl Network {
         self.send(Command::SendTest {
             peer_id,
             payload: payload.to_vec(),
+            respond,
+        })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Fetches metadata for a content ID or publication ID from one peer.
+    ///
+    /// The manifest bytes are bounded but not trusted here; the caller verifies
+    /// the root against a signed publication or the content ID.
+    pub fn fetch_file_metadata(&self, peer_id: &str, selector: FileSelector) -> Result<FileMetadata, NetError> {
+        let peer_id: PeerId = peer_id.trim().parse().map_err(|_| NetError::InvalidPeerId)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::FetchFileMetadata {
+            peer_id,
+            selector,
+            respond,
+        })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Fetches one bounded slice from a verified content chunk.
+    pub fn fetch_file_chunk(
+        &self,
+        peer_id: &str,
+        content_id: &[u8; 32],
+        index: u32,
+        offset: u32,
+        length: u32,
+    ) -> Result<Vec<u8>, NetError> {
+        let peer_id: PeerId = peer_id.trim().parse().map_err(|_| NetError::InvalidPeerId)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::FetchFileChunk {
+            peer_id,
+            content_id: *content_id,
+            index,
+            offset,
+            length,
             respond,
         })?;
         receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))

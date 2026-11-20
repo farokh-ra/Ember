@@ -34,14 +34,14 @@ subprojects {
 spotless {
     kotlin {
         target("**/*.kt")
-        targetExclude("**/build/**", "**/.gradle/**")
+        targetExclude("**/build/**", "**/.gradle/**", "NeededToolsHere/**")
         ktlint(libs.versions.ktlint.get())
         trimTrailingWhitespace()
         endWithNewline()
     }
     kotlinGradle {
         target("**/*.kts")
-        targetExclude("**/build/**", "**/.gradle/**")
+        targetExclude("**/build/**", "**/.gradle/**", "NeededToolsHere/**")
         ktlint(libs.versions.ktlint.get())
         trimTrailingWhitespace()
         endWithNewline()
@@ -58,7 +58,7 @@ spotless {
             ".gitignore",
             ".gitmessage",
         )
-        targetExclude("**/build/**", "**/.gradle/**")
+        targetExclude("**/build/**", "**/.gradle/**", "NeededToolsHere/**")
         trimTrailingWhitespace()
         endWithNewline()
     }

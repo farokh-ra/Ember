@@ -11,11 +11,11 @@ use libp2p::swarm::{NetworkBehaviour, StreamProtocol};
 use libp2p::{Multiaddr, autonat, connection_limits, dcutr, identify, kad, ping, relay, request_response};
 use nexus_protocol::DHT_MAX_VALUE_BYTES;
 
-use crate::codec::{TestCodec, test_protocol};
+use crate::codec::{FileCodec, TestCodec, file_protocol, test_protocol};
 use crate::config::{DhtMode, NetworkConfig};
 
 /// Protocol version advertised through identify.
-pub const IDENTIFY_PROTOCOL_VERSION: &str = "/nexus/0.1.0-stage-11";
+pub const IDENTIFY_PROTOCOL_VERSION: &str = "/nexus/0.1.0-stage-12";
 /// Agent string advertised through identify.
 pub const IDENTIFY_AGENT_VERSION: &str = "ember/0.1.0";
 /// Identify exchange interval.
@@ -56,6 +56,7 @@ pub(crate) struct Behaviour {
     pub(crate) dcutr: Toggle<dcutr::Behaviour>,
     pub(crate) autonat: Toggle<autonat::v1::Behaviour>,
     pub(crate) test: request_response::Behaviour<TestCodec>,
+    pub(crate) file: request_response::Behaviour<FileCodec>,
 }
 
 impl Behaviour {
@@ -112,12 +113,18 @@ impl Behaviour {
             DhtMode::Server => kad::Mode::Server,
         }));
 
+        let request_config = request_response::Config::default()
+            .with_request_timeout(config.request_timeout)
+            .with_max_concurrent_streams(config.max_concurrent_streams);
         let test = request_response::Behaviour::with_codec(
             TestCodec,
             [(test_protocol(), request_response::ProtocolSupport::Full)],
-            request_response::Config::default()
-                .with_request_timeout(config.request_timeout)
-                .with_max_concurrent_streams(config.max_concurrent_streams),
+            request_config.clone(),
+        );
+        let file = request_response::Behaviour::with_codec(
+            FileCodec,
+            [(file_protocol(), request_response::ProtocolSupport::Full)],
+            request_config,
         );
 
         let relay_config = relay::Config {
@@ -165,6 +172,7 @@ impl Behaviour {
             dcutr,
             autonat,
             test,
+            file,
         }
     }
 }
@@ -186,7 +194,7 @@ mod tests {
 
     #[test]
     fn protocol_names_are_versioned_and_private() {
-        assert_eq!(IDENTIFY_PROTOCOL_VERSION, "/nexus/0.1.0-stage-11");
+        assert_eq!(IDENTIFY_PROTOCOL_VERSION, "/nexus/0.1.0-stage-12");
         assert_eq!(KAD_PROTOCOL_NAME, "/nexus/kad/1.0.0");
         assert!(!KAD_PROTOCOL_NAME.contains("ipfs"));
     }

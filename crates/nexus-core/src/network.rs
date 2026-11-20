@@ -552,6 +552,10 @@ pub(crate) fn domain_error(error: &NetError) -> DomainError {
         NetError::InvalidKey => (DomainCode::InvalidArgument, "The DHT key is invalid."),
         NetError::RecordTooLarge => (DomainCode::InvalidArgument, "The DHT record exceeds its size limit."),
         NetError::Rejected => (DomainCode::NetworkUnavailable, "The remote peer rejected the request."),
+        NetError::FileUnavailable => (
+            DomainCode::NotFound,
+            "The remote peer does not have the requested content.",
+        ),
         NetError::Io(_) => (DomainCode::IoError, "A local network operation failed."),
         NetError::DriverFailed => (DomainCode::NetworkUnavailable, "The network driver could not start."),
         NetError::RelayUnavailable => (

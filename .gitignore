@@ -7,6 +7,7 @@ captures/
 .kotlin/
 local.properties
 *.hprof
+NeededToolsHere/
 
 # Android
 *.apk

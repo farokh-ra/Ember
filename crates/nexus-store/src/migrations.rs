@@ -36,10 +36,15 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "local import references",
         sql: include_str!("../migrations/0004_local_import_refs.sql"),
     },
+    Migration {
+        version: 5,
+        name: "download transfer metadata",
+        sql: include_str!("../migrations/0005_download_transfer_metadata.sql"),
+    },
 ];
 
 /// Newest schema version understood by this build.
-pub(crate) const LATEST_VERSION: i64 = 4;
+pub(crate) const LATEST_VERSION: i64 = 5;
 
 /// Runs all outstanding migrations on the writer connection.
 pub(crate) fn run(conn: &mut Connection) -> StoreResult<()> {
@@ -248,7 +253,7 @@ mod tests {
         .expect("insert setting");
 
         run_with(&mut conn, MIGRATIONS).expect("upgrade to latest");
-        assert_eq!(user_version(&conn), 4);
+        assert_eq!(user_version(&conn), LATEST_VERSION);
         assert!(table_exists(&conn, "search_index"));
 
         let theme: String = conn
@@ -291,7 +296,7 @@ mod tests {
         .expect("insert version two tombstone");
 
         run_with(&mut conn, MIGRATIONS).expect("upgrade to latest schema");
-        assert_eq!(user_version(&conn), 4);
+        assert_eq!(user_version(&conn), LATEST_VERSION);
         let (identity, content, revision, created): (String, String, i64, i64) = conn
             .query_row(
                 "SELECT identity_id, content_id, revision, created_at FROM tombstones WHERE publication_id = 'pub-001'",

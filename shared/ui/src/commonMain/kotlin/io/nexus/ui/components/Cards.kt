@@ -206,6 +206,20 @@ public fun DownloadCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                download.speedLabel?.let { speed ->
+                    Text(
+                        text = strings.downloadsSpeedLabel(speed),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                download.sourcePeer?.let { peer ->
+                    Text(
+                        text = strings.downloadsSourcePeerLabel(peer),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text(
                     text = strings.sourceCount(download.sourceCount),
                     style = MaterialTheme.typography.labelSmall,
