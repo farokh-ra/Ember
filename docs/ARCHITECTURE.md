@@ -118,10 +118,10 @@ flowchart LR
 | `nexus-protocol` | Publication, profile, tombstone, manifest, and wire schemas; validation; DHT key derivation; version rules. | Store bytes, dial peers, or mutate local state. |
 | `nexus-identity` | Identity lifecycle, encrypted key file, LEK handling, restore/export coordination. | Read the network or write publication records directly. |
 | `nexus-store` | SQLite schema and migrations, managed blob store, quota, reference counts, metadata export, reconciliation. | Parse network records or make product policy decisions. |
-| `nexus-transfer` | Streaming import, chunk manifests, download state machine, verification, export, replica re-verification. | Decide search ranking, publish profile records, or bypass store rules. |
+| `nexus-transfer` | Streaming import, chunk manifests, chunk and whole-file verification, export, replica re-verification. | Decide search ranking, publish profile records, or bypass store rules. |
 | `nexus-net` | libp2p node, transports, peer identity, DHT, bootstrap, request/response, peer observations, network state. | Interpret signed records as trusted data or write SQLite directly. |
 | `nexus-search` | Local FTS index, Explore queries, optional index-provider client, coverage metadata. | Trust unverified records or mutate signed records. |
-| `nexus-core` | Lifecycle, orchestration, command/event bus, operation registry, settings, snapshots. | Duplicate crate-specific logic or expose raw internals over FFI. |
+| `nexus-core` | Lifecycle, orchestration, command/event bus, operation registry, download state machine, settings, snapshots. | Duplicate crate-specific logic or expose raw internals over FFI. |
 | `nexus-ffi` | C ABI, JNI shim, handle registry, buffer ownership, CBOR envelopes, panic containment. | Implement protocol or storage logic. |
 | `nexus-observability` | Redacted structured logs, rotation, diagnostics bundle, crash markers. | Record secrets, passphrases, raw keys, or unnecessary local paths. |
 | `nexus-testkit` | Test harnesses, fake peers, deterministic clocks, cross-platform vectors. | Ship in release artifacts. |
@@ -399,19 +399,18 @@ See ADR-0005 for the full transport and discovery decision.
 ### 10.2 Download state machine
 
 ```text
-Queued -> Resolving -> Connecting -> Manifest -> Transferring
-       -> Verifying -> Completed
-       \-> Paused -> Transferring (resume)
-       \-> Failed
-       \-> Cancelled
+Pending -> Downloading -> Completed (promoted; row removed)
+                    \-> Paused -> Downloading (resume)
+                    \-> Failed -> Downloading (resume)
+                    \-> Cancelled
 ```
 
-- v1 downloads from one verified source at a time. Sequential failover is allowed.
-- A source must prove possession by serving at least one valid chunk.
-- Each chunk is checked against the manifest before it joins the verified prefix.
-- A disconnect pauses or fails over without corrupting the partial.
+- v1 downloads from one connected verified source at a time. Sequential failover is allowed.
+- A source must return a canonical manifest that verifies against the signed publication or the requested content ID.
+- Each 1 MiB chunk is checked against the manifest before it joins the verified prefix; a corrupt chunk is refetched or fails over.
+- A disconnect fails over or fails without corrupting the partial. A graceful stop and process death pause in-flight downloads at the last complete chunk.
 - The final full-file SHA-256 must match the content ID before the blob is promoted.
-- Process death moves in-flight downloads to paused, never completed.
+- Resume re-verifies the stored manifest root and only accepts a chunk-aligned verified prefix.
 - Cancel asks whether to keep or delete a resumable partial.
 
 ### 10.3 Replication and unpublish

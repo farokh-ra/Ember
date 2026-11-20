@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-FFI-001 |
-| Version | 1.4.0 (ABI 1) |
-| Status | Implemented through Stage 11; Android runtime verification deferred |
-| Date | 2026-11-19 |
+| Version | 1.5.0 (ABI 1) |
+| Status | Implemented through Stage 12; Android runtime verification deferred |
+| Date | 2026-11-20 |
 | Header | [nexus_core.h](nexus_core.h) |
 | Related | [ADR-0003](../decisions/ADR-0003-ffi-c-abi-jni-jna.md), [Architecture](../ARCHITECTURE.md) |
 
@@ -263,7 +263,7 @@ All production methods are available on both Android and Windows. Method IDs are
 
 Method IDs are grouped by domain. A future minor ABI may add methods in unused IDs; a released ID is never renumbered. Unknown IDs return `NEXUS_STATUS_UNSUPPORTED` with a domain error.
 
-Stage 11 implements nineteen callable methods: `system.info`, `system.health`, `system.snapshot`, `store.usage`, the thirteen `network.*` methods above, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
+Stage 12 implements twenty-five callable methods: `system.info`, `system.health`, `system.snapshot`, `store.usage`, the thirteen `network.*` methods above, the six `download.*` methods, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
 
 ### 6.1 Network method semantics
 
@@ -293,6 +293,18 @@ Stage 11 implements nineteen callable methods: `system.info`, `system.health`, `
 - If the event queue is full, progress events are coalesced per operation. Terminal events apply backpressure and are never dropped. Lifecycle and identity events use a non-blocking push; if the queue is saturated, they are counted as dropped rather than blocking the core.
 - `test.fault` accepts `fault` = `async`, `async_progress`, `async_fail`, `not_found`, `invalid_argument`, `conflict`, `quota_exceeded`, `verification_failed`, `unsupported_version`, `network_unavailable`, `timeout`, `cancelled`, `io_error`, `permission_denied`, `locked`, or `panic`, plus optional `steps` (1-100), `delay_ms` (0-60,000), and `fail_code`. Domain faults return a normal response envelope with `ok=false`; `panic` is caught at the ABI boundary and returns `NEXUS_STATUS_INTERNAL`.
 - The UI reconciles from `system.snapshot` after suspension, so missing progress events do not corrupt state.
+
+### 6.3 Download method semantics
+
+- `download.start` accepts `publication_id`, `content_id`, or both, as 32-byte hex; at least one is required. When both are present, the publication selects the metadata and the content ID must also match. It also requires `peer_id` or a non-empty `sources` array of at most 8 peer IDs. An optional `download_id` must be 1-128 ASCII alphanumeric, `-`, or `_` bytes. The immediate response is `{download_id, accepted: true}`; the transfer continues on the download pool.
+- `download.start` requires a running core and a running network. It does not dial peers. Every source must already be connected, and the first source that returns valid metadata becomes the serving peer.
+- `download.list` is a synchronous, paginated query. `state` filters by `pending`, `downloading`, `paused`, `failed`, or `cancelled`; `limit` is 1-100 and defaults to 50; `cursor` is the zero-based offset. Completed downloads are promoted into the library and are not listed.
+- `download.pause` is cooperative. A running job stops before writing the next chunk and persists `paused` with its verified prefix. A job that is not running persists the pause directly when its state permits it. A completed download returns `conflict`.
+- `download.resume` re-verifies the stored manifest root, or fetches metadata again when no root is stored, against the existing content ID and expected size. Only complete-chunk prefixes are resumable. The source defaults to the stored `source_peer`; `peer_id` or `sources` override it. A completed or already-running download returns `conflict`.
+- `download.cancel` stops a running job. `keep_partial` defaults to false; when true the verified partial and row remain resumable. A completed download returns `conflict`.
+- `download.remove` requires `confirmation: true`, refuses a running download, and refuses a completed library entry. It removes the download row and partial bytes.
+- Every download emits exactly one terminal event: `download.completed`, `download.failed`, or `download.cancelled`. `download.paused` is a durable non-terminal report. A failure that races a pause or cancel is reported as the user's action.
+- A manifest, publication, chunk, or whole-file mismatch returns `verification_failed` with a stable `details.reason`. A source that lacks the content returns `not_found`. Quota or free-space exhaustion returns `quota_exceeded`; verified bytes stay resumable.
 
 ## 7. Domain error codes
 
@@ -389,7 +401,7 @@ NexusStatus nexus_core_export_close(
 
 Events use the envelope in section 5.4.
 
-Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
+Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
 
 | Event | Meaning | Data |
 |---|---|---|
@@ -414,12 +426,14 @@ Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stop
 | `network.discovery_cancelled` | Peer-routing query cancelled before completion. | `target` |
 | `publication.published` | Publication stored and announcement attempted. | `publication_id`, `content_id`, `announcement` |
 | `publication.unpublished` | Tombstone stored and announced. | `publication_id`, `tombstone_id` |
-| `download.started` | Download accepted. | `download_id`, `publication_id`, `content_id` |
-| `download.progress` | Verified progress. | `download_id`, `verified_bytes`, `total_bytes`, `rate_bps`, `source_peer?` |
+| `download.started` | Download accepted and metadata verified. | `download_id`, `content_id`, `total_bytes`, `source_peer`, `publication_id?`, `display_name` |
+| `download.progress` | Verified progress. | `download_id`, `verified_bytes`, `total_bytes`, `rate_bps`, `source_peer` |
+| `download.resumed` | Transfer resumed from a verified prefix. | `download_id`, `content_id`, `verified_bytes`, `total_bytes` |
 | `download.completed` | Final verification passed. | `download_id`, `content_id`, `size` |
 | `download.paused` | Transfer paused with resumable state. | `download_id`, `verified_bytes`, `reason` |
 | `download.failed` | Terminal failure. | `download_id`, `error`, `verified_bytes` |
 | `download.cancelled` | Cancelled. | `download_id`, `partial_kept` |
+| `download.removed` | Incomplete download removed. | `download_id`, `removed` |
 | `replica.state` | Replica state changed. | `replica_id`, `state`, `last_verified_at?` |
 | `search.page` | Search or Explore results page. | `op_id`, `items`, `next_cursor?`, `coverage` |
 | `search.completed` | Search terminal result. | `op_id`, `coverage`, `conflicts` |
@@ -532,10 +546,11 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 | 10 | Losing one bootstrap peer does not disable discovery, and churn does not disable the entry point. | Passed in the `nexus-net` Stage 10 suite. |
 | 11 | Direct connections are preferred, a failed direct dial falls back to a reachable relay, and no path reports `NoViablePath`. | Passed in the `nexus-net` and `nexus-core` Stage 11 suites. |
 | 11 | Relay reservations report negotiated limits, relay lists persist across restart, and `network.connectivity` reports the expected classification and hint. | Passed in the `nexus-net` and `nexus-core` Stage 11 suites. |
-| 12 | Import/export streaming handles a 4 GiB file with bounded memory. | Not yet exercised at that size. |
+| 12 | `/nexus/file/1` metadata and bounded chunk slices cross the wire, corrupt chunks are rejected, and pause/resume continues from verified bytes. | Passed in the `nexus-protocol`, `nexus-net`, and `nexus-core` Stage 12 suites. |
+| 12 | A multi-megabyte file transfers between two engines and re-exports identical bytes with bounded memory. | Passed at 2.4 MiB in `nexus-core/tests/stage12.rs`; a 4 GiB transfer is not exercised at that size. |
 | 19 | Fuzzing covers malformed CBOR, oversized buffers, invalid handles, and cancellation races. | Not yet implemented. |
 
 The detailed evidence, commands, and test counts are in
 [STAGE_08.md](../progress/STAGE_08.md), [STAGE_09.md](../progress/STAGE_09.md),
-[STAGE_10.md](../progress/STAGE_10.md), and
-[STAGE_11.md](../progress/STAGE_11.md).
+[STAGE_10.md](../progress/STAGE_10.md), [STAGE_11.md](../progress/STAGE_11.md),
+and [STAGE_12.md](../progress/STAGE_12.md).
