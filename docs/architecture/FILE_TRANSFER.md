@@ -124,8 +124,9 @@ A metadata request succeeds only when:
 
 - The selector resolves to a stored manifest and, for a publication selector,
   the exact signed publication record.
-- The manifest body parses, is canonical, and matches the signed publication
-  (manifest root, content ID, size, chunk hashes, display filename).
+- The manifest body parses and matches the signed publication's content ID,
+  size, chunk size, and manifest root. The root commits to the exact canonical
+  manifest bytes, including every chunk hash.
 - The content record is `verified` and its stored size equals the manifest
   total.
 
@@ -194,6 +195,13 @@ between chunks, and during retry waits. When observed, the current chunk is not
 written; the last checkpointed prefix stays durable. The store records
 `paused`, and a `download.paused` event reports `verified_bytes` and `reason`.
 
+A pause requested before metadata registration is deferred until the download
+row exists. The worker still fetches and verifies the manifest, registers the
+row, and then pauses at the first chunk boundary, so the download remains
+visible and resumable. If metadata fails before a row exists, the download ends
+as `download.failed`; a pause is not reported for a row that was never created.
+Cancellation is not deferred.
+
 A pause request for a download that is not currently running persists the pause
 directly if the row is `pending`, `downloading`, or already `paused`. A
 completed download cannot be paused.
@@ -222,6 +230,11 @@ On engine start, `pause_interrupted_downloads` changes every row left in
 `downloading` to `paused` with `last_error = "interrupted by restart"`. The
 partial file and verified prefix are unchanged. The next resume re-verifies the
 manifest and continues from the durable prefix.
+
+A graceful `stop` asks every active download worker to pause before networking
+shuts down, waits a bounded time for workers to checkpoint and exit, then marks
+any remaining `downloading` row paused. A normal application exit therefore
+stays resumable instead of becoming a failure.
 
 ### 6.4 Cancellation and removal
 
@@ -255,7 +268,7 @@ The ABI remains 1. Stage 12 adds six methods:
 
 | ID | Method | Mode | Request | Result |
 |---|---|---|---|---|
-| 0x0801 | `download.start` | A | `publication_id` or `content_id`, `peer_id` or `sources`, optional `download_id` | `{download_id, accepted}` |
+| 0x0801 | `download.start` | A | `publication_id` or `content_id` (or both), `peer_id` or `sources`, optional `download_id` | `{download_id, accepted}` |
 | 0x0802 | `download.list` | S | `state?`, `cursor`, `limit` | `{items, next_cursor?}` |
 | 0x0803 | `download.pause` | A | `download_id` | Record or accepted |
 | 0x0804 | `download.resume` | A | `download_id`, optional selector and sources | Stored record |
@@ -288,7 +301,7 @@ dropped.
 
 | State | Meaning |
 |---|---|
-| `pending` | Accepted, worker not yet registered the row. |
+| `pending` | Accepted; the worker has not registered the row yet. A pause or cancel requested in this window is applied after registration. |
 | `downloading` | Worker is fetching and checkpointing chunks. |
 | `paused` | Stopped with a durable verified prefix. |
 | `failed` | Terminal error; the prefix may still be resumed. |

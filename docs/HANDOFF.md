@@ -39,7 +39,7 @@ transports and the Stage 11 relay fallback:
 - A demo Downloads card that shows speed and the serving peer alongside
   progress, status, source count, and verification state. It remains visibly
   simulated.
-- 20 new Rust tests, for 249 total.
+- 22 new Rust tests, for 251 total.
 
 ## Files changed
 
@@ -105,7 +105,7 @@ Documentation:
 cargo test --workspace -- --test-threads=1
 ```
 
-Result: PASS, 249 tests, 0 failures.
+Result: PASS, 251 tests, 0 failures.
 
 Stage 12-specific suites:
 
@@ -120,7 +120,7 @@ Result: PASS, 2 and 1 tests respectively.
 
 | Suite | Tests | Failures |
 |---|---:|---:|
-| `nexus-core` unit tests | 39 | 0 |
+| `nexus-core` unit tests | 41 | 0 |
 | `nexus-core` Stage 09 tests | 4 | 0 |
 | `nexus-core` Stage 10 tests | 2 | 0 |
 | `nexus-core` Stage 11 tests | 4 | 0 |
@@ -146,9 +146,9 @@ Result: PASS, 2 and 1 tests respectively.
 | `nexus-transfer` unit tests | 7 | 0 |
 | `nexus-transfer` integration tests | 7 | 0 |
 | `nexus-types` unit tests | 1 | 0 |
-| **Rust total** | **249** | **0** |
+| **Rust total** | **251** | **0** |
 
-Stage 11 had 229 tests. Stage 12 adds 11 core download-manager tests, 6 protocol
+Stage 11 had 229 tests. Stage 12 adds 13 core download-manager tests, 6 protocol
 wire tests, 2 network Stage 12 tests, and 1 core Stage 12 test.
 
 ### Kotlin checks

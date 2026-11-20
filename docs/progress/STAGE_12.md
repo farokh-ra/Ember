@@ -98,7 +98,9 @@ detail such as `manifest_mismatch`, `chunk_hash_mismatch`, or
 3. Chunks are fetched, verified, written at the chunk offset, flushed, and
    checkpointed. The store truncates any unverified tail and charges the
    verified delta against quota and free space.
-4. A pause stops before the next chunk; the durable prefix is unchanged.
+4. A pause stops before the next chunk; the durable prefix is unchanged. A
+   pause requested before metadata registration is deferred until the row
+   exists, so the download stays visible and resumable.
 5. A failure after all attempts ends as `download.failed` with the verified
    prefix intact.
 6. Completion re-verifies the whole file, promotes it into the managed store,
@@ -193,7 +195,7 @@ restart can resume without guessing a source or trusting a fresh manifest.
 
 ### 9.3 `nexus-core` unit tests
 
-11 new download-manager tests, 0 failures:
+13 new download-manager tests, 0 failures:
 
 | Test | Covers |
 |---|---|
@@ -203,6 +205,8 @@ restart can resume without guessing a source or trusting a fresh manifest.
 | `a_persistently_corrupt_source_fails_without_importing_content` | Terminal `verification_failed`, no library entry. |
 | `a_mismatched_publication_manifest_root_is_rejected` | Publication/manifest binding. |
 | `pause_stops_after_a_verified_chunk_and_resume_fetches_only_the_rest` | Pause boundary and resume from the prefix. |
+| `pause_before_metadata_registration_keeps_a_resumable_row` | Deferred pause with no row yet; resume still works. |
+| `pause_before_metadata_failure_reports_the_failure` | Early pause with failed metadata reports `failed`, not a phantom paused row. |
 | `cancel_can_keep_or_delete_the_verified_partial` | Both cancellation modes. |
 | `a_restart_pauses_interrupted_downloads_and_resume_continues_from_verified_bytes` | Process-death recovery. |
 | `a_disconnected_source_fails_over_to_the_next_verified_peer` | Source failover mid-transfer. |
@@ -219,12 +223,12 @@ restart can resume without guessing a source or trusting a fresh manifest.
 
 ### 9.5 Workspace totals
 
-`cargo test --workspace -- --test-threads=1` passed with 249 tests and 0
+`cargo test --workspace -- --test-threads=1` passed with 251 tests and 0
 failures:
 
 | Suite | Tests |
 |---|---:|
-| `nexus-core` unit tests | 39 |
+| `nexus-core` unit tests | 41 |
 | `nexus-core` Stage 09 tests | 4 |
 | `nexus-core` Stage 10 tests | 2 |
 | `nexus-core` Stage 11 tests | 4 |
@@ -250,9 +254,9 @@ failures:
 | `nexus-transfer` unit tests | 7 |
 | `nexus-transfer` integration tests | 7 |
 | `nexus-types` unit tests | 1 |
-| **Total** | **249** |
+| **Total** | **251** |
 
-Stage 11 had 229 tests; Stage 12 adds 20: 11 core download-manager tests, 6
+Stage 11 had 229 tests; Stage 12 adds 22: 13 core download-manager tests, 6
 protocol wire tests, 2 network Stage 12 tests, and 1 core Stage 12 test.
 
 ### 9.6 Kotlin checks

@@ -395,16 +395,27 @@ fn finish_failure(
 ) {
     match control.action() {
         ControlAction::Cancel(keep) => finish_cancel(context, download_id, keep),
-        ControlAction::Pause => finish_pause(context, download_id, "paused by user", verified),
-        ControlAction::Continue => {
-            let _ = context.store.fail_download(download_id, error.code.as_str());
-            emit_failure(context, download_id, error, verified);
+        ControlAction::Pause => {
+            // A pause requested before metadata registration has no row to
+            // persist yet. If metadata then fails, report the failure instead
+            // of a paused state the user could never resume.
+            if !finish_pause(context, download_id, "paused by user", verified) {
+                fail_download(context, download_id, error, verified);
+            }
         }
+        ControlAction::Continue => fail_download(context, download_id, error, verified),
     }
 }
 
-fn finish_pause(context: &DownloadContext, download_id: &str, reason: &str, verified: u64) {
-    let _ = context.store.pause_download(download_id, Some(reason));
+fn fail_download(context: &DownloadContext, download_id: &str, error: &DomainError, verified: u64) {
+    let _ = context.store.fail_download(download_id, error.code.as_str());
+    emit_failure(context, download_id, error, verified);
+}
+
+fn finish_pause(context: &DownloadContext, download_id: &str, reason: &str, verified: u64) -> bool {
+    if context.store.pause_download(download_id, Some(reason)).is_err() {
+        return false;
+    }
     let event = PendingEvent::durable(
         "download.paused",
         Value::Map(vec![
@@ -418,6 +429,7 @@ fn finish_pause(context: &DownloadContext, download_id: &str, reason: &str, veri
     )
     .with_download(download_id.to_owned());
     let _ = context.events.push(event);
+    true
 }
 
 fn finish_cancel(context: &DownloadContext, download_id: &str, keep: bool) {
@@ -707,7 +719,7 @@ fn fetch_metadata(
     let mut last_error: Option<NetError> = None;
     for _ in 0..METADATA_ROUNDS {
         for peer in &job.sources {
-            check_control(control)?;
+            check_control_metadata(control)?;
             match context.transport.metadata(peer, selector) {
                 Ok(metadata) => return Ok((metadata, peer.clone())),
                 Err(error) => {
@@ -718,7 +730,7 @@ fn fetch_metadata(
                         return Err(TransferError::Failed(invalid_argument("the source peer ID is invalid")));
                     }
                     last_error = Some(error);
-                    backoff(control)?;
+                    backoff_metadata(control)?;
                 }
             }
         }
@@ -870,12 +882,34 @@ fn check_control(control: &DownloadControl) -> Result<(), TransferError> {
     }
 }
 
+/// Metadata work is not interrupted by pause. A pause requested before the
+/// download row exists must still leave a resumable record, so it is applied
+/// after registration; cancellation remains immediate.
+fn check_control_metadata(control: &DownloadControl) -> Result<(), TransferError> {
+    match control.action() {
+        ControlAction::Continue | ControlAction::Pause => Ok(()),
+        ControlAction::Cancel(keep) => Err(TransferError::Cancelled(keep)),
+    }
+}
+
 fn backoff(control: &DownloadControl) -> Result<(), TransferError> {
     match control.wait(RETRY_DELAY) {
         ControlAction::Continue => Ok(()),
         ControlAction::Pause => Err(TransferError::Paused("paused by user")),
         ControlAction::Cancel(keep) => Err(TransferError::Cancelled(keep)),
     }
+}
+
+/// Bounded metadata retry delay that only yields to cancellation.
+fn backoff_metadata(control: &DownloadControl) -> Result<(), TransferError> {
+    if let ControlAction::Cancel(keep) = control.action() {
+        return Err(TransferError::Cancelled(keep));
+    }
+    std::thread::sleep(RETRY_DELAY);
+    if let ControlAction::Cancel(keep) = control.action() {
+        return Err(TransferError::Cancelled(keep));
+    }
+    Ok(())
 }
 
 fn emit_progress(context: &DownloadContext, download_id: &str, progress: &mut Progress, force: bool) {
@@ -1012,6 +1046,9 @@ impl Engine {
             }
             None => self.new_download_id(),
         };
+        if self.find_download(&download_id)?.is_some() {
+            return Err(CoreError::InvalidArgument("a download with this ID already exists"));
+        }
         let control = Arc::new(DownloadControl::new());
         {
             let mut running = lock_downloads(&self.downloads);
@@ -2044,6 +2081,102 @@ mod tests {
         let resumed = find(&collected, "download.resumed");
         assert_eq!(unsigned(&resumed.data, "verified_bytes"), CHUNK_SIZE_V1);
         assert!(event_types(&collected).contains(&"download.completed"));
+    }
+
+    #[test]
+    fn pause_before_metadata_registration_keeps_a_resumable_row() {
+        let fixture = Fixture::new("pause-early", 200 * 1024);
+        let events = Arc::new(EventQueue::new());
+        let control = Arc::new(DownloadControl::new());
+        assert!(control.request_pause());
+        let transport = Arc::new(MockSource::new(&fixture));
+        let download_id = "dl-stage12-pause-early";
+        run(
+            &fixture,
+            &events,
+            transport.clone(),
+            &control,
+            job(
+                download_id,
+                FileSelector::ContentId(decode_content_id(&fixture.content_id).expect("content id")),
+                None,
+                None,
+                &["peer-a"],
+                false,
+            ),
+        );
+
+        let paused = fixture
+            .store
+            .download(download_id)
+            .expect("a paused record must exist after metadata registration");
+        assert_eq!(paused.state, DownloadState::Paused);
+        assert_eq!(paused.verified_prefix, 0);
+        assert!(
+            transport.requested_indexes().is_empty(),
+            "no chunk is requested once the deferred pause is applied"
+        );
+        let collected = drain(&events);
+        assert!(event_types(&collected).contains(&"download.paused"));
+
+        let resume_transport = Arc::new(MockSource::new(&fixture));
+        let resume_control = Arc::new(DownloadControl::new());
+        run(
+            &fixture,
+            &events,
+            resume_transport.clone(),
+            &resume_control,
+            job(
+                download_id,
+                FileSelector::ContentId(decode_content_id(&fixture.content_id).expect("content id")),
+                None,
+                Some(fixture.content_id.clone()),
+                &["peer-a"],
+                true,
+            ),
+        );
+        assert_eq!(fixture.content_bytes(), fixture.content);
+        assert_eq!(resume_transport.requested_indexes(), vec![0]);
+    }
+
+    #[test]
+    fn pause_before_metadata_failure_reports_the_failure() {
+        let fixture = Fixture::new("pause-early-fail", 200 * 1024);
+        let events = Arc::new(EventQueue::new());
+        let control = Arc::new(DownloadControl::new());
+        assert!(control.request_pause());
+        let transport = Arc::new(MockSource::new(&fixture));
+        transport
+            .fail_metadata
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert("peer-a".to_owned());
+        let download_id = "dl-stage12-pause-early-fail";
+        run(
+            &fixture,
+            &events,
+            transport,
+            &control,
+            job(
+                download_id,
+                FileSelector::ContentId(decode_content_id(&fixture.content_id).expect("content id")),
+                None,
+                None,
+                &["peer-a"],
+                false,
+            ),
+        );
+
+        assert!(
+            fixture.store.download(download_id).is_err(),
+            "no row is created when metadata never succeeds"
+        );
+        let collected = drain(&events);
+        assert!(
+            !event_types(&collected).contains(&"download.paused"),
+            "a pause with no row must not claim a resumable state"
+        );
+        assert!(event_types(&collected).contains(&"download.failed"));
     }
 
     #[test]

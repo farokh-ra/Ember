@@ -275,7 +275,7 @@ impl Engine {
             network.shutdown();
         }
         self.wait_for_downloads_to_stop(Duration::from_secs(5));
-        self.store.pause_interrupted_downloads()?;
+        let pause_result = self.store.pause_interrupted_downloads();
 
         let checkpoint = self.store.checkpoint();
         {
@@ -298,6 +298,7 @@ impl Engine {
             )]),
         ));
         checkpoint?;
+        pause_result?;
         Ok(())
     }
 

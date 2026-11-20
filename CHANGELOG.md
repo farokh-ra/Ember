@@ -211,7 +211,7 @@ All notable changes to Ember are recorded here. The format follows
 - Schema version 5 with `manifest_root` and `source_peer` on downloads.
 - Transfer speed and serving-peer fields in the demo Downloads screen.
 - Direct-transfer design in `docs/architecture/FILE_TRANSFER.md`.
-- 20 new Stage 12 Rust tests, for 249 Rust tests total.
+- 22 new Stage 12 Rust tests, for 251 Rust tests total.
 - Stage 12 evidence record.
 
 ### Changed
@@ -276,6 +276,14 @@ All notable changes to Ember are recorded here. The format follows
 - Managed-store scans no longer follow symlinks or reparse points.
 - A failed DHT publication now increments `dht_publish_failures` once instead of
   twice.
+- A `download.pause` requested before metadata registration is deferred until
+  the download row exists, so the download stays visible and resumable instead
+  of being discarded. If metadata then fails, the failure is reported instead
+  of a paused state with no row.
+- `download.start` rejects a user-supplied `download_id` that already exists in
+  the store.
+- A graceful core stop records the `pause_interrupted_downloads` result and
+  still completes the state and identity shutdown before returning the error.
 
 ### Security
 
