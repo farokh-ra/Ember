@@ -22,8 +22,8 @@ pub use error::{StoreError, StoreResult};
 pub use managed_store::ManagedStore;
 pub use model::{
     ContentRecord, ContentReference, ContentState, DownloadRecord, DownloadState, IdentityReference, ImportedContent,
-    PeerObservation, ProfileRecord, PublicationRecord, ReferenceType, ReleaseOutcome, ReplicaRecord, ReplicaState,
-    TombstoneRecord,
+    PeerObservation, ProfileCacheOutcome, ProfileConflict, ProfileFreshness, ProfileRecord, ProfileState,
+    PublicationRecord, ReferenceType, ReleaseOutcome, ReplicaRecord, ReplicaState, TombstoneRecord,
 };
 pub use paths::{
     FALLBACK_FILENAME, MAX_FILENAME_BYTES, safe_display_name, unique_export_path, validate_store_component,

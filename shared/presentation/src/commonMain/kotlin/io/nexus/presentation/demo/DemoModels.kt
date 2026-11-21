@@ -107,6 +107,27 @@ public data class DemoPublication(
     public val isDemo: Boolean = true,
 )
 
+/** Lifecycle of a signed profile record shown in the demo UI. */
+public enum class ProfileRecordState {
+    DRAFT,
+    PENDING,
+    PUBLISHED,
+}
+
+/** How recently a profile record was confirmed. */
+public enum class ProfileFreshness {
+    CURRENT,
+    STALE,
+    UNKNOWN,
+}
+
+/** Another identity that uses the same username label. */
+public data class DemoUsernameCollision(
+    public val identityId: String,
+    public val displayName: String,
+    public val usernameLabel: String,
+)
+
 /** Demo profile shown on the profile screen. */
 public data class DemoProfile(
     public val displayName: String,
@@ -116,6 +137,14 @@ public data class DemoProfile(
     public val publicationCount: Int,
     public val hostedReplicaCount: Int,
     public val joinedLabel: String,
+    public val identityId: String = "",
+    public val recordRevision: Int = 1,
+    public val recordState: ProfileRecordState = ProfileRecordState.PUBLISHED,
+    public val freshness: ProfileFreshness = ProfileFreshness.CURRENT,
+    public val publishedLabel: String = "",
+    public val lastCheckedLabel: String = "",
+    public val conflictCount: Int = 0,
+    public val usernameCollisions: List<DemoUsernameCollision> = emptyList(),
     public val isDemo: Boolean = true,
 )
 

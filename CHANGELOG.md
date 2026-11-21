@@ -213,6 +213,20 @@ All notable changes to Ember are recorded here. The format follows
 - Direct-transfer design in `docs/architecture/FILE_TRANSFER.md`.
 - 22 new Stage 12 Rust tests, for 251 Rust tests total.
 - Stage 12 evidence record.
+- Signed public profiles with local editing and drafts, identity-derived DHT
+  publication and lookup, revision checks, stale-cache labelling, same-revision
+  conflict retention, and case-insensitive username-label collision reporting.
+- Three new core methods: `profile.get_local` (0x0301), `profile.publish`
+  (0x0302), and `profile.lookup` (0x0303).
+- Six profile events: `profile.draft_saved`, `profile.published`,
+  `profile.lookup_completed`, `profile.lookup_failed`,
+  `profile.publish_cancelled`, and `profile.lookup_cancelled`.
+- Schema version 6 with profile lifecycle, freshness, timestamps, and retained
+  profile conflicts.
+- Signed-state, freshness, revision, identity, conflict, and collision labels in
+  the demo Profile screen.
+- 14 new Stage 13 Rust tests, for 265 Rust tests total.
+- Stage 13 evidence record.
 
 ### Changed
 
@@ -258,6 +272,16 @@ All notable changes to Ember are recorded here. The format follows
   methods.
 - The identify protocol version is now `/nexus/0.1.0-stage-12`; the Kademlia
   protocol is `/nexus/kad/1.0.0` and the file protocol is `/nexus/file/1`.
+- The SQLite schema is now version 6; profiles carry lifecycle, freshness, and
+  check timestamps, and conflicting same-revision records are retained.
+- The protocol version is now `0.1.0-stage-13`; the ABI remains 1.
+- The FFI interface document is at version 1.6.0 with twenty-eight callable
+  methods.
+- The identify protocol remains `/nexus/0.1.0-stage-12` because Stage 13 adds no
+  new network protocol or frame type.
+- The Windows developer environment sets `GRADLE_USER_HOME` to the gitignored
+  `NeededToolsHere/gradle-home`, so Gradle and WiX downloads stay inside the
+  repository.
 
 ### Fixed
 
@@ -356,6 +380,15 @@ All notable changes to Ember are recorded here. The format follows
   There is no availability guarantee or remote-erasure mechanism.
 - The Kotlin Downloads screen shows demo speed, progress, and source-peer fields
   and is not connected to the core yet.
+- Profiles are published and verified on Windows loopback. The Kotlin Profile
+  screen remains demo data and is not connected to the core yet.
+- Usernames are labels, not unique accounts. There is no registry, reservation,
+  or first-claim rule, and collision detection covers only profiles the local
+  store has seen.
+- A same-revision profile conflict is retained for review. There is no automatic
+  conflict resolution or UI flow to choose between the retained records.
+- A cached remote profile is served as stale after a network miss or failure,
+  even when the previous check was recent.
 - Stage 10 supports Kademlia peer routing, signed record publication and
   lookup, and provider discovery. Stage 11 adds Circuit Relay v2 fallback,
   DCUtR hole punching, and AutoNAT. mDNS is deferred; NAT traversal is not

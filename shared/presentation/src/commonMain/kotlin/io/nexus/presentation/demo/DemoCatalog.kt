@@ -20,6 +20,21 @@ public object DemoCatalog {
             publicationCount = 2,
             hostedReplicaCount = 4,
             joinedLabel = "12 Oct 2026",
+            identityId = "nx1demo5d2c91a46f803b7e1a550c429d187e36",
+            recordRevision = 3,
+            recordState = ProfileRecordState.PUBLISHED,
+            freshness = ProfileFreshness.CURRENT,
+            publishedLabel = "20 Nov 2026",
+            lastCheckedLabel = "just now",
+            conflictCount = 1,
+            usernameCollisions =
+                listOf(
+                    DemoUsernameCollision(
+                        identityId = "nx1demo0c4f7b2a9e6d8135a0b7c4e2d9f68135",
+                        displayName = "Avery Chen Archive",
+                        usernameLabel = "Avery",
+                    ),
+                ),
         )
 
     public val publications: List<DemoPublication> =

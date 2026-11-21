@@ -79,6 +79,14 @@ public fun ProfileScreen(
                     publicationCount = demoProfile.publicationCount,
                     hostedReplicaCount = demoProfile.hostedReplicaCount,
                     joinedLabel = demoProfile.joinedLabel,
+                    identityId = demoProfile.identityId,
+                    recordRevision = demoProfile.recordRevision,
+                    recordState = demoProfile.recordState,
+                    freshness = demoProfile.freshness,
+                    publishedLabel = demoProfile.publishedLabel,
+                    lastCheckedLabel = demoProfile.lastCheckedLabel,
+                    conflictCount = demoProfile.conflictCount,
+                    usernameCollisions = demoProfile.usernameCollisions,
                     onNetworkStatus = onOpenNetwork,
                 )
                 Text(

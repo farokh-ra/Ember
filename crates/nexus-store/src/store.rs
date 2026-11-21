@@ -17,15 +17,16 @@ use crate::error::{StoreError, StoreResult};
 use crate::managed_store::ManagedStore;
 use crate::model::{
     ContentRecord, ContentReference, ContentState, DownloadRecord, DownloadState, IdentityReference, ImportedContent,
-    PeerObservation, ProfileRecord, PublicationRecord, ReferenceType, ReleaseOutcome, ReplicaRecord, ReplicaState,
-    TombstoneRecord,
+    PeerObservation, ProfileCacheOutcome, ProfileConflict, ProfileFreshness, ProfileRecord, ProfileState,
+    PublicationRecord, ReferenceType, ReleaseOutcome, ReplicaRecord, ReplicaState, TombstoneRecord,
 };
 use crate::paths::{safe_display_name, unique_export_path, validate_store_component};
 use crate::quota::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage};
-use crate::util::{hex_lower, is_content_id, is_safe_id, now_secs};
+use crate::util::{hex_lower, is_content_id, is_safe_id, now_ms, now_secs};
 
 const CONTENT_COLUMNS: &str = "content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at";
 const DOWNLOAD_COLUMNS: &str = "download_id, content_id, display_name, expected_size, verified_prefix, state, partial_file, created_at, updated_at, last_error, manifest_root, source_peer";
+const PROFILE_COLUMNS: &str = "identity_id, revision, record_bytes, display_name, username, bio, avatar_content_id, updated_at, updated_at_ms, state, published_at, last_checked_at, freshness";
 
 /// Tunable storage limits.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1023,61 +1024,240 @@ impl Store {
     }
 
     /// Adds or replaces a verified profile record.
+    ///
+    /// Core callers use the narrower local and cache methods below; this
+    /// method remains the direct storage primitive used by tests and tools.
     pub fn upsert_profile(&self, record: &ProfileRecord) -> StoreResult<()> {
-        validate_entity_id(&record.identity_id, "identity ID")?;
-        if let Some(content_id) = &record.avatar_content_id {
-            validate_content_id(content_id)?;
+        validate_profile_record(record)?;
+        let record = record.clone();
+        self.db.write(move |connection| write_profile(connection, &record))
+    }
+
+    /// Returns one stored profile row by identity.
+    pub fn profile(&self, identity_id: &str) -> StoreResult<Option<ProfileRecord>> {
+        validate_entity_id(identity_id, "identity ID")?;
+        let identity_id = identity_id.to_owned();
+        self.db.read(move |connection| {
+            Ok(connection
+                .query_row(
+                    &format!("SELECT {PROFILE_COLUMNS} FROM profiles WHERE identity_id = ?1"),
+                    [&identity_id],
+                    profile_from_row,
+                )
+                .optional()?)
+        })
+    }
+
+    /// Returns the local profile row for an identity, ignoring remote caches.
+    pub fn local_profile(&self, identity_id: &str) -> StoreResult<Option<ProfileRecord>> {
+        Ok(self.profile(identity_id)?.filter(|record| record.state.is_local()))
+    }
+
+    /// Stores a signed local draft, pending, or published profile.
+    ///
+    /// `expected_revision` provides optimistic concurrency. When it is absent,
+    /// a local row may advance but never roll back to a lower revision.
+    pub fn store_local_profile(&self, record: &ProfileRecord, expected_revision: Option<u64>) -> StoreResult<()> {
+        validate_profile_record(record)?;
+        if !record.state.is_local() {
+            return Err(StoreError::InvalidId(
+                "local profile state must be draft, pending, or published".to_owned(),
+            ));
         }
         let record = record.clone();
         self.db.write(move |connection| {
-            connection.execute(
-                "INSERT INTO profiles
-                 (identity_id, revision, record_bytes, display_name, username, bio,
-                  avatar_content_id, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT(identity_id) DO UPDATE SET
-                     revision = excluded.revision,
-                     record_bytes = excluded.record_bytes,
-                     display_name = excluded.display_name,
-                     username = excluded.username,
-                     bio = excluded.bio,
-                     avatar_content_id = excluded.avatar_content_id,
-                     updated_at = excluded.updated_at",
-                params![
-                    record.identity_id,
-                    i64::try_from(record.revision).unwrap_or(i64::MAX),
-                    record.record_bytes,
-                    record.display_name,
-                    record.username,
-                    record.bio,
-                    record.avatar_content_id,
-                    record.updated_at
-                ],
-            )?;
+            let transaction = connection.transaction()?;
+            let existing: Option<i64> = transaction
+                .query_row(
+                    "SELECT revision FROM profiles WHERE identity_id = ?1",
+                    [&record.identity_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(revision) = existing {
+                let revision = u64::try_from(revision).unwrap_or(0);
+                if expected_revision.is_some_and(|expected| expected != revision)
+                    || (expected_revision.is_none() && record.revision < revision)
+                {
+                    return Err(StoreError::RecordConflict(record.identity_id.clone()));
+                }
+            } else if expected_revision.is_some_and(|expected| expected != 0) {
+                return Err(StoreError::RecordConflict(record.identity_id.clone()));
+            }
+            write_profile(&transaction, &record)?;
+            transaction.commit()?;
             Ok(())
+        })
+    }
+
+    /// Caches a verified profile signed by another identity.
+    ///
+    /// A newer revision replaces the cached row, an identical revision is
+    /// idempotent, an older revision is reported as stale, and a same-revision
+    /// record with different bytes is retained as a conflict without replacing
+    /// the accepted row.
+    pub fn cache_remote_profile(&self, record: &ProfileRecord) -> StoreResult<ProfileCacheOutcome> {
+        validate_profile_record(record)?;
+        if record.state != ProfileState::Remote {
+            return Err(StoreError::InvalidId("cached profile state must be remote".to_owned()));
+        }
+        let record = record.clone();
+        self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            let existing = transaction
+                .query_row(
+                    "SELECT revision, record_bytes, state FROM profiles WHERE identity_id = ?1",
+                    [&record.identity_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, Vec<u8>>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let observed_at = now_ms();
+            let Some((revision, record_bytes, state)) = existing else {
+                write_profile(&transaction, &record)?;
+                transaction.commit()?;
+                return Ok(ProfileCacheOutcome::Stored);
+            };
+            let revision = u64::try_from(revision).unwrap_or(0);
+            let state = ProfileState::parse(&state).unwrap_or(ProfileState::Remote);
+            let outcome = if state.is_local() {
+                if record_bytes == record.record_bytes {
+                    ProfileCacheOutcome::Unchanged
+                } else {
+                    insert_profile_conflict(
+                        &transaction,
+                        &record.identity_id,
+                        record.revision,
+                        &record.record_bytes,
+                        observed_at,
+                    )?;
+                    ProfileCacheOutcome::Conflict
+                }
+            } else if record.revision > revision {
+                write_profile(&transaction, &record)?;
+                ProfileCacheOutcome::Stored
+            } else if record.revision < revision {
+                mark_cached_checked(&transaction, &record.identity_id, observed_at)?;
+                ProfileCacheOutcome::Stale
+            } else if record_bytes == record.record_bytes {
+                mark_cached_checked(&transaction, &record.identity_id, observed_at)?;
+                ProfileCacheOutcome::Unchanged
+            } else {
+                insert_profile_conflict(
+                    &transaction,
+                    &record.identity_id,
+                    record.revision,
+                    &record.record_bytes,
+                    observed_at,
+                )?;
+                mark_cached_checked(&transaction, &record.identity_id, observed_at)?;
+                ProfileCacheOutcome::Conflict
+            };
+            transaction.commit()?;
+            Ok(outcome)
+        })
+    }
+
+    /// Marks a stored local profile as announced or deferred.
+    pub fn mark_profile_published(&self, identity_id: &str, announced: bool, at: u64) -> StoreResult<()> {
+        validate_entity_id(identity_id, "identity ID")?;
+        let identity_id = identity_id.to_owned();
+        let state = if announced { "published" } else { "pending" };
+        self.db.write(move |connection| {
+            let changed = connection.execute(
+                "UPDATE profiles
+                 SET state = ?2, published_at = ?3, freshness = 'current', updated_at = ?4
+                 WHERE identity_id = ?1",
+                params![identity_id, state, i64::try_from(at).unwrap_or(i64::MAX), now_secs()],
+            )?;
+            if changed == 0 {
+                return Err(StoreError::RecordNotFound(identity_id));
+            }
+            Ok(())
+        })
+    }
+
+    /// Records the result of a network freshness check for a stored profile.
+    pub fn mark_profile_checked(&self, identity_id: &str, freshness: ProfileFreshness, at: u64) -> StoreResult<()> {
+        validate_entity_id(identity_id, "identity ID")?;
+        let identity_id = identity_id.to_owned();
+        let freshness = freshness.as_str();
+        self.db.write(move |connection| {
+            let changed = connection.execute(
+                "UPDATE profiles SET last_checked_at = ?2, freshness = ?3 WHERE identity_id = ?1",
+                params![identity_id, i64::try_from(at).unwrap_or(i64::MAX), freshness],
+            )?;
+            if changed == 0 {
+                return Err(StoreError::RecordNotFound(identity_id));
+            }
+            Ok(())
+        })
+    }
+
+    /// Lists retained same-revision conflicts for one identity.
+    pub fn profile_conflicts(&self, identity_id: &str) -> StoreResult<Vec<ProfileConflict>> {
+        validate_entity_id(identity_id, "identity ID")?;
+        let identity_id = identity_id.to_owned();
+        self.db.read(move |connection| {
+            let mut statement = connection.prepare(
+                "SELECT identity_id, revision, record_bytes, observed_at
+                 FROM profile_conflicts WHERE identity_id = ?1
+                 ORDER BY observed_at ASC, conflict_id ASC",
+            )?;
+            let rows = statement.query_map([&identity_id], |row| {
+                Ok(ProfileConflict {
+                    identity_id: row.get(0)?,
+                    revision: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+                    record_bytes: row.get(2)?,
+                    observed_at: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Lists every stored profile using a username label, case-insensitively.
+    ///
+    /// Usernames are labels, not reservations. More than one identity may
+    /// match, and callers must show each distinct identity ID.
+    pub fn profiles_with_username(&self, username: &str) -> StoreResult<Vec<ProfileRecord>> {
+        if username.is_empty() || username.len() > 128 {
+            return Err(StoreError::InvalidId("username label is out of bounds".to_owned()));
+        }
+        let needle = username.to_lowercase();
+        self.db.read(move |connection| {
+            let mut statement = connection.prepare(&format!(
+                "SELECT {PROFILE_COLUMNS} FROM profiles
+                 WHERE username IS NOT NULL ORDER BY identity_id ASC"
+            ))?;
+            let rows = statement.query_map([], profile_from_row)?;
+            let mut matches = Vec::new();
+            for row in rows {
+                let record = row?;
+                if record
+                    .username
+                    .as_deref()
+                    .is_some_and(|label| label.to_lowercase() == needle)
+                {
+                    matches.push(record);
+                }
+            }
+            Ok(matches)
         })
     }
 
     /// Lists stored profiles.
     pub fn profiles(&self) -> StoreResult<Vec<ProfileRecord>> {
         self.db.read(|connection| {
-            let mut statement = connection.prepare(
-                "SELECT identity_id, revision, record_bytes, display_name, username, bio,
-                        avatar_content_id, updated_at
-                 FROM profiles ORDER BY identity_id ASC",
-            )?;
-            let rows = statement.query_map([], |row| {
-                Ok(ProfileRecord {
-                    identity_id: row.get(0)?,
-                    revision: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
-                    record_bytes: row.get(2)?,
-                    display_name: row.get(3)?,
-                    username: row.get(4)?,
-                    bio: row.get(5)?,
-                    avatar_content_id: row.get(6)?,
-                    updated_at: u64::try_from(row.get::<_, i64>(7)?).unwrap_or(0),
-                })
-            })?;
+            let mut statement = connection.prepare(&format!(
+                "SELECT {PROFILE_COLUMNS} FROM profiles ORDER BY identity_id ASC"
+            ))?;
+            let rows = statement.query_map([], profile_from_row)?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
     }
@@ -1957,5 +2137,123 @@ fn download_from_row(row: &Row<'_>) -> rusqlite::Result<DownloadRecord> {
         last_error: row.get(9)?,
         manifest_root: row.get(10)?,
         source_peer: row.get(11)?,
+    })
+}
+
+fn validate_profile_record(record: &ProfileRecord) -> StoreResult<()> {
+    validate_entity_id(&record.identity_id, "identity ID")?;
+    if record.revision == 0 {
+        return Err(StoreError::InvalidId("profile revision must be at least 1".to_owned()));
+    }
+    if record.record_bytes.is_empty() || record.record_bytes.len() > 65_536 {
+        return Err(StoreError::InvalidRecord(
+            "profile record size is out of bounds".to_owned(),
+        ));
+    }
+    if let Some(content_id) = &record.avatar_content_id {
+        validate_content_id(content_id)?;
+    }
+    if let Some(username) = &record.username
+        && (username.is_empty() || username.len() > 128)
+    {
+        return Err(StoreError::InvalidId("username label is out of bounds".to_owned()));
+    }
+    Ok(())
+}
+
+fn write_profile(connection: &rusqlite::Connection, record: &ProfileRecord) -> StoreResult<()> {
+    connection.execute(
+        "INSERT INTO profiles
+         (identity_id, revision, record_bytes, display_name, username, bio,
+          avatar_content_id, updated_at, updated_at_ms, state, published_at,
+          last_checked_at, freshness)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+         ON CONFLICT(identity_id) DO UPDATE SET
+             revision = excluded.revision,
+             record_bytes = excluded.record_bytes,
+             display_name = excluded.display_name,
+             username = excluded.username,
+             bio = excluded.bio,
+             avatar_content_id = excluded.avatar_content_id,
+             updated_at = excluded.updated_at,
+             updated_at_ms = excluded.updated_at_ms,
+             state = excluded.state,
+             published_at = excluded.published_at,
+             last_checked_at = excluded.last_checked_at,
+             freshness = excluded.freshness",
+        params![
+            record.identity_id,
+            i64::try_from(record.revision).unwrap_or(i64::MAX),
+            record.record_bytes,
+            record.display_name,
+            record.username,
+            record.bio,
+            record.avatar_content_id,
+            record.updated_at,
+            record.updated_at_ms,
+            record.state.as_str(),
+            record
+                .published_at
+                .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+            record
+                .last_checked_at
+                .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+            record.freshness.as_str(),
+        ],
+    )?;
+    Ok(())
+}
+
+fn mark_cached_checked(connection: &rusqlite::Connection, identity_id: &str, at: u64) -> StoreResult<()> {
+    connection.execute(
+        "UPDATE profiles SET last_checked_at = ?2, freshness = 'current' WHERE identity_id = ?1",
+        params![identity_id, i64::try_from(at).unwrap_or(i64::MAX)],
+    )?;
+    Ok(())
+}
+
+fn insert_profile_conflict(
+    connection: &rusqlite::Connection,
+    identity_id: &str,
+    revision: u64,
+    record_bytes: &[u8],
+    observed_at: u64,
+) -> StoreResult<()> {
+    connection.execute(
+        "INSERT OR IGNORE INTO profile_conflicts
+         (identity_id, revision, record_bytes, observed_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![
+            identity_id,
+            i64::try_from(revision).unwrap_or(i64::MAX),
+            record_bytes,
+            i64::try_from(observed_at).unwrap_or(i64::MAX),
+        ],
+    )?;
+    Ok(())
+}
+
+fn profile_from_row(row: &Row<'_>) -> rusqlite::Result<ProfileRecord> {
+    let state: String = row.get(9)?;
+    let freshness: String = row.get(12)?;
+    Ok(ProfileRecord {
+        identity_id: row.get(0)?,
+        revision: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+        record_bytes: row.get(2)?,
+        display_name: row.get(3)?,
+        username: row.get(4)?,
+        bio: row.get(5)?,
+        avatar_content_id: row.get(6)?,
+        updated_at: u64::try_from(row.get::<_, i64>(7)?).unwrap_or(0),
+        updated_at_ms: u64::try_from(row.get::<_, i64>(8)?).unwrap_or(0),
+        state: ProfileState::parse(&state).ok_or_else(|| invalid_enum(9, "profile state", &state))?,
+        published_at: row
+            .get::<_, Option<i64>>(10)?
+            .map(|value| u64::try_from(value).unwrap_or(0)),
+        last_checked_at: row
+            .get::<_, Option<i64>>(11)?
+            .map(|value| u64::try_from(value).unwrap_or(0)),
+        freshness: ProfileFreshness::parse(&freshness)
+            .ok_or_else(|| invalid_enum(12, "profile freshness", &freshness))?,
     })
 }

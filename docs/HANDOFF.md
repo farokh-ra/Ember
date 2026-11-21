@@ -1,99 +1,89 @@
 # Ember Project Handoff
 
-**Current stage:** 12 - direct file transfer
+**Current stage:** 13 - profiles and signed public metadata
 **Stage status:** Complete
-**Last updated:** 2026-11-20
-**Branch:** `feat/12-streaming-transfer`
-**Next stage:** 13 - profiles and signed public metadata (waiting for user permission)
+**Last updated:** 2026-11-21
+**Branch:** `feat/13-profiles` (stacked on `feat/12-streaming-transfer`)
+**Next stage:** 14 - publishing and file pages (waiting for user permission)
 
 ## What was implemented
 
-Stage 12 adds direct peer-to-peer file transfer on top of the Stage 09
-transports and the Stage 11 relay fallback:
+Stage 13 adds signed public profiles on top of the Stage 10 DHT and the Stage 08
+identity vault:
 
-- A bounded `/nexus/file/1` request/response protocol for metadata and chunk
-  slices, with canonical CBOR, exact field sets, and a 512 KiB message cap.
-- A `FileProvider` contract in `nexus-net` and a storage-backed
-  `CoreFileProvider` in the core that serves only verified content.
-- Direct transfer from one connected peer at a time, with up to 8 ordered
-  fallback sources and 4 attempts per chunk.
-- Per-chunk SHA-256 verification before any bytes are written.
-- Manifest, signed-publication, content-ID, and whole-file verification before
-  promotion into the managed library.
-- Pause, resume, retry, cancellation with optional partial retention, and
-  source failover.
-- Durable verified-prefix checkpoints and process-death recovery: interrupted
-  downloads become `paused` on start and resume from the last complete chunk.
-  A graceful stop also pauses active downloads before networking shuts down.
-- Quota and free-space checks at registration and after every verified chunk.
-- Bounded memory: 64 KiB wire slices and one 1 MiB chunk assembled at a time.
-- Safe display names and generated partial paths that cannot traverse or
-  overwrite.
-- Six new core methods: `download.start` (0x0801), `download.list` (0x0802),
-  `download.pause` (0x0803), `download.resume` (0x0804),
-  `download.cancel` (0x0805), and `download.remove` (0x0806).
-- Eight transfer events: `download.started`, `download.progress`,
-  `download.resumed`, `download.paused`, `download.completed`,
-  `download.failed`, `download.cancelled`, and `download.removed`.
-- Schema version 5 with `manifest_root` and `source_peer` on downloads.
-- A demo Downloads card that shows speed and the serving peer alongside
-  progress, status, source count, and verification state. It remains visibly
-  simulated.
-- 22 new Rust tests, for 251 total.
+- A canonical v1 profile body with display name, optional username label, bio,
+  optional avatar content ID, bounded publication references, revision, and
+  update time.
+- Local editing that signs every field change through the identity vault and
+  increments the revision by one.
+- `publish: false` stores a signed draft and emits `profile.draft_saved` without
+  any DHT announcement.
+- DHT publication under `sha256("NEXUS-DHT-PROFILE-v1" + identity_id)`, with
+  the exact signed envelope stored before network work starts.
+- Lookup that verifies the envelope, requested identity ID, and derived DHT key
+  before caching.
+- Newer-revision replacement, older-revision stale reporting without rollback,
+  and same-revision conflict retention in `profile_conflicts`.
+- A cache served after a network miss or failure is labelled stale, and cached
+  rows older than seven days are also stale.
+- Case-insensitive username-label collision reporting with distinct identity
+  IDs. Usernames are labels, not unique accounts.
+- `expected_revision` optimistic concurrency and a no-field republish that keeps
+  the existing revision.
+- Three new core methods: `profile.get_local` (0x0301), `profile.publish`
+  (0x0302), and `profile.lookup` (0x0303).
+- Six profile events: `profile.draft_saved`, `profile.published`,
+  `profile.lookup_completed`, `profile.lookup_failed`,
+  `profile.publish_cancelled`, and `profile.lookup_cancelled`.
+- Schema version 6 with profile lifecycle, freshness, timestamps, and retained
+  conflicts.
+- A demo Profile card that shows signed, state, freshness, revision, identity,
+  conflict, and collision labels. It remains visibly simulated.
+- 14 new Rust tests, for 265 total.
 
 ## Files changed
 
 Protocol crate:
 
-- `crates/nexus-protocol/src/file.rs` (new)
-- `crates/nexus-protocol/src/lib.rs`
-
-Network crate:
-
-- `crates/nexus-net/src/behaviour.rs`
-- `crates/nexus-net/src/codec.rs`
-- `crates/nexus-net/src/driver.rs`
-- `crates/nexus-net/src/error.rs`
-- `crates/nexus-net/src/file.rs` (new)
-- `crates/nexus-net/src/lib.rs`
-- `crates/nexus-net/tests/stage12.rs` (new)
+- `crates/nexus-protocol/src/envelope.rs`
 
 Core crate:
 
-- `crates/nexus-core/src/downloads.rs` (new)
+- `crates/nexus-core/src/profiles.rs` (new)
 - `crates/nexus-core/src/engine.rs`
-- `crates/nexus-core/src/error.rs`
 - `crates/nexus-core/src/lib.rs`
-- `crates/nexus-core/src/network.rs`
-- `crates/nexus-core/tests/stage12.rs` (new)
+- `crates/nexus-core/tests/stage13.rs` (new)
 
 Store crate:
 
-- `crates/nexus-store/migrations/0005_download_transfer_metadata.sql` (new)
+- `crates/nexus-store/migrations/0006_profiles.sql` (new)
+- `crates/nexus-store/src/lib.rs`
 - `crates/nexus-store/src/migrations.rs`
 - `crates/nexus-store/src/model.rs`
 - `crates/nexus-store/src/store.rs`
+- `crates/nexus-store/src/util.rs`
 - `crates/nexus-store/tests/local_import.rs`
+- `crates/nexus-store/tests/profiles.rs` (new)
 - `crates/nexus-store/tests/storage.rs`
-
-FFI and workspace:
-
-- `crates/nexus-ffi/tests/c_abi.rs`
-- `.gitignore`
-- `build.gradle.kts`
 
 Shared Kotlin:
 
 - `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/demo/DemoModels.kt`
 - `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/demo/DemoCatalog.kt`
 - `shared/ui/src/commonMain/kotlin/io/nexus/ui/components/Cards.kt`
+- `shared/ui/src/commonMain/kotlin/io/nexus/ui/components/ProfileCards.kt` (new)
+- `shared/ui/src/commonMain/kotlin/io/nexus/ui/screens/ProfileScreen.kt`
 - `shared/ui/src/commonMain/kotlin/io/nexus/ui/resources/NexusStrings.kt`
+
+Developer tooling:
+
+- `scripts/dev-env.ps1` (repo-local `GRADLE_USER_HOME`)
 
 Documentation:
 
-- `docs/architecture/FILE_TRANSFER.md` (new)
-- `docs/progress/STAGE_12.md` (new)
-- `docs/architecture/FFI_INTERFACE.md` (version 1.5.0)
+- `docs/progress/STAGE_13.md` (new)
+- `docs/architecture/FFI_INTERFACE.md` (version 1.6.0)
+- `docs/architecture/DHT_DESIGN.md`
 - `docs/HANDOFF.md`
 - `README.md`, `CHANGELOG.md`
 
@@ -105,26 +95,28 @@ Documentation:
 cargo test --workspace -- --test-threads=1
 ```
 
-Result: PASS, 251 tests, 0 failures.
+Result: PASS, 265 tests, 0 failures.
 
-Stage 12-specific suites:
+Stage 13-specific suites:
 
 ```text
-cargo test -p nexus-net --test stage12 -- --test-threads=1
-cargo test -p nexus-core --test stage12 -- --test-threads=1
+cargo test -p nexus-core --lib profiles:: -- --test-threads=1
+cargo test -p nexus-core --test stage13 -- --test-threads=1
+cargo test -p nexus-store --test profiles -- --test-threads=1
 ```
 
-Result: PASS, 2 and 1 tests respectively.
+Result: PASS, 7, 1, and 5 tests respectively.
 
 ### Test breakdown
 
 | Suite | Tests | Failures |
 |---|---:|---:|
-| `nexus-core` unit tests | 41 | 0 |
+| `nexus-core` unit tests | 48 | 0 |
 | `nexus-core` Stage 09 tests | 4 | 0 |
 | `nexus-core` Stage 10 tests | 2 | 0 |
 | `nexus-core` Stage 11 tests | 4 | 0 |
 | `nexus-core` Stage 12 tests | 1 | 0 |
+| `nexus-core` Stage 13 tests | 1 | 0 |
 | `nexus-crypto` unit tests | 24 | 0 |
 | `nexus-ffi` unit tests | 4 | 0 |
 | `nexus-ffi` C ABI tests | 6 | 0 |
@@ -136,99 +128,102 @@ Result: PASS, 2 and 1 tests respectively.
 | `nexus-net` Stage 11 tests | 5 | 0 |
 | `nexus-net` Stage 12 tests | 2 | 0 |
 | `nexus-observability` unit tests | 3 | 0 |
-| `nexus-protocol` unit tests | 31 | 0 |
+| `nexus-protocol` unit tests | 32 | 0 |
 | `nexus-protocol` signed-record tests | 9 | 0 |
 | `nexus-protocol` Stage 07 tests | 8 | 0 |
 | `nexus-store` unit tests | 17 | 0 |
 | `nexus-store` local-import tests | 4 | 0 |
+| `nexus-store` profile tests | 5 | 0 |
 | `nexus-store` Stage 07 tests | 4 | 0 |
 | `nexus-store` storage tests | 12 | 0 |
 | `nexus-transfer` unit tests | 7 | 0 |
 | `nexus-transfer` integration tests | 7 | 0 |
 | `nexus-types` unit tests | 1 | 0 |
-| **Rust total** | **251** | **0** |
+| **Rust total** | **265** | **0** |
 
-Stage 11 had 229 tests. Stage 12 adds 13 core download-manager tests, 6 protocol
-wire tests, 2 network Stage 12 tests, and 1 core Stage 12 test.
+Stage 12 had 251 tests. Stage 13 adds 7 core profile-worker tests, 5 store profile
+tests, 1 protocol envelope test, and 1 core Stage 13 test.
 
 ### Kotlin checks
 
 ```text
-gradle spotlessCheck detekt :shared:presentation:jvmTest :shared:ui:jvmTest
+gradlew --no-daemon --console=plain spotlessCheck detekt
+  :shared:presentation:jvmTest :shared:ui:jvmTest
+  :apps:desktopApp:createDistributable :apps:androidApp:assembleDebug
 ```
 
-Result: PASS.
+Result: PASS, including the desktop distributable and Android debug APK. Gradle
+uses `GRADLE_USER_HOME=NeededToolsHere/gradle-home`, so packaging downloads stay
+inside the repository.
 
 ### Formatting, linting, and dependency policy
 
 ```text
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo deny check
-cargo audit
 ```
 
 - Formatting and Clippy with warnings denied: PASS.
-- `cargo deny check`: `advisories ok, bans ok, licenses ok, sources ok`. One
-  unmaintained, non-vulnerable Linux-only `paste` advisory
-  (`RUSTSEC-2024-0436`) remains documented in `deny.toml`.
-- `cargo audit`: 411 dependencies scanned; no vulnerabilities and one allowed
-  warning.
-- `Cargo.lock` remains at 411 packages. Stage 12 adds no dependency.
+- `Cargo.lock` remains at 411 packages. Stage 13 adds no dependency.
 - The native artifact build was not re-run because the ABI and exported surface
   did not change. The six C ABI tests still pass in the workspace suite.
+- `cargo deny check` and `cargo audit` were not re-run for Stage 13; no
+  dependency changed.
 
 ## Errors and failed attempts
 
-1. Migration tests still asserted schema version 4 after migration 5 was added.
-   They now assert `LATEST_VERSION`, and the checkpoint test asserts the
-   current version.
-2. `mixed_or_unknown_shapes_are_rejected` changed a valid content-ID byte
-   instead of testing truncation and trailing bytes. It now truncates and
-   appends bytes.
-3. Clippy rejected `i64::from(LATEST_VERSION)` as a useless conversion. The
-   assertion now compares the integer directly.
-4. Spotless walked the local Gradle cache inside `NeededToolsHere` and tried to
-   format generated Kotlin DSL accessors. The directory is excluded from
-   Spotless and ignored by Git.
-5. `download.started` needed more fields for the UI than the reserved contract,
-   so it also carries `total_bytes`, `source_peer`, `publication_id`, and
-   `display_name`.
-6. A pause can race a chunk failure. The worker re-reads the control before
-   recording a failure, so the persisted state and terminal event match the
-   user's action.
+1. Migration and schema assertions still expected version 5 after migration 6
+   was added. They now assert `LATEST_VERSION` and schema 6.
+2. The Stage 13 integration test initially used two DHT clients and could not
+   satisfy quorum because a client rejects stored records. It now uses two DHT
+   servers plus one client reader, which also makes the stale-cache assertion
+   deterministic.
+3. A publish with no profile fields originally tried to build a new record from
+   empty fields. It now republishes the existing signed bytes without a revision
+   bump.
+4. Detekt counted seventeen functions in `Cards.kt`. The profile card and its
+   helpers moved to `ProfileCards.kt`, leaving both files under the threshold.
+5. Clippy rejected an eight-argument publish worker. The worker now takes the
+   verified `SignedProfile` and derives its identity, revision, timestamp, and
+   bytes.
+6. Clippy also rejected redundant row closures and a collapsible username
+   check; both were simplified.
 
 ## Decisions and unresolved questions
 
-- Stage 12 was explicitly authorized by the project owner after Stage 11 was
-  approved.
-- One source is used at a time. Parallel chunk swarms and erasure coding are
-  deferred.
-- A source must already be connected; the download manager does not dial.
-- Chunk slices are 64 KiB on the wire even though chunks are 1 MiB. This keeps
-  each frame small enough for a relayed circuit.
-- Only complete chunks are checkpointed. A mid-chunk prefix is rejected on
-  resume rather than re-verified in place.
-- The manifest root and source peer are persisted so a restart can resume
-  without trusting a fresh metadata response.
-- Completed downloads leave the download queue and become verified content with
-  a `retained_download` reference.
-- The ABI remains 1; the protocol version is `0.1.0-stage-12`, and the identify
-  protocol is `/nexus/0.1.0-stage-12`.
-- The Kotlin Downloads UI remains labeled demo data; core wiring is a later UI
+- Stage 13 was explicitly authorized by the project owner after Stage 12 was
+  completed.
+- Stage 13 is a stacked branch from `feat/12-streaming-transfer` because Stage
+  12 is not merged yet. Stage 12 remains at `8a9e863` with PR #11 open. Merge
+  Stage 12 first, then rebase and merge Stage 13.
+- Profiles are exact signed records under an identity-derived DHT key. There is
+  no profile registry or unique handle.
+- Username labels are compared case-insensitively for transparency, but the
+  stored spelling is preserved. Collisions cover only profiles the local store
+  has seen.
+- `profile.publish` defaults to publishing. A draft requires `publish: false`.
+- Omitting every profile field republishes the existing signed record; it does
+  not create an empty revision.
+- Same-revision conflicts are retained for review rather than resolved
+  automatically. Conflict presentation and resolution remain later work.
+- Cached remote profiles are always labelled stale after a network miss or
+  failure, even when the previous check was recent.
+- The ABI remains 1; the core protocol version is `0.1.0-stage-13`. The identify
+  protocol remains `/nexus/0.1.0-stage-12` because no network frame changed.
+- The Kotlin Profile UI remains labeled demo data; core wiring is a later UI
   stage.
-- Android runtime transfer evidence is deferred because no emulator or device
-  is available.
-- Remote GitHub Actions execution has not run for Stage 12.
+- Android runtime profile evidence is deferred because no emulator or device is
+  available.
+- Remote GitHub Actions execution has not run for Stage 13.
 
 ## Exact next action
 
-1. Review `docs/progress/STAGE_12.md`,
-   `docs/architecture/FILE_TRANSFER.md`, the updated
+1. Review `docs/progress/STAGE_13.md`,
+   `docs/architecture/DHT_DESIGN.md`, the updated
    `docs/architecture/FFI_INTERFACE.md`, and the `nexus-protocol`,
-   `nexus-net`, `nexus-store`, and `nexus-core` Stage 12 changes.
-2. Give explicit approval to start Stage 13.
-3. Stage 13 adds profiles and signed public metadata: the public profile schema,
-   username collision behavior without a central registry, signed profile
-   publication and retrieval, stale-record handling, and profile pages. Do not
+   `nexus-store`, and `nexus-core` Stage 13 changes.
+2. Merge Stage 12 (PR #11), then rebase and merge the Stage 13 branch.
+3. Give explicit approval to start Stage 14. Stage 14 adds explicit file
+   selection and publishing: descriptions, categories, tags, signed publication
+   records, publisher availability, file details, and unpublish behavior. Do not
    begin it before that approval.

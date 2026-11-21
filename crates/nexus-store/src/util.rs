@@ -16,6 +16,14 @@ pub fn now_secs() -> u64 {
         .map_or(0, |duration| duration.as_secs())
 }
 
+/// Returns the current Unix time in milliseconds, saturating at zero.
+#[must_use]
+pub fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+}
+
 /// Formats bytes as lowercase hexadecimal.
 #[must_use]
 pub fn hex_lower(bytes: &[u8]) -> String {

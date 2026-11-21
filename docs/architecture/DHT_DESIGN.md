@@ -1,12 +1,12 @@
 # DHT Design
 
-**Status:** Implemented in Stage 10
+**Status:** Implemented in Stage 10; signed profile publication added in Stage 13
 **Scope:** Kademlia peer routing, signed record publication and lookup, provider records, bootstrap entry points, and bounded discovery.
 
-This document records the Stage 10 design. It is implemented by
-`nexus-protocol::dht`, `nexus-net`, and the `network.discover` core method.
-It does not introduce a new authority, account service, or mutable global
-namespace.
+This document records the Stage 10 design and the Stage 13 profile extension.
+It is implemented by `nexus-protocol::dht`, `nexus-net`, the `network.discover`
+core method, and the `profile.*` core methods. It does not introduce a new
+authority, account service, or mutable global namespace.
 
 ## 1. Roles and protocol
 
@@ -17,7 +17,7 @@ namespace.
 
 - The Kademlia protocol ID is `/nexus/kad/1.0.0`. It is separate from the
   public IPFS DHT and from the Stage 09 `/nexus/test/1` transport check.
-- Identify advertises `/nexus/0.1.0-stage-10` and `ember/0.1.0`.
+- Identify advertises `/nexus/0.1.0-stage-12` and `ember/0.1.0`.
 - Replication factor is 8 and query parallelism is 3. Kademlia's disjoint
   query paths reduce the chance that one malicious node controls a lookup.
 - The frame cap is 80 KiB, leaving headroom over the 64 KiB signed-envelope
@@ -72,6 +72,29 @@ shadowing a record with divergent bytes at the same revision. The counter
 Provider records follow the same principle at the identity level: a provider is
 added by peer ID, addresses are replaced by validated hints, and a malformed
 key or oversized address list is rejected before it reaches the store.
+
+### 3.1 Profile records
+
+Stage 13 publishes profiles through the same signed-record path.
+
+- The key is `sha256("NEXUS-DHT-PROFILE-v1" + identity_id)` and the value is the
+  exact signed profile envelope using the profile domain tag.
+- A profile revision starts at 1 and increases by one for every field change.
+  Republishing the existing signed bytes keeps the revision unchanged.
+- The core stores the signed bytes locally before announcing them. A local row
+  is `draft`, `pending`, or `published`; a verified cache from another identity
+  is `remote`.
+- A lookup verifies the signature, the requested identity ID, and the derived
+  key before caching. A newer revision replaces the cached row, an older
+  revision is reported as stale without rolling back, and a same-revision
+  record with different bytes is retained in `profile_conflicts` without
+  replacing the accepted row.
+- A cached record served after a network miss or failure is labeled stale.
+  Cached rows whose last successful check is older than seven days are also
+  presented as stale.
+- Usernames are labels, not reservations. Collision detection compares labels
+  case-insensitively and returns each distinct identity ID. Two identities may
+  publish the same label without either record being invalid.
 
 ## 4. Routing and lookups
 
@@ -160,9 +183,9 @@ probabilistic.
   the user identity behind the device peer key.
 - Status counters expose counts and stable error codes, not raw addresses of
   unrelated peers or key material.
-- The core does not expose raw DHT publish/lookup methods. `network.discover`
-  returns peer identity and addresses only; record publication and lookup remain
-  network-layer APIs used by later product stages.
+- The core does not expose raw DHT publish/lookup methods. `profile.publish`
+  and `profile.lookup` publish and retrieve signed profile envelopes only;
+  arbitrary DHT keys and values remain network-layer APIs.
 
 ## 8. Deferred
 
@@ -184,6 +207,18 @@ Stage 10 adds:
   provider discovery, bootstrap loss, and churn.
 - `nexus-core` Stage 10 tests for `network.discover` completion, invalid
   targets, DHT status fields, and a terminal failure event.
+
+Stage 13 adds:
+
+- `nexus-store` tests for the local profile lifecycle, expected-revision
+  enforcement, remote cache outcomes, conflict retention, and case-insensitive
+  username-label queries.
+- `nexus-core` profile worker tests for publish success, deferred publication,
+  verified caching, collisions, stale caches, revision rollback, and identity
+  mismatch rejection.
+- `nexus-core/tests/stage13.rs`, where two real engines publish and retrieve
+  signed profiles through loopback DHT servers, observe a newer revision, and
+  serve a stale-labeled cache after both servers stop.
 
 All network tests bind loopback addresses and use ordinary peers. No test
 depends on a central account service or an external bootstrap operator.
