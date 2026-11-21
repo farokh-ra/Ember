@@ -41,10 +41,15 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "download transfer metadata",
         sql: include_str!("../migrations/0005_download_transfer_metadata.sql"),
     },
+    Migration {
+        version: 6,
+        name: "signed profile cache and conflicts",
+        sql: include_str!("../migrations/0006_profiles.sql"),
+    },
 ];
 
 /// Newest schema version understood by this build.
-pub(crate) const LATEST_VERSION: i64 = 5;
+pub(crate) const LATEST_VERSION: i64 = 6;
 
 /// Runs all outstanding migrations on the writer connection.
 pub(crate) fn run(conn: &mut Connection) -> StoreResult<()> {

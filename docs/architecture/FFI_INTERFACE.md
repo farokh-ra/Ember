@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-FFI-001 |
-| Version | 1.5.0 (ABI 1) |
-| Status | Implemented through Stage 12; Android runtime verification deferred |
-| Date | 2026-11-20 |
+| Version | 1.6.0 (ABI 1) |
+| Status | Implemented through Stage 13; Android runtime verification deferred |
+| Date | 2026-11-21 |
 | Header | [nexus_core.h](nexus_core.h) |
 | Related | [ADR-0003](../decisions/ADR-0003-ffi-c-abi-jni-jna.md), [Architecture](../ARCHITECTURE.md) |
 
@@ -215,9 +215,9 @@ All production methods are available on both Android and Windows. Method IDs are
 | 0x0203 | `identity.export_backup` | A | `passphrase` | `identity.backup_ready` with bounded backup bytes. |
 | 0x0204 | `identity.restore_backup` | A | `passphrase`, `backup_bytes` | `identity.restored` with identity ID. |
 | 0x0205 | `identity.reset` | A | `confirmation` | `identity.reset_completed`; destructive and explicit. |
-| 0x0301 | `profile.get_local` | S | none | Local profile body and verification state. |
-| 0x0302 | `profile.publish` | A | `display_name`, `bio`, `avatar_content_id?`, `publication_refs` | `profile.published` with profile revision. |
-| 0x0303 | `profile.lookup` | A | `identity_id` | `profile.lookup_completed` with verified record or not-found. |
+| 0x0301 | `profile.get_local` | S | none | Local identity ID, profile or null, lifecycle state, freshness, retained conflicts, and verification state. |
+| 0x0302 | `profile.publish` | A | `display_name?`, `username?`, `bio?`, `avatar_content_id?`, `publication_refs?`, `publish?`, `expected_revision?` | `profile.draft_saved` when `publish` is false, otherwise `profile.published` with revision and announcement outcome. |
+| 0x0303 | `profile.lookup` | A | `identity_id` | `profile.lookup_completed` with a verified record, freshness, conflicts, and username-label collisions. |
 | 0x0401 | `store.usage` | S | none | Quota, used bytes by category, free space, reserve. |
 | 0x0402 | `store.set_quota` | S | `quota_bytes` | Effective quota and whether current usage exceeds it. |
 | 0x0403 | `store.cleanup_preview` | S | none | Reclaimable bytes and items requiring confirmation. |
@@ -263,7 +263,7 @@ All production methods are available on both Android and Windows. Method IDs are
 
 Method IDs are grouped by domain. A future minor ABI may add methods in unused IDs; a released ID is never renumbered. Unknown IDs return `NEXUS_STATUS_UNSUPPORTED` with a domain error.
 
-Stage 12 implements twenty-five callable methods: `system.info`, `system.health`, `system.snapshot`, `store.usage`, the thirteen `network.*` methods above, the six `download.*` methods, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
+Stage 13 implements twenty-eight callable methods: `system.info`, `system.health`, `system.snapshot`, the three `profile.*` methods above, `store.usage`, the thirteen `network.*` methods above, the six `download.*` methods, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
 
 ### 6.1 Network method semantics
 
@@ -305,6 +305,21 @@ Stage 12 implements twenty-five callable methods: `system.info`, `system.health`
 - `download.remove` requires `confirmation: true`, refuses a running download, and refuses a completed library entry. It removes the download row and partial bytes.
 - Every download emits exactly one terminal event: `download.completed`, `download.failed`, or `download.cancelled`. `download.paused` is a durable non-terminal report. A failure that races a pause or cancel is reported as the user's action.
 - A manifest, publication, chunk, or whole-file mismatch returns `verification_failed` with a stable `details.reason`. A source that lacks the content returns `not_found`. Quota or free-space exhaustion returns `quota_exceeded`; verified bytes stay resumable.
+
+### 6.4 Profile method semantics
+
+- Profiles are exact signed records published under the DHT key derived from the owner's identity ID. The identity vault signs the canonical profile body with the profile domain tag; private keys never enter CBOR or the store.
+- `profile.get_local` is synchronous and returns `identity_id`, `has_profile`, `profile` (or null), and `conflicts`. The profile map includes `revision`, `display_name`, `username`, `username_is_label`, `bio`, `avatar_content_id`, `publication_refs`, `state`, `freshness`, `stale`, `discoverable`, `signed`, `record_verified`, `updated_at_ms`, `published_at`, `last_checked_at`, and `conflict_count`.
+- Profile states are `draft` (signed locally, not advertised), `pending` (signed and intended for publication, not yet announced), `published` (announced), and `remote` (a verified cache from another identity). Freshness values are `current`, `stale`, and `unknown`.
+- The first `profile.publish` requires `display_name`. Later calls merge supplied fields with the existing signed record. Omitting every profile field republishes the existing signed bytes without incrementing the revision. `publish` defaults to true.
+- `expected_revision` provides optimistic concurrency. A mismatch returns `conflict` with `details.current_revision` and leaves the stored record unchanged. Without it, local writes may advance but never roll back to a lower revision.
+- Every successful field update increments the revision by one and signs a fresh record. The signed bytes are stored before network work starts. `publish: false` emits `profile.draft_saved` with `discoverable: false`; no DHT announcement is attempted.
+- A publish attempt with networking disabled or unavailable keeps the row `pending` and emits `profile.published` with `discoverable: false`, `announcement: "deferred"`, and an `error` map. The signed record is not lost and can be republished later.
+- `profile.lookup` verifies the signature, the requested identity ID, and the DHT key before caching. A newer revision replaces the cached row. An older revision is retained as the accepted record and reported with `stale: true`. A same-revision record with different bytes is retained in `conflicts` without replacing the accepted row.
+- A cache served because the network returned no record or failed is labeled `stale`, including when the previous check was recent. A local row is returned with `source: "local"` and `stale: false`. A cached remote row whose last check is older than seven days is also presented as `stale`.
+- Usernames are labels, not unique reservations. `username_collisions` lists every other known profile whose label matches case-insensitively (Unicode-aware lowercasing), each with its distinct `identity_id`. `username_is_label` is always true so the UI never presents a label as a global handle.
+- `profile.publish` and `profile.lookup` are cancellable. Cancellation emits `profile.publish_cancelled` or `profile.lookup_cancelled`; a verification or storage failure during lookup emits `profile.lookup_failed`.
+- Terminal events are `profile.published`, `profile.draft_saved`, `profile.lookup_completed`, `profile.lookup_failed`, `profile.publish_cancelled`, and `profile.lookup_cancelled`.
 
 ## 7. Domain error codes
 
@@ -401,7 +416,7 @@ NexusStatus nexus_core_export_close(
 
 Events use the envelope in section 5.4.
 
-Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
+Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. Stage 13 adds the `profile.*` signed-profile family. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
 
 | Event | Meaning | Data |
 |---|---|---|
@@ -424,6 +439,12 @@ Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stop
 | `network.discovery_completed` | Peer-routing query finished. | `target` (null when sampled), `peers` (bounded `{peer_id, addresses}` list), `routing_peers`, `elapsed_ms` |
 | `network.discovery_failed` | Peer-routing query failed or timed out. | `target`, `error` |
 | `network.discovery_cancelled` | Peer-routing query cancelled before completion. | `target` |
+| `profile.draft_saved` | Signed local draft stored without announcement. | `identity_id`, `revision`, `state`, `discoverable`, `record_verified`, `updated_at_ms` |
+| `profile.published` | Signed profile announcement finished or was deferred. | `identity_id`, `revision`, `state`, `discoverable`, `announcement`, `record_verified`, `updated_at_ms`, `error?` |
+| `profile.lookup_completed` | Profile lookup finished, from the network or a cache. | `identity_id`, `found`, `source`, `freshness`, `stale`, `conflict`, `record`, `conflicts`, `username_collisions`, `username_is_label`, `checked_at_ms`, `error?` |
+| `profile.lookup_failed` | Returned record failed verification or storage. | `identity_id`, `error` |
+| `profile.publish_cancelled` | Publish cancelled before completion. | `identity_id`, `revision` |
+| `profile.lookup_cancelled` | Lookup cancelled before completion. | `identity_id` |
 | `publication.published` | Publication stored and announcement attempted. | `publication_id`, `content_id`, `announcement` |
 | `publication.unpublished` | Tombstone stored and announced. | `publication_id`, `tombstone_id` |
 | `download.started` | Download accepted and metadata verified. | `download_id`, `content_id`, `total_bytes`, `source_peer`, `publication_id?`, `display_name` |
@@ -548,9 +569,11 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 | 11 | Relay reservations report negotiated limits, relay lists persist across restart, and `network.connectivity` reports the expected classification and hint. | Passed in the `nexus-net` and `nexus-core` Stage 11 suites. |
 | 12 | `/nexus/file/1` metadata and bounded chunk slices cross the wire, corrupt chunks are rejected, and pause/resume continues from verified bytes. | Passed in the `nexus-protocol`, `nexus-net`, and `nexus-core` Stage 12 suites. |
 | 12 | A multi-megabyte file transfers between two engines and re-exports identical bytes with bounded memory. | Passed at 2.4 MiB in `nexus-core/tests/stage12.rs`; a 4 GiB transfer is not exercised at that size. |
+| 13 | Two identities publish signed profiles through the DHT, verify and cache each other's records, and expose case-insensitive username-label collisions. | Passed in `nexus-core/tests/stage13.rs`. |
+| 13 | A newer revision supersedes a cached one, and an unreachable publisher leaves a stale-labeled cache instead of a false success. | Passed in `nexus-core/tests/stage13.rs` and the `nexus-core` profile worker tests. |
 | 19 | Fuzzing covers malformed CBOR, oversized buffers, invalid handles, and cancellation races. | Not yet implemented. |
 
 The detailed evidence, commands, and test counts are in
 [STAGE_08.md](../progress/STAGE_08.md), [STAGE_09.md](../progress/STAGE_09.md),
 [STAGE_10.md](../progress/STAGE_10.md), [STAGE_11.md](../progress/STAGE_11.md),
-and [STAGE_12.md](../progress/STAGE_12.md).
+[STAGE_12.md](../progress/STAGE_12.md), and [STAGE_13.md](../progress/STAGE_13.md).

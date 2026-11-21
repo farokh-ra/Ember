@@ -10,24 +10,27 @@ name for ABI and format stability: Kotlin packages (`io.nexus`), Rust crates
 (`nexus-*`), the native library (`nexus_core`), and signed record tags
 (`NEXUS-*`).
 
-This repository is at the end of **Stage 12: direct file transfer**. The Android
-and Windows shells still run the shared, clickable UI prototype with visibly
-labelled mock data. Underneath it, the Rust core now owns an embedded SQLite
-schema, migrations, a content-addressed managed file store, quota accounting,
-reference-counted cleanup, startup reconciliation, metadata export/restore,
-local Ed25519 identities, stable `nx1...` identity IDs, canonical signed
-records, encrypted identity storage, passphrase-encrypted backups, streaming
-content IDs, chunk manifests, publication revisions, signed tombstones, the
-versioned native boundary, an authenticated libp2p transport stack, and direct
-peer-to-peer file transfer. A C harness, Android JNI shim, and Windows JNA
-adapter exercise the same lifecycle, dispatch, event, cancellation, and
-streaming contract. Networking supports QUIC v1 and TCP + Noise + Yamux, direct
-connections, persisted bootstrap peers, bounded reconnection, Kademlia peer
-routing, signed DHT record publication and lookup, provider discovery, Circuit
-Relay v2 fallback, DCUtR hole punching, and AutoNAT reachability. Transfers use
-`/nexus/file/1`, verify every chunk before writing, resume from durable
-checkpoints after a pause or restart, and fail over to another connected source.
-Hosting and search remain later stages.
+This repository is at the end of **Stage 13: profiles and signed public
+metadata**. The Android and Windows shells still run the shared, clickable UI
+prototype with visibly labelled mock data. Underneath it, the Rust core now owns
+an embedded SQLite schema, migrations, a content-addressed managed file store,
+quota accounting, reference-counted cleanup, startup reconciliation, metadata
+export/restore, local Ed25519 identities, stable `nx1...` identity IDs,
+canonical signed records, encrypted identity storage, passphrase-encrypted
+backups, streaming content IDs, chunk manifests, publication revisions, signed
+tombstones, the versioned native boundary, an authenticated libp2p transport
+stack, direct peer-to-peer file transfer, and signed public profiles. A C
+harness, Android JNI shim, and Windows JNA adapter exercise the same lifecycle,
+dispatch, event, cancellation, and streaming contract. Networking supports QUIC
+v1 and TCP + Noise + Yamux, direct connections, persisted bootstrap peers,
+bounded reconnection, Kademlia peer routing, signed DHT record publication and
+lookup, provider discovery, Circuit Relay v2 fallback, DCUtR hole punching, and
+AutoNAT reachability. Transfers use `/nexus/file/1`, verify every chunk before
+writing, resume from durable checkpoints after a pause or restart, and fail over
+to another connected source. Profiles are signed, published under an
+identity-derived DHT key, verified before caching, labelled stale when
+unconfirmed, and treat usernames as non-unique labels. Hosting and search remain
+later stages.
 
 ## Current status
 
@@ -45,7 +48,7 @@ Hosting and search remain later stages.
 | Loading, empty, offline, error, and retry states | Complete on data-driven screens |
 | Accessibility and keyboard support | Implemented; focus, keyboard, and Escape checks passed |
 | Stage 04 desktop test pass | Complete; journeys, five states, themes, and compact layout verified |
-| SQLite schema and transactional migrations | Complete; schema version 5 |
+| SQLite schema and transactional migrations | Complete; schema version 6 |
 | Managed content-addressed file store | Complete; atomic import, no-copy staged adoption, and exclusive lock |
 | Quota, free-space reserve, and file limits | Complete; 10 GiB default, 1 GiB reserve, 4 GiB file cap |
 | Reference-counted deletion and cleanup | Complete; published originals and replicas require confirmation |
@@ -57,7 +60,7 @@ Hosting and search remain later stages.
 | Publication revisions and signed tombstones | Complete; immutability, attribution, and revision rules |
 | Encrypted identity at rest and backup | Complete; LEK/HKDF at rest, Argon2id/XChaCha20-Poly1305 backup |
 | C ABI and versioned CBOR envelopes | Complete; 17 functions, opaque handles, panic containment |
-| Core lifecycle, dispatch, and event queue | Complete; twenty-five methods, four operation workers, two download workers, coalescing queue |
+| Core lifecycle, dispatch, and event queue | Complete; twenty-eight methods, four operation workers, two download workers, coalescing queue |
 | Streaming import/export through the ABI | Complete; 1 MiB chunks, staged adoption, bounded export |
 | Device peer identity and encrypted peer key | Complete; independent of the user signing identity |
 | QUIC v1 and TCP/Noise/Yamux transports | Complete on Windows loopback; Android runtime deferred |
@@ -73,16 +76,18 @@ Hosting and search remain later stages.
 | Direct peer-to-peer file transfer | Complete on Windows loopback; `/nexus/file/1`, verified chunks, source failover |
 | Pause, resume, and process-death recovery | Complete; durable chunk checkpoints and restart recovery |
 | Download methods and events | Complete; six `download.*` methods and eight transfer events |
+| Signed public profiles | Complete on Windows loopback; local drafts, DHT publish/lookup, revisions, stale caches, conflicts, and label collisions |
+| Profile methods and events | Complete; three `profile.*` methods and six profile events |
 | JNI and JNA adapters | Complete on Windows JNA and a Windows-hosted JNI proxy; Android runtime execution deferred |
 | C harness and adapter contract tests | Complete; 100 lifecycle cycles and 2.5 MB round-trip |
 | Formatting, linting, and static analysis | Enforced locally and in CI |
 | CI workflow and dependency review | Defined |
 | Developer setup and contribution guides | Complete |
-| Product features | Mock UI prototypes; storage, crypto, publication, native, network, and transfer foundations complete, hosting and search later |
+| Product features | Mock UI prototypes; storage, crypto, publication, native, network, transfer, and profile foundations complete, hosting and search later |
 
-See [docs/progress/STAGE_12.md](docs/progress/STAGE_12.md) for the exact
+See [docs/progress/STAGE_13.md](docs/progress/STAGE_13.md) for the exact
 evidence and commands used to verify this stage. The byte-level record, identity,
-manifest, tombstone, at-rest, and backup formats are specified in
+manifest, tombstone, profile, at-rest, and backup formats are specified in
 [docs/architecture/SIGNED_RECORD_FORMATS.md](docs/architecture/SIGNED_RECORD_FORMATS.md),
 the Kademlia record and routing design in
 [docs/architecture/DHT_DESIGN.md](docs/architecture/DHT_DESIGN.md), the NAT and
@@ -234,7 +239,7 @@ workflow and release conventions.
 | [docs/architecture/NAT_TRAVERSAL.md](docs/architecture/NAT_TRAVERSAL.md) | Relay fallback, hole punching, NAT status, path reporting, and bounds. |
 | [docs/architecture/FILE_TRANSFER.md](docs/architecture/FILE_TRANSFER.md) | `/nexus/file/1`, chunk verification, resume, failover, bounds, and limitations. |
 | [docs/operations/RELAY_NODES.md](docs/operations/RELAY_NODES.md) | Relay setup, capacity, firewall rules, monitoring, and privacy. |
-| [docs/progress/STAGE_12.md](docs/progress/STAGE_12.md) | Stage 12 scope, architecture, tests, and verification evidence. |
+| [docs/progress/STAGE_13.md](docs/progress/STAGE_13.md) | Stage 13 scope, architecture, tests, and verification evidence. |
 | [docs/decisions](docs/decisions/README.md) | Accepted architecture decision records. |
 | [docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md) | Repeatable Windows setup and troubleshooting. |
 | [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) | Branches, commits, pull requests, releases, and CI. |
@@ -252,10 +257,9 @@ details. Debug logs must be redacted according to
 
 ## Next stage
 
-Stage 13 adds profiles and signed public metadata: the public profile schema,
-username collision behavior without a central registry, signed profile
-publication and retrieval, stale-record handling, and profile pages. It must not
-begin until Stage 12 is reviewed and approved by the project owner. Android JNI
-runtime verification and remote CI execution remain outstanding from Stage 08,
-and Android on-device networking and transfer evidence remain outstanding from
-Stages 09 and 12.
+Stage 14 adds explicit file selection and publishing: descriptions, categories,
+tags, signed publication records, publisher availability, file details, and
+unpublish behavior. It must not begin until Stage 13 is reviewed and approved by
+the project owner. Android JNI runtime verification and remote CI execution
+remain outstanding from Stage 08, and Android on-device networking, transfer,
+and profile evidence remain outstanding from Stages 09, 12, and 13.

@@ -27,6 +27,9 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $ToolchainRoot = Join-Path $env:LOCALAPPDATA "NEXUS\toolchain"
 $JdkHome = Join-Path $ToolchainRoot "jdk\jdk-21.0.13+9"
 $GradleHome = Join-Path $ToolchainRoot "gradle\gradle-9.9.1"
+# Keep this project's Gradle downloads and caches inside the repository so they
+# do not land in the user profile. The directory is gitignored.
+$GradleUserHome = Join-Path $RepoRoot "NeededToolsHere\gradle-home"
 $MingwHome = Join-Path $ToolchainRoot "mingw\mingw64"
 $CargoHome = Join-Path $ToolchainRoot "cargo"
 $RustupHome = Join-Path $ToolchainRoot "rustup"
@@ -56,6 +59,7 @@ if (-not (Test-Path (Join-Path $CargoHome "bin\cargo.exe"))) {
 
 $env:JAVA_HOME = $JdkHome
 $env:GRADLE_HOME = $GradleHome
+$env:GRADLE_USER_HOME = $GradleUserHome
 $env:ANDROID_HOME = $AndroidHome
 $env:ANDROID_SDK_ROOT = $AndroidHome
 $env:ANDROID_NDK_HOME = Join-Path $AndroidHome "ndk\29.0.14206865"
@@ -89,6 +93,7 @@ if (-not $Quiet) {
     Write-Host "Ember developer environment"
     Write-Host "  JDK:     $javaVersion"
     Write-Host "  Gradle:  $GradleHome"
+    Write-Host "  Gradle cache: $GradleUserHome"
     Write-Host "  Rust:    $(& (Join-Path $CargoHome "bin\rustc.exe") --version)"
     Write-Host "  Cargo:   $(& (Join-Path $CargoHome "bin\cargo.exe") --version)"
     Write-Host "  Android: $AndroidHome"

@@ -27,6 +27,18 @@ impl SignedRecord {
             return Err(ProtocolError::RecordTooLarge);
         }
         let signature = keypair.sign_domain(tag, &body);
+        Self::from_parts(body, signature)
+    }
+
+    /// Builds an envelope from already-signed body bytes and a signature.
+    ///
+    /// The identity vault signs domain-separated messages without exposing its
+    /// keypair. A record built here is not trusted until the caller verifies it
+    /// against the public key named by the body.
+    pub fn from_parts(body: Vec<u8>, signature: SignatureBytes) -> Result<Self, ProtocolError> {
+        if body.is_empty() || body.len() > MAX_SIGNED_BODY_BYTES {
+            return Err(ProtocolError::RecordTooLarge);
+        }
         let envelope = Value::Map(vec![
             (Value::Unsigned(1), Value::Bytes(body.clone())),
             (Value::Unsigned(2), Value::Bytes(signature.as_bytes().to_vec())),
@@ -116,6 +128,25 @@ mod tests {
             .verify(DomainTag::Profile, &keypair.public_key())
             .expect("verify");
         assert!(parsed.verify(DomainTag::Publication, &keypair.public_key()).is_err());
+    }
+
+    #[test]
+    fn envelope_can_be_built_from_external_signing() {
+        let keypair = KeyPair::from_seed([3_u8; 32]);
+        let body = Value::Map(vec![(Value::Unsigned(1), Value::Text("profile".to_owned()))])
+            .to_canonical_bytes()
+            .expect("body");
+        let signature = keypair.sign_domain(DomainTag::Profile, &body);
+        let record = SignedRecord::from_parts(body.clone(), signature).expect("envelope");
+        record
+            .verify(DomainTag::Profile, &keypair.public_key())
+            .expect("verify");
+        assert_eq!(record.body_bytes(), body);
+
+        let other = KeyPair::from_seed([4_u8; 32]).sign_domain(DomainTag::Profile, &body);
+        let wrong = SignedRecord::from_parts(body, other).expect("envelope");
+        assert!(wrong.verify(DomainTag::Profile, &keypair.public_key()).is_err());
+        assert!(SignedRecord::from_parts(Vec::new(), signature).is_err());
     }
 
     #[test]

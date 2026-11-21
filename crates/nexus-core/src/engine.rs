@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use nexus_crypto::Value;
+use nexus_crypto::{DomainTag, SignatureBytes, Value};
 use nexus_identity::{Identity, IdentityVault, LocalEncryptionKey};
 use nexus_net::{Network, NetworkConfig, NetworkState, NetworkStatus, PeerDiscovery, PeerSnapshot};
 use nexus_store::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage, Store, StoreConfig, StoreError, safe_display_name};
@@ -109,7 +109,7 @@ pub struct Engine {
     secret: zeroize::Zeroizing<Vec<u8>>,
     pub(crate) events: Arc<EventQueue>,
     pub(crate) ops: Arc<OperationRegistry>,
-    pool: WorkerPool,
+    pub(crate) pool: WorkerPool,
     pub(crate) download_pool: WorkerPool,
     pub(crate) downloads: Arc<Mutex<HashMap<String, Arc<crate::downloads::DownloadControl>>>>,
     imports: Mutex<HashMap<u64, ImportSession>>,
@@ -524,6 +524,9 @@ impl Engine {
             0x0101 => self.system_info().map(MethodOutcome::Result),
             0x0102 => self.system_health().map(MethodOutcome::Result),
             0x0103 => self.system_snapshot(&params).map(MethodOutcome::Result),
+            0x0301 => self.profile_get_local(),
+            0x0302 => self.profile_publish(&params),
+            0x0303 => self.profile_lookup(&params),
             0x0401 => self.store_usage().map(MethodOutcome::Result),
             0x0601 => Ok(MethodOutcome::Result(self.network_status_method()?)),
             0x0602 => self.network_peers(&params).map(MethodOutcome::Result),
@@ -556,6 +559,9 @@ impl Engine {
             "system.health",
             "system.snapshot",
             "store.usage",
+            "profile.get_local",
+            "profile.publish",
+            "profile.lookup",
             "network.status",
             "network.peers",
             "network.bootstrap_list",
@@ -854,12 +860,25 @@ impl Engine {
         }
     }
 
-    fn identity_status(&self) -> IdentityStatus {
+    pub(crate) fn identity_status(&self) -> IdentityStatus {
         self.identity
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .status
             .clone()
+    }
+
+    /// Signs a domain-separated message with the unlocked identity.
+    ///
+    /// The keypair never leaves the identity slot; profile signing only needs
+    /// the resulting signature bytes.
+    pub(crate) fn sign_identity_domain(&self, tag: DomainTag, message: &[u8]) -> Option<SignatureBytes> {
+        self.identity
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .identity
+            .as_ref()
+            .map(|identity| identity.sign_domain(tag, message))
     }
 
     pub(crate) fn network_snapshot(&self) -> Option<Arc<Network>> {

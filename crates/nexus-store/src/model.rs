@@ -159,6 +159,84 @@ pub struct IdentityReference {
     pub created_at: u64,
 }
 
+/// Local lifecycle state of a stored profile record.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileState {
+    /// Signed locally but explicitly not advertised.
+    Draft,
+    /// Signed and intended for publication, but not yet announced.
+    Pending,
+    /// Announced to the record system.
+    Published,
+    /// Cached from another identity.
+    Remote,
+}
+
+impl ProfileState {
+    /// Stable database and wire name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Pending => "pending",
+            Self::Published => "published",
+            Self::Remote => "remote",
+        }
+    }
+
+    /// Parses a stable database name.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "draft" => Some(Self::Draft),
+            "pending" => Some(Self::Pending),
+            "published" => Some(Self::Published),
+            "remote" => Some(Self::Remote),
+            _ => None,
+        }
+    }
+
+    /// True for draft, pending, and published local rows.
+    #[must_use]
+    pub const fn is_local(self) -> bool {
+        !matches!(self, Self::Remote)
+    }
+}
+
+/// How recently a cached or local profile was confirmed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileFreshness {
+    /// Confirmed by the local writer or a successful lookup.
+    Current,
+    /// A cached record whose last check is too old or whose refresh failed.
+    Stale,
+    /// Never checked and not written locally.
+    Unknown,
+}
+
+impl ProfileFreshness {
+    /// Stable database and wire name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Stale => "stale",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// Parses a stable database name.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "current" => Some(Self::Current),
+            "stale" => Some(Self::Stale),
+            "unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+}
+
 /// A verified profile record.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProfileRecord {
@@ -176,8 +254,44 @@ pub struct ProfileRecord {
     pub bio: Option<String>,
     /// Avatar content ID, if any.
     pub avatar_content_id: Option<String>,
-    /// Last local update time.
+    /// Last local update time in Unix seconds.
     pub updated_at: u64,
+    /// Signed record update time in Unix milliseconds.
+    pub updated_at_ms: u64,
+    /// Local lifecycle state.
+    pub state: ProfileState,
+    /// Last local publish attempt in Unix milliseconds.
+    pub published_at: Option<u64>,
+    /// Last network check in Unix milliseconds.
+    pub last_checked_at: Option<u64>,
+    /// Freshness label for this row.
+    pub freshness: ProfileFreshness,
+}
+
+/// A rejected same-revision profile record kept for transparency.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProfileConflict {
+    /// Identity that signed the profile.
+    pub identity_id: String,
+    /// Revision both records claim.
+    pub revision: u64,
+    /// Exact signed bytes that lost the conflict.
+    pub record_bytes: Vec<u8>,
+    /// When the conflict was observed in Unix milliseconds.
+    pub observed_at: u64,
+}
+
+/// Result of caching a verified remote profile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileCacheOutcome {
+    /// The incoming record replaced the cached row.
+    Stored,
+    /// The incoming record matched the cached row.
+    Unchanged,
+    /// The incoming record was older than the cached row.
+    Stale,
+    /// The incoming record claimed the same revision with different bytes.
+    Conflict,
 }
 
 /// A verified publication record.

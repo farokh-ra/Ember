@@ -194,6 +194,24 @@ public interface NexusStrings {
     public val profileBackupUnavailable: String
     public val profileNetworkLink: String
     public val profileNoPublications: String
+    public val profileSignedRecord: String
+    public val profileRecordDraft: String
+    public val profileRecordPending: String
+    public val profileRecordPublished: String
+    public val profileRevision: String
+    public val profileIdentityId: String
+    public val profileFreshnessLabel: String
+    public val profileFreshnessCurrent: String
+    public val profileFreshnessStale: String
+    public val profileFreshnessUnknown: String
+    public val profilePublishedAt: String
+    public val profileLastChecked: String
+    public val profileConflictsLabel: String
+    public val profileConflictNote: String
+    public val profileCollisionsLabel: String
+    public val profileCollisionNote: String
+    public val profileNoCollisions: String
+    public val profileSignedNote: String
 
     // File details.
     public val fileDetailsTitle: String
@@ -644,9 +662,30 @@ public object EnglishNexusStrings : NexusStrings {
     override val profileEditUnavailable: String = "Profile editing is not available in this preview."
     override val profileIdentityBackup: String = "Identity backup and restore"
     override val profileBackupUnavailable: String =
-        "Not available in Stage 04. There is no central recovery."
+        "Not available in this preview. There is no central recovery."
     override val profileNetworkLink: String = "View network status"
     override val profileNoPublications: String = "No demo publications for this profile."
+    override val profileSignedRecord: String = "Signed record"
+    override val profileRecordDraft: String = "Draft, not announced"
+    override val profileRecordPending: String = "Pending announcement"
+    override val profileRecordPublished: String = "Published"
+    override val profileRevision: String = "Revision"
+    override val profileIdentityId: String = "Identity ID"
+    override val profileFreshnessLabel: String = "Freshness"
+    override val profileFreshnessCurrent: String = "Current"
+    override val profileFreshnessStale: String = "Stale"
+    override val profileFreshnessUnknown: String = "Unknown"
+    override val profilePublishedAt: String = "Published"
+    override val profileLastChecked: String = "Last checked"
+    override val profileConflictsLabel: String = "Retained conflicts"
+    override val profileConflictNote: String =
+        "A same-revision record with different bytes was kept for review. The accepted revision was not overwritten."
+    override val profileCollisionsLabel: String = "Username collisions"
+    override val profileCollisionNote: String =
+        "Usernames are labels, not unique accounts. These distinct identities also use this label."
+    override val profileNoCollisions: String = "No other known identity uses this label."
+    override val profileSignedNote: String =
+        "The Rust core signs and publishes real profile records. This card is sample data."
 
     override val fileDetailsTitle: String = "File details"
     override val fileSectionAvailability: String = "Availability"
