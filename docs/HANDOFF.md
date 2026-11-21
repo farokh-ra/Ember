@@ -193,9 +193,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 - Stage 13 was explicitly authorized by the project owner after Stage 12 was
   completed.
-- Stage 13 is a stacked branch from `feat/12-streaming-transfer` because Stage
-  12 is not merged yet. Stage 12 remains at `8a9e863` with PR #11 open. Merge
-  Stage 12 first, then rebase and merge Stage 13.
+- Stage 13 was stacked on `feat/12-streaming-transfer` while PR #11 was open.
+  PR #11 merged on 2026-11-20, and Stage 13 was rebased onto the merge commit;
+  PR #12 now targets `main`.
 - Profiles are exact signed records under an identity-derived DHT key. There is
   no profile registry or unique handle.
 - Username labels are compared case-insensitively for transparency, but the
@@ -214,15 +214,15 @@ cargo clippy --workspace --all-targets -- -D warnings
   stage.
 - Android runtime profile evidence is deferred because no emulator or device is
   available.
-- Remote GitHub Actions execution has not run for Stage 13.
+- GitHub Actions passed all seven checks for PR #12 on 2026-11-21.
 
 ## Exact next action
 
 1. Review `docs/progress/STAGE_13.md`,
    `docs/architecture/DHT_DESIGN.md`, the updated
-   `docs/architecture/FFI_INTERFACE.md`, and the `nexus-protocol`,
-   `nexus-store`, and `nexus-core` Stage 13 changes.
-2. Merge Stage 12 (PR #11), then rebase and merge the Stage 13 branch.
+   `docs/architecture/FFI_INTERFACE.md`, the `nexus-protocol`,
+   `nexus-store`, and `nexus-core` Stage 13 changes, and PR #12.
+2. Merge Stage 13 (PR #12) after approval. Stage 12 is already merged.
 3. Give explicit approval to start Stage 14. Stage 14 adds explicit file
    selection and publishing: descriptions, categories, tags, signed publication
    records, publisher availability, file details, and unpublish behavior. Do not

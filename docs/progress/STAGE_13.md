@@ -269,6 +269,10 @@ profile tests, 1 protocol envelope test, and 1 core Stage 13 test.
 - No dependency was added; `Cargo.lock` remains at 411 packages.
 - The FFI interface document is at version 1.6.0 with twenty-eight callable
   methods.
+- GitHub Actions passed all seven checks for PR #12: Rust format/lint/test and
+  policy, Rust Windows MSVC build and tests, Windows desktop build, Android
+  build/tests/static analysis, repository hygiene, PR title, and dependency
+  review.
 
 ## 11. Exit criteria
 
@@ -334,8 +338,8 @@ This is not claimed as Android runtime evidence.
   failure, even when the previous check was recent.
 - The Kotlin Profile UI remains labeled demo data; core wiring is a later UI
   stage.
-- Android runtime profile evidence and remote GitHub Actions execution remain
-  outstanding.
+- Android runtime profile evidence remains outstanding; GitHub Actions passed
+  all seven checks for PR #12.
 
 ## 15. Next stage
 
