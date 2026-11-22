@@ -322,6 +322,18 @@ impl Network {
         receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
     }
 
+    /// Withdraws this node as a provider for one 32-byte content ID.
+    ///
+    /// The local provider record is removed immediately. Remote peers may keep
+    /// a cached provider observation until it expires, so withdrawal is not a
+    /// global deletion promise.
+    pub fn stop_providing(&self, content_id: &[u8]) -> Result<(), NetError> {
+        let key = dht_key(content_id)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::DhtStopProviding { key, respond })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
     /// Finds providers for one 32-byte content ID.
     pub fn find_providers(&self, content_id: &[u8]) -> Result<Vec<DiscoveredPeer>, NetError> {
         let key = dht_key(content_id)?;

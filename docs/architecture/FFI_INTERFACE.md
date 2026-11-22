@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-FFI-001 |
-| Version | 1.6.0 (ABI 1) |
-| Status | Implemented through Stage 13; Android runtime verification deferred |
-| Date | 2026-11-21 |
+| Version | 1.7.0 (ABI 1) |
+| Status | Implemented through Stage 14; Android runtime verification deferred |
+| Date | 2026-11-22 |
 | Header | [nexus_core.h](nexus_core.h) |
 | Related | [ADR-0003](../decisions/ADR-0003-ffi-c-abi-jni-jna.md), [Architecture](../ARCHITECTURE.md) |
 
@@ -222,11 +222,11 @@ All production methods are available on both Android and Windows. Method IDs are
 | 0x0402 | `store.set_quota` | S | `quota_bytes` | Effective quota and whether current usage exceeds it. |
 | 0x0403 | `store.cleanup_preview` | S | none | Reclaimable bytes and items requiring confirmation. |
 | 0x0404 | `store.cleanup` | A | `selection` | `store.cleanup_completed` with reclaimed bytes. |
-| 0x0501 | `publication.create` | A | `content_id`, metadata fields, optional parent | `publication.published` with publication ID and record. |
-| 0x0502 | `publication.unpublish` | A | `publication_id`, `confirmation` | `publication.unpublished` with tombstone ID. |
-| 0x0503 | `publication.get` | S | `publication_id` | Local or cached verified record and tombstone state. |
-| 0x0504 | `publication.list_local` | S | `cursor`, `limit` | Local publications with revision and serving state. |
-| 0x0505 | `publication.lookup` | A | `publication_id` | `publication.lookup_completed` with verified record and freshness. |
+| 0x0501 | `publication.create` | A | `content_id`, `display_filename`, `description?`, `category?`, `tags?`, `parent_content_id?`, `parent_publication_id?` | `publication.published` with publication ID, announcement and provider outcome, serving, availability, and preview. |
+| 0x0502 | `publication.unpublish` | A | `publication_id`, `confirmation` | `publication.unpublished` with tombstone ID, withdrawal outcome, limits, and retained local bytes. |
+| 0x0503 | `publication.get` | S | `publication_id` | Local or cached record, tombstone, signature, serving, availability, and preview. |
+| 0x0504 | `publication.list_local` | S | `cursor?`, `limit?` | Local publications with metadata, revision, serving, announced, availability, and preview. |
+| 0x0505 | `publication.lookup` | A | `publication_id` | `publication.lookup_completed` with verified record, source, providers, availability, conflict state, and preview. |
 | 0x0601 | `network.status` | S | none | Network state, local peer ID, transports, listen/observed/confirmed addresses, peer and connection counts, counters, last error. |
 | 0x0602 | `network.peers` | S | `cursor`, `limit` | Observed peers with state, direction, transport, address, last seen, RTT, protocols, agent version. |
 | 0x0603 | `network.bootstrap_list` | S | none | Configured bootstrap and manual peers. |
@@ -263,7 +263,7 @@ All production methods are available on both Android and Windows. Method IDs are
 
 Method IDs are grouped by domain. A future minor ABI may add methods in unused IDs; a released ID is never renumbered. Unknown IDs return `NEXUS_STATUS_UNSUPPORTED` with a domain error.
 
-Stage 13 implements twenty-eight callable methods: `system.info`, `system.health`, `system.snapshot`, the three `profile.*` methods above, `store.usage`, the thirteen `network.*` methods above, the six `download.*` methods, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
+Stage 14 implements thirty-three callable methods: `system.info`, `system.health`, `system.snapshot`, the three `profile.*` methods above, the five `publication.*` methods above, `store.usage`, the thirteen `network.*` methods above, the six `download.*` methods, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
 
 ### 6.1 Network method semantics
 
@@ -320,6 +320,23 @@ Stage 13 implements twenty-eight callable methods: `system.info`, `system.health
 - Usernames are labels, not unique reservations. `username_collisions` lists every other known profile whose label matches case-insensitively (Unicode-aware lowercasing), each with its distinct `identity_id`. `username_is_label` is always true so the UI never presents a label as a global handle.
 - `profile.publish` and `profile.lookup` are cancellable. Cancellation emits `profile.publish_cancelled` or `profile.lookup_cancelled`; a verification or storage failure during lookup emits `profile.lookup_failed`.
 - Terminal events are `profile.published`, `profile.draft_saved`, `profile.lookup_completed`, `profile.lookup_failed`, `profile.publish_cancelled`, and `profile.lookup_cancelled`.
+
+### 6.5 Publication method semantics
+
+- Publishing is explicit. The host first streams bytes through the import API and passes the resulting verified `content_id` to `publication.create`; the method never accepts a local path. The signed record binds the uploader identity, content ID, size, manifest root, display filename, description, category, tags, revision, and timestamp.
+- `publication.create` accepts `display_filename` or the legacy `filename`, an optional description of at most 4,096 UTF-8 bytes, one of `documents`, `images`, `audio`, `video`, `software`, `data`, `archives`, or `other`, and at most 10 tags of 1-32 UTF-8 bytes each. Tags are deduplicated in order. The immediate response is `{op_id, accepted: true, publication_id, content_id, revision: 1}`.
+- The exact signed record is stored before network work starts. The publication row becomes local and serving immediately, and the pending `local_import` reference is adopted into a `publication_original` reference. A worker announces the record and starts providing the content ID. If networking is unavailable, the record and serving state are kept and `publication.published` reports `announced: false` with an error.
+- `publication.published` carries `publication_id`, `content_id`, `revision`, `record_verified`, `announced`, `provider_announced`, `serving`, `availability`, `preview`, and an optional `error` map.
+- `publication.get` is synchronous and returns `found`, `publication`, `tombstone`, `serving`, `availability`, `signature_verified`, and `preview`. The record map includes `identity_id`, `content_id`, `revision`, `title`, `description`, `filename`, `category`, `size_bytes`, `tags`, `published_at_ms`, `updated_at_ms`, `tombstoned`, `local`, `serving`, `announced`, `availability`, `signature_verified`, `preview`, and `tombstone`.
+- `publication.list_local` lists rows owned by the current identity, sorted by publication ID. `limit` is 1-100 and defaults to 50; `cursor` is the last publication ID of the previous page. The result is `{identity_id, publications, next_cursor, total}`.
+- `publication.lookup` verifies the record signature, the requested publication ID, and the derived DHT key before caching. It also looks up the signed tombstone key; a valid tombstone is cached and forces `tombstoned: true` and `availability: "record_only"`. A malformed or mismatched tombstone fails the lookup instead of being cached.
+- A local row is returned with `source: "local"` and is not replaced by a remote record. A different record already cached under the same publication ID is a `conflict`: the accepted row is retained and the event reports `conflict: true`.
+- Provider lookup returns bounded `{peer_id, addresses}` hints. Availability values are `local`, `available_now`, `seen_recently`, `no_known_source`, and `record_only`. A provider hint does not prove the peer will answer; availability is a last-observed hint, not a guarantee.
+- `publication.unpublish` requires `confirmation: true` and a local publication owned by the current identity. It signs a tombstone bound to the identity, publication ID, content ID, and revision, verifies it against the publication, stores it, marks the row tombstoned and not serving, announces the tombstone, and withdraws the provider unless another local serving reason remains. Local bytes and the local original reference are retained. A non-owner, missing confirmation, or already-tombstoned row returns `conflict`.
+- `publication.unpublished` carries `publication_id`, `tombstone_id` (`"{publication_id}:{revision}"`), `revision`, `record_verified`, `tombstone_announced`, `provider_withdrawn`, `serving`, `local_bytes_retained`, `record_removed`, `availability`, `limits`, and an optional `error` map. `record_removed` is always false.
+- A serving node answers file metadata and chunk requests only when the content is verified and a local serving publication, active replica, or retained completed download exists. A cached remote publication never makes this device a source.
+- Previews are metadata only: `{kind, supported, auto_execute: false, reason}`. `kind` is `text`, `image`, or `none`; `reason` is `plain_text`, `raster_image`, or `unsupported_format`. Only plain-text and raster-image extensions are eligible. SVG, HTML, PDF, archives, binaries, and executable script extensions are never previewed, and no path executes a file automatically.
+- `publication.create`, `publication.unpublish`, and `publication.lookup` are cancellable. Cancellation emits `publication.publish_cancelled`, `publication.unpublish_cancelled`, or `publication.lookup_cancelled`. A verification or storage failure during lookup emits `publication.lookup_failed`.
 
 ## 7. Domain error codes
 
@@ -416,7 +433,7 @@ NexusStatus nexus_core_export_close(
 
 Events use the envelope in section 5.4.
 
-Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. Stage 13 adds the `profile.*` signed-profile family. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
+Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. Stage 13 adds the `profile.*` signed-profile family. Stage 14 adds the `publication.*` publishing family. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
 
 | Event | Meaning | Data |
 |---|---|---|
@@ -445,8 +462,14 @@ Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stop
 | `profile.lookup_failed` | Returned record failed verification or storage. | `identity_id`, `error` |
 | `profile.publish_cancelled` | Publish cancelled before completion. | `identity_id`, `revision` |
 | `profile.lookup_cancelled` | Lookup cancelled before completion. | `identity_id` |
-| `publication.published` | Publication stored and announcement attempted. | `publication_id`, `content_id`, `announcement` |
-| `publication.unpublished` | Tombstone stored and announced. | `publication_id`, `tombstone_id` |
+| `publication.published` | Publication stored and announcement attempted. | `publication_id`, `content_id`, `revision`, `record_verified`, `announced`, `provider_announced`, `serving`, `availability`, `preview`, `error?` |
+| `publication.publish_failed` | The stored publication could not be read or its ID was malformed. | `publication_id`, `error` |
+| `publication.unpublished` | Tombstone stored and announced; local bytes retained. | `publication_id`, `tombstone_id`, `revision`, `record_verified`, `tombstone_announced`, `provider_withdrawn`, `serving`, `local_bytes_retained`, `record_removed`, `availability`, `limits`, `error?` |
+| `publication.publish_cancelled` | Publish cancelled before completion. | `publication_id`, `serving` |
+| `publication.unpublish_cancelled` | Unpublish cancelled before completion. | `publication_id`, `tombstone_id`, `local_bytes_retained` |
+| `publication.lookup_completed` | Lookup finished from the network or a cache. | `publication_id`, `found`, `source`, `availability`, `stale`, `conflict`, `record`, `providers`, `checked_at_ms`, `error?` |
+| `publication.lookup_failed` | Returned record or tombstone failed verification or storage. | `publication_id`, `error` |
+| `publication.lookup_cancelled` | Lookup cancelled before completion. | `publication_id` |
 | `download.started` | Download accepted and metadata verified. | `download_id`, `content_id`, `total_bytes`, `source_peer`, `publication_id?`, `display_name` |
 | `download.progress` | Verified progress. | `download_id`, `verified_bytes`, `total_bytes`, `rate_bps`, `source_peer` |
 | `download.resumed` | Transfer resumed from a verified prefix. | `download_id`, `content_id`, `verified_bytes`, `total_bytes` |
@@ -571,9 +594,12 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 | 12 | A multi-megabyte file transfers between two engines and re-exports identical bytes with bounded memory. | Passed at 2.4 MiB in `nexus-core/tests/stage12.rs`; a 4 GiB transfer is not exercised at that size. |
 | 13 | Two identities publish signed profiles through the DHT, verify and cache each other's records, and expose case-insensitive username-label collisions. | Passed in `nexus-core/tests/stage13.rs`. |
 | 13 | A newer revision supersedes a cached one, and an unreachable publisher leaves a stale-labeled cache instead of a false success. | Passed in `nexus-core/tests/stage13.rs` and the `nexus-core` profile worker tests. |
+| 14 | A publisher imports, signs, announces, serves, and withdraws a publication; a second engine discovers and verifies the record, downloads the content, and observes the signed tombstone. | Passed in `nexus-core/tests/stage14.rs`. |
+| 14 | The serving gate refuses unowned or tombstoned content, and unpublish retains local bytes while reporting the limits. | Passed in `nexus-store/tests/stage14.rs` and the `nexus-core` publication worker tests. |
 | 19 | Fuzzing covers malformed CBOR, oversized buffers, invalid handles, and cancellation races. | Not yet implemented. |
 
 The detailed evidence, commands, and test counts are in
 [STAGE_08.md](../progress/STAGE_08.md), [STAGE_09.md](../progress/STAGE_09.md),
 [STAGE_10.md](../progress/STAGE_10.md), [STAGE_11.md](../progress/STAGE_11.md),
-[STAGE_12.md](../progress/STAGE_12.md), and [STAGE_13.md](../progress/STAGE_13.md).
+[STAGE_12.md](../progress/STAGE_12.md), [STAGE_13.md](../progress/STAGE_13.md), and
+[STAGE_14.md](../progress/STAGE_14.md).

@@ -42,7 +42,7 @@ public object DemoCatalog {
             DemoPublication(
                 recordId = "nx-demo-coastal-field-notes",
                 title = "Coastal Field Notes",
-                fileName = "Coastal Field Notes.pdf",
+                fileName = "Coastal Field Notes.txt",
                 description = "Sample research notes from a coastal survey. Demo content only.",
                 category = DemoCategory.DOCUMENTS,
                 tags = listOf("field notes", "coast", "research"),
@@ -69,6 +69,13 @@ public object DemoCatalog {
                 unpublished = false,
                 recordVersion = 1,
                 contentId = "21eb3e82caf8d600b77ac313831e1b9e0d3b52b1cbb4c3c9f8e630d2a7388ac7",
+                serving = true,
+                preview =
+                    DemoPreview(
+                        kind = DemoPreviewKind.TEXT,
+                        supported = true,
+                        reason = DemoPreviewReason.PLAIN_TEXT,
+                    ),
             ),
             DemoPublication(
                 recordId = "nx-demo-community-garden-plan",
@@ -100,6 +107,13 @@ public object DemoCatalog {
                 unpublished = false,
                 recordVersion = 1,
                 contentId = "5c949e7d6401d358ad83b86724b9e7e2eb2535e0565fa0b23e74ddfcf96694ff",
+                serving = false,
+                preview =
+                    DemoPreview(
+                        kind = DemoPreviewKind.NONE,
+                        supported = false,
+                        reason = DemoPreviewReason.UNSUPPORTED_FORMAT,
+                    ),
             ),
             DemoPublication(
                 recordId = "nx-demo-protocol-overview",
@@ -119,6 +133,13 @@ public object DemoCatalog {
                 unpublished = false,
                 recordVersion = 2,
                 contentId = "876f9dbbabbaf39949bb6d471fa793d098cd72d46028cd29c8569bdf7a455430",
+                serving = false,
+                preview =
+                    DemoPreview(
+                        kind = DemoPreviewKind.TEXT,
+                        supported = true,
+                        reason = DemoPreviewReason.PLAIN_TEXT,
+                    ),
             ),
             DemoPublication(
                 recordId = "nx-demo-dawn-chorus",
@@ -155,6 +176,13 @@ public object DemoCatalog {
                 unpublished = false,
                 recordVersion = 1,
                 contentId = "9903861d4e6aeaa3beb51061adfc683297c041ac90047f0ff5ae5f236211bf27",
+                serving = false,
+                preview =
+                    DemoPreview(
+                        kind = DemoPreviewKind.NONE,
+                        supported = false,
+                        reason = DemoPreviewReason.UNSUPPORTED_FORMAT,
+                    ),
             ),
             DemoPublication(
                 recordId = "nx-demo-open-type-specimen",
@@ -174,6 +202,13 @@ public object DemoCatalog {
                 unpublished = false,
                 recordVersion = 1,
                 contentId = "7a1e3d80de38223183f5b447435f0710159035a197573e97dae1dfc14d90cdfc",
+                serving = false,
+                preview =
+                    DemoPreview(
+                        kind = DemoPreviewKind.NONE,
+                        supported = false,
+                        reason = DemoPreviewReason.UNSUPPORTED_FORMAT,
+                    ),
             ),
             DemoPublication(
                 recordId = "nx-demo-mutual-aid-map",
@@ -200,6 +235,13 @@ public object DemoCatalog {
                 unpublished = true,
                 recordVersion = 2,
                 contentId = "ddb50b23b2e56e538885a53a9b7097506fd589ab10c6ae954fd5204a6243393f",
+                serving = false,
+                preview =
+                    DemoPreview(
+                        kind = DemoPreviewKind.NONE,
+                        supported = false,
+                        reason = DemoPreviewReason.UNSUPPORTED_FORMAT,
+                    ),
             ),
             DemoPublication(
                 recordId = "nx-demo-repair-cafe",
@@ -219,6 +261,13 @@ public object DemoCatalog {
                 unpublished = false,
                 recordVersion = 1,
                 contentId = "7f2569de739dcf179ae45d2e7647db974f5916429f79aa740f35f121f0b9d4fa",
+                serving = false,
+                preview =
+                    DemoPreview(
+                        kind = DemoPreviewKind.NONE,
+                        supported = false,
+                        reason = DemoPreviewReason.UNSUPPORTED_FORMAT,
+                    ),
             ),
         )
 
@@ -267,7 +316,7 @@ public object DemoCatalog {
             DemoDownload(
                 id = "download-coastal-notes",
                 title = "Coastal Field Notes",
-                fileName = "Coastal Field Notes.pdf",
+                fileName = "Coastal Field Notes.txt",
                 sizeLabel = "2.4 MB",
                 transferredLabel = "2.4 MB of 2.4 MB",
                 progress = 1f,

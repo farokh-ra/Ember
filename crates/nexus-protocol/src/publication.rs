@@ -57,6 +57,37 @@ impl Category {
         self as u64
     }
 
+    /// Returns the stable lowercase storage and display name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Documents => "documents",
+            Self::Images => "images",
+            Self::Audio => "audio",
+            Self::Video => "video",
+            Self::Software => "software",
+            Self::Data => "data",
+            Self::Archives => "archives",
+            Self::Other => "other",
+        }
+    }
+
+    /// Parses a stable lowercase category name.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "documents" => Some(Self::Documents),
+            "images" => Some(Self::Images),
+            "audio" => Some(Self::Audio),
+            "video" => Some(Self::Video),
+            "software" => Some(Self::Software),
+            "data" => Some(Self::Data),
+            "archives" => Some(Self::Archives),
+            "other" => Some(Self::Other),
+            _ => None,
+        }
+    }
+
     /// Maps a wire code to the closed v1 enum.
     #[must_use]
     pub const fn from_code(code: u64) -> Option<Self> {

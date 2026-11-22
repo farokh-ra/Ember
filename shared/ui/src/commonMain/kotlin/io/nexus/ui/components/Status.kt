@@ -148,6 +148,21 @@ public fun UnpublishedBadge(modifier: Modifier = Modifier) {
     )
 }
 
+/** Whether this device currently serves verified bytes for the publication. */
+@Composable
+public fun ServingBadge(
+    serving: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val strings = LocalNexusStrings.current
+    StatusBadge(
+        text = if (serving) strings.fileServingNow else strings.fileNotServing,
+        tone = if (serving) StatusTone.AVAILABLE else StatusTone.NEUTRAL,
+        icon = if (serving) NexusIcons.Hosted else NexusIcons.Clock,
+        modifier = modifier,
+    )
+}
+
 @Composable
 public fun SourceStatusBadge(
     online: Boolean,

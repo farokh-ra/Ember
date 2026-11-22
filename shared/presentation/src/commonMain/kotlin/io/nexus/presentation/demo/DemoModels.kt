@@ -85,6 +85,31 @@ public data class DemoSource(
     public val lastSeenLabel: String,
 )
 
+/** How the core may show a safe preview for a publication. */
+public enum class DemoPreviewKind {
+    TEXT,
+    IMAGE,
+    NONE,
+}
+
+/** Why a preview is or is not offered. Mirrors the core's preview contract. */
+public enum class DemoPreviewReason {
+    PLAIN_TEXT,
+    RASTER_IMAGE,
+    UNSUPPORTED_FORMAT,
+}
+
+/**
+ * Metadata-only preview state. Previews never execute a file, and unsupported
+ * formats are opened only after an explicit download and verification.
+ */
+public data class DemoPreview(
+    public val kind: DemoPreviewKind,
+    public val supported: Boolean,
+    public val reason: DemoPreviewReason,
+    public val autoExecute: Boolean = false,
+)
+
 /** One sample publication record. */
 public data class DemoPublication(
     public val recordId: String,
@@ -104,6 +129,13 @@ public data class DemoPublication(
     public val unpublished: Boolean,
     public val recordVersion: Int,
     public val contentId: String,
+    public val serving: Boolean = false,
+    public val preview: DemoPreview =
+        DemoPreview(
+            kind = DemoPreviewKind.NONE,
+            supported = false,
+            reason = DemoPreviewReason.UNSUPPORTED_FORMAT,
+        ),
     public val isDemo: Boolean = true,
 )
 

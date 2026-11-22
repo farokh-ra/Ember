@@ -56,9 +56,11 @@ impl CoreFileProvider {
     }
 
     fn serveable(&self, content_id: &str, expected_size: u64) -> bool {
-        self.store
-            .content(content_id)
-            .is_ok_and(|record| record.state == ContentState::Verified && record.size_bytes == expected_size)
+        self.store.content(content_id).is_ok_and(|record| {
+            record.state == ContentState::Verified
+                && record.size_bytes == expected_size
+                && self.store.content_serveable(content_id).unwrap_or(false)
+        })
     }
 
     fn metadata_for_publication(&self, publication_id: &str) -> Option<FileMetadata> {

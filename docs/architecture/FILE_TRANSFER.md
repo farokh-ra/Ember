@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-TRANSFER-001 |
-| Version | 1.0.0 |
-| Status | Implemented in Stage 12; Android runtime verification deferred |
-| Date | 2026-11-20 |
+| Version | 1.1.0 |
+| Status | Implemented in Stage 12; publication serving gate added in Stage 14; Android runtime verification deferred |
+| Date | 2026-11-22 |
 | Related | [ADR-0005](../decisions/ADR-0005-libp2p-transports-discovery.md), [ADR-0007](../decisions/ADR-0007-protocol-boundaries-versioning.md), [FFI_INTERFACE.md](FFI_INTERFACE.md), [DHT_DESIGN.md](DHT_DESIGN.md) |
 
 ## 1. Purpose
@@ -137,6 +137,26 @@ uses the stored content ID and manifest entry.
 
 The serving node holds no transfer session. Each request is stateless, so a
 disconnect or restart cannot leave a half-served file in a special state.
+
+### 4.1 Publication serving gate
+
+Stage 14 adds an explicit sharing decision on top of content verification. The
+provider answers only when the content row is `verified` and at least one local
+reason to share it exists:
+
+- a local, non-tombstoned publication with `serving = 1`, or
+- an active replica, or
+- a retained completed download.
+
+A cached remote publication is never a reason to serve. Unpublishing marks the
+publication `tombstoned = 1` and `serving = 0`, so the next metadata or chunk
+request is refused even though the local bytes remain. The gate is read from
+stored state per request; it does not rely on an in-memory flag or a restart.
+
+Publishing also announces a provider record for the content ID, and unpublishing
+withdraws it unless another local reason to serve remains. A provider record is a
+hint: the downloader still verifies the manifest, the signed publication when
+present, every chunk, and the final content ID.
 
 ## 5. Download manager
 
@@ -319,9 +339,16 @@ A completed file becomes a normal verified content record with a
   dial peers itself.
 - Resume requires the manifest to remain stored or re-fetchable. If the
   manifest is lost and every source is offline, the partial cannot be resumed.
-- The content is served only while the source is online and the content is
-  verified. There is no separate seeding protocol, incentive, or availability
-  guarantee.
+- The content is served only while the source is online, the content is
+  verified, and the source still has a local reason to share it. Unpublishing
+  stops local serving but cannot delete copies other peers already hold. There
+  is no separate seeding protocol, incentive, or availability guarantee.
+- A publication record does not prove availability. The DHT record and provider
+  hint can outlive a publisher that has gone offline, so the UI reports
+  signature, serving, and availability separately.
+- Previews are metadata only and limited to plain text and raster images. SVG,
+  HTML, PDF, archives, binaries, and executable script extensions are not
+  previewed, and a downloaded file is never opened automatically.
 - Transfers are bounded by the 4 GiB file cap and the 1 MiB chunk model from
   Stage 07.
 - Android runtime transfer behaviour is not exercised locally. The Android
@@ -342,5 +369,11 @@ A completed file becomes a normal verified content record with a
   `crates/nexus-core/src/downloads.rs` unit tests.
 - Two real engines exchanging a 2.4 MiB file end to end, then re-exporting the
   exact bytes: `crates/nexus-core/tests/stage12.rs`.
+- A publisher importing, signing, announcing, serving, and withdrawing a file,
+  and a second engine discovering the record, downloading the bytes, and
+  observing the tombstone: `crates/nexus-core/tests/stage14.rs`.
+- Serving-gate, remote-cache, tombstone-retention, and manifest persistence
+  tests: `crates/nexus-store/tests/stage14.rs`.
 
-See [STAGE_12.md](../progress/STAGE_12.md) for commands and totals.
+See [STAGE_12.md](../progress/STAGE_12.md) and
+[STAGE_14.md](../progress/STAGE_14.md) for commands and totals.
