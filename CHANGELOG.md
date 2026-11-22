@@ -320,6 +320,8 @@ All notable changes to Ember are recorded here. The format follows
 - The file provider now applies the publication serving gate, so imported content
   is not shared until a local publication, replica, or retained download
   justifies it.
+- The committed `Cargo.lock` now resolves `url` 2.5.9 and `form_urlencoded`
+  1.2.3, fixing RUSTSEC-2026-0592. The package count remains 411.
 
 ### Fixed
 
@@ -397,6 +399,8 @@ All notable changes to Ember are recorded here. The format follows
   sanitized before storage; request data cannot choose a path.
 - Download IDs are limited to 128 ASCII alphanumeric, `-`, or `_` bytes, and
   removal requires explicit confirmation.
+- The transitive `url` crate was updated from 2.5.8 to 2.5.9 for
+  RUSTSEC-2026-0592, a stack overflow in `Url::origin()` on nested `blob:` URLs.
 
 ### Known limitations
 

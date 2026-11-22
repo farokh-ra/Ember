@@ -97,6 +97,11 @@ Documentation:
 - `docs/HANDOFF.md`
 - `README.md`, `CHANGELOG.md`
 
+Dependency lock:
+
+- `Cargo.lock` (`url` 2.5.8 -> 2.5.9, `form_urlencoded` 1.2.2 -> 1.2.3, for
+  RUSTSEC-2026-0592)
+
 ## Commands and results
 
 ### Rust tests
@@ -178,11 +183,15 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 - Formatting and Clippy with warnings denied: PASS.
-- `Cargo.lock` remains at 411 packages. Stage 14 adds no dependency.
+- Stage 14 adds no direct dependency; `Cargo.lock` remains at 411 packages.
+- The first CI run failed only `cargo deny check` with RUSTSEC-2026-0592, a stack
+  overflow in `Url::origin()` on nested `blob:` URLs in the transitive `url`
+  crate 2.5.8. The lockfile was updated to `url` 2.5.9 and
+  `form_urlencoded` 1.2.3, and the workspace suite was re-run after the update.
 - The native artifact build was not re-run because the ABI and exported surface
   did not change. The six C ABI tests still pass in the workspace suite.
-- `cargo deny check` and `cargo audit` were not re-run for Stage 14; no
-  dependency changed.
+- `cargo deny check` and `cargo audit` run in CI. The advisory that failed the
+  first Stage 14 run is fixed by the lockfile update above.
 
 ## Errors and failed attempts
 

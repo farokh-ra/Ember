@@ -351,7 +351,11 @@ Stage 14 tests, 1 migration test, and 1 core Stage 14 test.
 
 - `cargo fmt --all -- --check` passes.
 - `cargo clippy --workspace --all-targets -- -D warnings` passes.
-- No dependency was added; `Cargo.lock` remains at 411 packages.
+- Stage 14 adds no direct dependency; `Cargo.lock` remains at 411 packages.
+- The first CI run failed only `cargo deny check` with RUSTSEC-2026-0592, a stack
+  overflow in `Url::origin()` on nested `blob:` URLs in the transitive `url`
+  crate 2.5.8. The lockfile was updated to `url` 2.5.9 and
+  `form_urlencoded` 1.2.3; no package was added or removed.
 - The FFI interface document is at version 1.7.0 with thirty-three callable
   methods.
 
