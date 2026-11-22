@@ -1,12 +1,13 @@
 # DHT Design
 
-**Status:** Implemented in Stage 10; signed profile publication added in Stage 13
+**Status:** Implemented in Stage 10; signed profile publication added in Stage 13; signed file publication added in Stage 14
 **Scope:** Kademlia peer routing, signed record publication and lookup, provider records, bootstrap entry points, and bounded discovery.
 
-This document records the Stage 10 design and the Stage 13 profile extension.
-It is implemented by `nexus-protocol::dht`, `nexus-net`, the `network.discover`
-core method, and the `profile.*` core methods. It does not introduce a new
-authority, account service, or mutable global namespace.
+This document records the Stage 10 design and the Stage 13 and Stage 14 signed
+record extensions. It is implemented by `nexus-protocol::dht`, `nexus-net`, the
+`network.discover` core method, the `profile.*` core methods, and the
+`publication.*` core methods. It does not introduce a new authority, account
+service, or mutable global namespace.
 
 ## 1. Roles and protocol
 
@@ -96,6 +97,37 @@ Stage 13 publishes profiles through the same signed-record path.
   case-insensitively and returns each distinct identity ID. Two identities may
   publish the same label without either record being invalid.
 
+### 3.2 Publication and tombstone records
+
+Stage 14 publishes file metadata and withdrawals through the same signed-record
+path.
+
+- The publication key is `sha256("NEXUS-DHT-PUB-v1" + publication_id)` and the
+  value is the exact signed publication envelope. The publication ID is the
+  SHA-256 of that signed record.
+- The tombstone key is `sha256("NEXUS-DHT-TOMB-v1" + publication_id)` and the
+  value is the exact signed tombstone envelope. The tombstone binds the owner
+  identity, publication ID, content ID, and revision.
+- A publication revision starts at 1. Stage 14 creates revision 1 only and
+  treats the signed bytes as immutable; editing and revision chains are later
+  work.
+- The core stores the exact signed record locally before announcing it. It also
+  announces a content provider record so a lookup can find the publishing peer
+  by content ID. Provider identity is authoritative; addresses remain hints.
+- `publication.lookup` verifies the record signature, the requested publication
+  ID, and the derived key. It then looks up the tombstone key and verifies the
+  tombstone against the publication before caching either record. A malformed
+  or mismatched tombstone fails the lookup instead of being cached.
+- A verified tombstone forces `availability = record_only`. A provider hit
+  yields `available_now`; a recent earlier hit without a current provider yields
+  `seen_recently`; a miss with no source yields `no_known_source`.
+- `publication.unpublish` announces the tombstone and withdraws the provider
+  record unless another local publication, an active replica, or a retained
+  download still justifies serving the same content.
+- DHT records have a 24 h TTL. Stage 14 announces on publish and unpublish but
+  does not run a periodic re-announcement worker, so long-term discoverability
+  depends on the hosting and republication work in later stages.
+
 ## 4. Routing and lookups
 
 - `network.discover` runs `GetClosestPeers` for an optional 32-byte target.
@@ -183,15 +215,17 @@ probabilistic.
   the user identity behind the device peer key.
 - Status counters expose counts and stable error codes, not raw addresses of
   unrelated peers or key material.
-- The core does not expose raw DHT publish/lookup methods. `profile.publish`
-  and `profile.lookup` publish and retrieve signed profile envelopes only;
-  arbitrary DHT keys and values remain network-layer APIs.
+- The core does not expose raw DHT publish/lookup methods. `profile.publish`,
+  `profile.lookup`, `publication.create`, `publication.unpublish`, and
+  `publication.lookup` publish and retrieve signed envelopes only; arbitrary DHT
+  keys and values remain network-layer APIs.
 
 ## 8. Deferred
 
 - Durable DHT caching and record persistence across restarts.
+- Periodic republication of local records before their 24 h TTL expires.
 - Provider reputation, availability scoring, and multi-source download policy
-  (Stage 12 and later).
+  (Stage 15 and later).
 - Index-provider records (Stage 16).
 - Relay, hole punching, and NAT traversal (Stage 11).
 - A public bootstrap list distribution service. Stage 10 documents manual,
@@ -219,6 +253,17 @@ Stage 13 adds:
 - `nexus-core/tests/stage13.rs`, where two real engines publish and retrieve
   signed profiles through loopback DHT servers, observe a newer revision, and
   serve a stale-labeled cache after both servers stop.
+
+Stage 14 adds:
+
+- `nexus-store` tests for publication metadata and tags, exact remote caching,
+  cache conflicts, the serving gate, tombstone state, and manifest persistence.
+- `nexus-core` publication worker tests for record and provider announcement,
+  deferred publication, tombstone announcement and provider withdrawal, verified
+  caching, and publication ID mismatch rejection.
+- `nexus-core/tests/stage14.rs`, where a publisher imports, signs, announces,
+  serves, and withdraws a file while a second engine discovers the record,
+  verifies it, downloads the exact bytes, and observes the signed tombstone.
 
 All network tests bind loopback addresses and use ordinary peers. No test
 depends on a central account service or an external bootstrap operator.

@@ -135,7 +135,7 @@ fn local_import_verifies_exact_bytes_before_promotion() {
 fn checkpoint_flushes_and_schema_is_current() {
     let root = TempRoot::new("checkpoint");
     let store = store(&root);
-    assert_eq!(store.schema_version().expect("schema"), 6);
+    assert_eq!(store.schema_version().expect("schema"), 7);
     store.checkpoint().expect("checkpoint");
-    assert_eq!(store.schema_version().expect("schema after checkpoint"), 6);
+    assert_eq!(store.schema_version().expect("schema after checkpoint"), 7);
 }

@@ -91,6 +91,14 @@ fn publication_record(signed: &SignedPublication, content_id: &str, updated_at: 
         published_at: 1_700_000_000,
         updated_at,
         tombstoned: false,
+        category: body.category,
+        size_bytes: body.size,
+        tags: body.tags.clone(),
+        local: true,
+        serving: true,
+        announced: false,
+        availability: nexus_store::PublicationAvailability::Local,
+        last_checked_at: None,
     }
 }
 

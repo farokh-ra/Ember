@@ -227,6 +227,34 @@ All notable changes to Ember are recorded here. The format follows
   the demo Profile screen.
 - 14 new Stage 13 Rust tests, for 265 Rust tests total.
 - Stage 13 evidence record.
+- Explicit signed file publishing with descriptions, categories, tags, content
+  IDs, manifest roots, and size metadata.
+- DHT publication and provider announcement, lookup with signature, publication
+  ID, and derived-key verification, signed tombstone lookup, provider hints, and
+  availability reported separately from signature and serving.
+- A serving gate that shares verified bytes only for a local non-tombstoned
+  serving publication, an active replica, or a retained completed download.
+- Unpublish with explicit confirmation and ownership checks, a signed tombstone,
+  provider withdrawal, retained local bytes, and repeated limits that copies
+  held by other peers are not deleted.
+- A metadata-only preview contract for plain text and raster images with
+  `auto_execute` always false; SVG, HTML, PDF, archives, binaries, and executable
+  script extensions are never previewed.
+- Five new core methods: `publication.create` (0x0501),
+  `publication.unpublish` (0x0502), `publication.get` (0x0503),
+  `publication.list_local` (0x0504), and `publication.lookup` (0x0505).
+- Eight publication events: `publication.published`,
+  `publication.publish_failed`, `publication.unpublished`,
+  `publication.publish_cancelled`, `publication.unpublish_cancelled`,
+  `publication.lookup_completed`, `publication.lookup_failed`, and
+  `publication.lookup_cancelled`.
+- Schema version 7 with publication metadata, local/serving/announced state,
+  availability and last-check timestamps, a `publication_tags` table, and a
+  rebuild that allows verified remote records without local foreign keys.
+- Separate signature, serving, and availability states, safe-preview cards, and
+  unpublish limits in the demo Publish and File Details screens.
+- 16 new Stage 14 Rust tests, for 281 Rust tests total.
+- Stage 14 evidence record.
 
 ### Changed
 
@@ -282,6 +310,16 @@ All notable changes to Ember are recorded here. The format follows
 - The Windows developer environment sets `GRADLE_USER_HOME` to the gitignored
   `NeededToolsHere/gradle-home`, so Gradle and WiX downloads stay inside the
   repository.
+- The SQLite schema is now version 7; publications carry category, size, tags,
+  local/serving/announced state, availability, and last-check timestamps.
+- The protocol version is now `0.1.0-stage-14`; the ABI remains 1.
+- The FFI interface document is at version 1.7.0 with thirty-three callable
+  methods.
+- The identify protocol remains `/nexus/0.1.0-stage-12` because Stage 14 adds no
+  new network protocol or frame type.
+- The file provider now applies the publication serving gate, so imported content
+  is not shared until a local publication, replica, or retained download
+  justifies it.
 
 ### Fixed
 
@@ -367,7 +405,8 @@ All notable changes to Ember are recorded here. The format follows
   the product screens are not connected to them yet.
 - Networking, publishing, hosting, and search product flows are not implemented
   yet. The native boundary, lifecycle, events, streaming, and test methods exist;
-  networking and direct transfer are implemented at the core and network layers.
+  networking, direct transfer, profile publication, and file publication are
+  implemented at the core and network layers.
 - Direct transfer is implemented and tested on Windows loopback. The product
   screens remain mock content and are not connected to it.
 - Stage 12 uses one connected source at a time. It does not run parallel chunk
@@ -377,11 +416,21 @@ All notable changes to Ember are recorded here. The format follows
 - Resume requires the manifest to remain stored or re-fetchable. If the manifest
   is lost and every source is offline, the partial cannot be resumed.
 - Content is available only while a source is online and serving verified bytes.
-  There is no availability guarantee or remote-erasure mechanism.
+  There is no availability guarantee or remote-erasure mechanism. Unpublishing
+  stops local serving and announces a signed withdrawal, but cannot delete copies
+  other peers already hold.
 - The Kotlin Downloads screen shows demo speed, progress, and source-peer fields
   and is not connected to the core yet.
-- Profiles are published and verified on Windows loopback. The Kotlin Profile
-  screen remains demo data and is not connected to the core yet.
+- Profiles and publications are published and verified on Windows loopback. The
+  Kotlin Profile, Publish, and File Details screens remain demo data and are not
+  connected to the core yet.
+- Stage 14 creates publication revision 1 only. Editing a publication and
+  revision chains are deferred.
+- The DHT record TTL is 24 h. Stage 14 announces on publish and unpublish but
+  does not run a periodic re-announcement worker, so long-term discoverability
+  depends on later hosting and republication work.
+- Previews are metadata classification only. The core does not render text or
+  images, and the demo screens do not open files.
 - Usernames are labels, not unique accounts. There is no registry, reservation,
   or first-claim rule, and collision detection covers only profiles the local
   store has seen.
@@ -407,6 +456,8 @@ All notable changes to Ember are recorded here. The format follows
   configured, and persisted lists are operator or release decisions.
 - Android runtime DHT behavior is not exercised locally; the Android libraries
   cross-build with the same graph.
+- Android runtime publication and file-serving behavior is not exercised
+  locally; the Android libraries cross-build with the same publishing code.
 - Android runtime relay, DCUtR, and AutoNAT behavior is not exercised locally;
   the Android libraries cross-build with the same relay graph.
 - The Android lifecycle hook for Wi-Fi switches and sleep/wake is not bound yet;

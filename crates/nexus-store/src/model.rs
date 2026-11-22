@@ -1,5 +1,7 @@
 //! Storage records shared with later stages.
 
+use nexus_protocol::Category;
+
 /// The reason a content blob is retained.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ReferenceType {
@@ -294,6 +296,60 @@ pub enum ProfileCacheOutcome {
     Conflict,
 }
 
+/// How a publication's content can be reached right now.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublicationAvailability {
+    /// Verified bytes are present in this store and the record is serving.
+    Local,
+    /// At least one provider responded during the last availability check.
+    AvailableNow,
+    /// A provider was observed recently but none responded now.
+    SeenRecently,
+    /// The signed record is known, but no source is known right now.
+    NoKnownSource,
+    /// Only the signed record is stored; no content is available locally or
+    /// online.
+    RecordOnly,
+}
+
+impl PublicationAvailability {
+    /// SQLite and diagnostics representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::AvailableNow => "available_now",
+            Self::SeenRecently => "seen_recently",
+            Self::NoKnownSource => "no_known_source",
+            Self::RecordOnly => "record_only",
+        }
+    }
+
+    /// Parses a stored availability value.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "local" => Some(Self::Local),
+            "available_now" => Some(Self::AvailableNow),
+            "seen_recently" => Some(Self::SeenRecently),
+            "no_known_source" => Some(Self::NoKnownSource),
+            "record_only" => Some(Self::RecordOnly),
+            _ => None,
+        }
+    }
+}
+
+/// Result of caching a verified remote publication.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublicationCacheOutcome {
+    /// The incoming record was added to the cache.
+    Stored,
+    /// The incoming record matched the stored row byte for byte.
+    Unchanged,
+    /// The incoming record conflicts with the stored row.
+    Conflict,
+}
+
 /// A verified publication record.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PublicationRecord {
@@ -319,6 +375,23 @@ pub struct PublicationRecord {
     pub updated_at: u64,
     /// Whether a tombstone has been received or created.
     pub tombstoned: bool,
+    /// Closed protocol category.
+    pub category: Category,
+    /// Complete file size from the signed record.
+    pub size_bytes: u64,
+    /// Ordered signed tags.
+    pub tags: Vec<String>,
+    /// Whether this device published or imported the record.
+    pub local: bool,
+    /// Whether this device is currently willing to serve the content for this
+    /// publication.
+    pub serving: bool,
+    /// Whether the record was announced to the DHT.
+    pub announced: bool,
+    /// Last known content availability.
+    pub availability: PublicationAvailability,
+    /// Last availability check in Unix milliseconds.
+    pub last_checked_at: Option<u64>,
 }
 
 /// A signed tombstone record.

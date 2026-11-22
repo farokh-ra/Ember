@@ -96,6 +96,10 @@ pub(crate) enum Command {
         key: [u8; DHT_KEY_BYTES],
         respond: oneshot::Sender<Result<(), NetError>>,
     },
+    DhtStopProviding {
+        key: [u8; DHT_KEY_BYTES],
+        respond: oneshot::Sender<Result<(), NetError>>,
+    },
     DhtFindProviders {
         key: [u8; DHT_KEY_BYTES],
         respond: oneshot::Sender<Result<Vec<DiscoveredPeer>, NetError>>,
@@ -424,6 +428,7 @@ impl Driver {
             Command::DhtPublish { key, value, respond } => self.dht_publish(key, value, respond),
             Command::DhtLookup { key, respond } => self.dht_lookup(key, respond),
             Command::DhtStartProviding { key, respond } => self.dht_start_providing(key, respond),
+            Command::DhtStopProviding { key, respond } => self.dht_stop_providing(key, respond),
             Command::DhtFindProviders { key, respond } => self.dht_find_providers(key, respond),
             Command::BootstrapAdd { address, respond } => self.bootstrap_add(address, respond),
             Command::BootstrapRemove { address, respond } => self.bootstrap_remove(&address, respond),
@@ -942,6 +947,18 @@ impl Driver {
                 deadline: self.dht_deadline(),
             },
         );
+    }
+
+    fn dht_stop_providing(&mut self, key: [u8; DHT_KEY_BYTES], respond: oneshot::Sender<Result<(), NetError>>) {
+        if validate_provider_key(&key).is_err() {
+            let _ = respond.send(Err(NetError::InvalidKey));
+            return;
+        }
+        self.swarm
+            .behaviour_mut()
+            .kademlia
+            .stop_providing(&RecordKey::new(&key));
+        let _ = respond.send(Ok(()));
     }
 
     fn dht_find_providers(

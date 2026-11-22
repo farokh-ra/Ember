@@ -46,10 +46,15 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "signed profile cache and conflicts",
         sql: include_str!("../migrations/0006_profiles.sql"),
     },
+    Migration {
+        version: 7,
+        name: "explicit publication serving state",
+        sql: include_str!("../migrations/0007_publications.sql"),
+    },
 ];
 
 /// Newest schema version understood by this build.
-pub(crate) const LATEST_VERSION: i64 = 6;
+pub(crate) const LATEST_VERSION: i64 = 7;
 
 /// Runs all outstanding migrations on the writer connection.
 pub(crate) fn run(conn: &mut Connection) -> StoreResult<()> {
@@ -313,6 +318,94 @@ mod tests {
         assert_eq!(content, content_id);
         assert_eq!(revision, 2);
         assert_eq!(created, 5);
+    }
+
+    #[test]
+    fn upgrades_version_six_publications_with_explicit_serving_state() {
+        let mut conn = Connection::open_in_memory().expect("open memory database");
+        run_with(&mut conn, &MIGRATIONS[..6]).expect("run version six");
+
+        let content_id = "a".repeat(64);
+        conn.execute(
+            "INSERT INTO identity_refs (identity_id, public_key, key_file, label, created_at)
+             VALUES ('nx1v7identity', zeroblob(32), 'secrets/identity.enc', NULL, 1)",
+            [],
+        )
+        .expect("insert identity");
+        conn.execute(
+            "INSERT INTO contents (content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at)
+             VALUES (?1, 4321, 'verified', 'blobs/aa/aa/blob', 1, 1, 1)",
+            [&content_id],
+        )
+        .expect("insert content");
+        for (publication_id, tombstoned) in [("pub-live", 0_i64), ("pub-dead", 1_i64)] {
+            conn.execute(
+                "INSERT INTO publications
+                 (publication_id, identity_id, content_id, revision, record_bytes, title, description,
+                  filename, published_at, updated_at, tombstoned)
+                 VALUES (?1, 'nx1v7identity', ?2, 1, x'01', 'Title', NULL, 'file.bin', 10, 10, ?3)",
+                rusqlite::params![publication_id, &content_id, tombstoned],
+            )
+            .expect("insert publication");
+        }
+        conn.execute(
+            "INSERT INTO replicas
+             (replica_id, content_id, publication_id, state, last_verified_at, created_at, updated_at)
+             VALUES ('replica-1', ?1, 'pub-live', 'active', 2, 1, 2)",
+            [&content_id],
+        )
+        .expect("insert replica");
+
+        run_with(&mut conn, MIGRATIONS).expect("upgrade to latest schema");
+        assert_eq!(user_version(&conn), LATEST_VERSION);
+        assert!(table_exists(&conn, "publication_tags"));
+
+        let live: (String, i64, i64, i64, i64, String) = conn
+            .query_row(
+                "SELECT category, size_bytes, local, serving, announced, availability
+                 FROM publications WHERE publication_id = 'pub-live'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .expect("read live publication");
+        assert_eq!(live, ("other".to_owned(), 4321, 1, 1, 0, "local".to_owned()));
+
+        let dead: (i64, i64, i64, String) = conn
+            .query_row(
+                "SELECT local, serving, announced, availability
+                 FROM publications WHERE publication_id = 'pub-dead'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("read tombstoned publication");
+        assert_eq!(dead, (1, 0, 0, "record_only".to_owned()));
+
+        let replica: (String, String) = conn
+            .query_row(
+                "SELECT publication_id, state FROM replicas WHERE replica_id = 'replica-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read replica");
+        assert_eq!(replica, ("pub-live".to_owned(), "active".to_owned()));
+
+        // Publication attribution on a replica is no longer a foreign key.
+        conn.execute(
+            "INSERT INTO replicas
+             (replica_id, content_id, publication_id, state, last_verified_at, created_at, updated_at)
+             VALUES ('replica-2', ?1, 'pub-not-cached', 'active', NULL, 3, 3)",
+            [&content_id],
+        )
+        .expect("replica may reference a publication not cached locally");
     }
 
     #[test]

@@ -8,8 +8,9 @@ use std::time::Duration;
 
 use rusqlite::types::Type;
 use rusqlite::{OptionalExtension, Row, params};
+use sha2::{Digest, Sha256};
 
-use nexus_protocol::{ManifestV1, SignedPublication};
+use nexus_protocol::{CHUNK_SIZE_V1, Category, ChunkEntry, MAX_TAG_BYTES, MAX_TAGS, ManifestV1, SignedPublication};
 
 use crate::backup::{self, ExportReport, RestoreReport};
 use crate::db::Database;
@@ -18,7 +19,8 @@ use crate::managed_store::ManagedStore;
 use crate::model::{
     ContentRecord, ContentReference, ContentState, DownloadRecord, DownloadState, IdentityReference, ImportedContent,
     PeerObservation, ProfileCacheOutcome, ProfileConflict, ProfileFreshness, ProfileRecord, ProfileState,
-    PublicationRecord, ReferenceType, ReleaseOutcome, ReplicaRecord, ReplicaState, TombstoneRecord,
+    PublicationAvailability, PublicationCacheOutcome, PublicationRecord, ReferenceType, ReleaseOutcome, ReplicaRecord,
+    ReplicaState, TombstoneRecord,
 };
 use crate::paths::{safe_display_name, unique_export_path, validate_store_component};
 use crate::quota::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage};
@@ -27,6 +29,7 @@ use crate::util::{hex_lower, is_content_id, is_safe_id, now_ms, now_secs};
 const CONTENT_COLUMNS: &str = "content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at";
 const DOWNLOAD_COLUMNS: &str = "download_id, content_id, display_name, expected_size, verified_prefix, state, partial_file, created_at, updated_at, last_error, manifest_root, source_peer";
 const PROFILE_COLUMNS: &str = "identity_id, revision, record_bytes, display_name, username, bio, avatar_content_id, updated_at, updated_at_ms, state, published_at, last_checked_at, freshness";
+const PUBLICATION_COLUMNS: &str = "publication_id, identity_id, content_id, revision, record_bytes, title, description, filename, published_at, updated_at, tombstoned, category, size_bytes, local, serving, announced, availability, last_checked_at";
 
 /// Tunable storage limits.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1272,6 +1275,14 @@ impl Store {
         validate_entity_id(&record.publication_id, "publication ID")?;
         validate_entity_id(&record.identity_id, "identity ID")?;
         validate_content_id(&record.content_id)?;
+        if record.tags.len() > MAX_TAGS {
+            return Err(StoreError::InvalidRecord("publication has too many tags".to_owned()));
+        }
+        for tag in &record.tags {
+            if tag.is_empty() || tag.len() > MAX_TAG_BYTES {
+                return Err(StoreError::InvalidRecord("publication tag is malformed".to_owned()));
+            }
+        }
         let record = record.clone();
         let filename = safe_display_name(&record.filename);
         self.db.write(move |connection| {
@@ -1308,8 +1319,9 @@ impl Store {
             transaction.execute(
                 "INSERT INTO publications
                  (publication_id, identity_id, content_id, revision, record_bytes, title, description,
-                  filename, published_at, updated_at, tombstoned)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                  filename, published_at, updated_at, tombstoned, category, size_bytes, local, serving,
+                  announced, availability, last_checked_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
                 params![
                     record.publication_id,
                     record.identity_id,
@@ -1321,7 +1333,16 @@ impl Store {
                     filename,
                     record.published_at,
                     record.updated_at,
-                    if record.tombstoned { 1_i64 } else { 0_i64 }
+                    if record.tombstoned { 1_i64 } else { 0_i64 },
+                    record.category.as_str(),
+                    i64::try_from(record.size_bytes).unwrap_or(i64::MAX),
+                    if record.local { 1_i64 } else { 0_i64 },
+                    if record.serving { 1_i64 } else { 0_i64 },
+                    if record.announced { 1_i64 } else { 0_i64 },
+                    record.availability.as_str(),
+                    record
+                        .last_checked_at
+                        .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
                 ],
             )?;
             transaction.execute(
@@ -1330,21 +1351,98 @@ impl Store {
                    AND EXISTS (SELECT 1 FROM tombstones WHERE publication_id = ?1)",
                 [&record.publication_id],
             )?;
+            transaction.execute(
+                "DELETE FROM publication_tags WHERE publication_id = ?1",
+                [&record.publication_id],
+            )?;
+            for (position, tag) in record.tags.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO publication_tags (publication_id, tag, position)
+                     VALUES (?1, ?2, ?3)",
+                    params![record.publication_id, tag, i64::try_from(position).unwrap_or(i64::MAX)],
+                )?;
+            }
             transaction.commit()?;
             Ok(())
+        })
+    }
+
+    /// Caches a verified remote publication and reports whether it was new.
+    pub fn cache_remote_publication(&self, record: &PublicationRecord) -> StoreResult<PublicationCacheOutcome> {
+        let existed = self.publication_exists(&record.publication_id)?;
+        if existed {
+            let existing = self.publication(&record.publication_id)?;
+            if existing.record_bytes == record.record_bytes
+                && existing.identity_id == record.identity_id
+                && existing.content_id == record.content_id
+                && existing.revision == record.revision
+            {
+                return Ok(PublicationCacheOutcome::Unchanged);
+            }
+            return Ok(PublicationCacheOutcome::Conflict);
+        }
+        self.upsert_publication(record)?;
+        Ok(PublicationCacheOutcome::Stored)
+    }
+
+    /// Returns whether a publication row exists.
+    pub fn publication_exists(&self, publication_id: &str) -> StoreResult<bool> {
+        validate_entity_id(publication_id, "publication ID")?;
+        let publication_id = publication_id.to_owned();
+        self.db.read(move |connection| {
+            let count: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM publications WHERE publication_id = ?1",
+                [publication_id],
+                |row| row.get(0),
+            )?;
+            Ok(count > 0)
         })
     }
 
     /// Lists publication records.
     pub fn publications(&self) -> StoreResult<Vec<PublicationRecord>> {
         self.db.read(|connection| {
-            let mut statement = connection.prepare(
-                "SELECT publication_id, identity_id, content_id, revision, record_bytes, title,
-                        description, filename, published_at, updated_at, tombstoned
-                 FROM publications ORDER BY published_at DESC",
-            )?;
+            let mut statement = connection.prepare(&format!(
+                "SELECT {PUBLICATION_COLUMNS} FROM publications ORDER BY published_at DESC"
+            ))?;
             let rows = statement.query_map([], publication_from_row)?;
-            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+            let mut records = rows.collect::<Result<Vec<_>, _>>()?;
+            for record in &mut records {
+                record.tags = publication_tags(connection, &record.publication_id)?;
+            }
+            Ok(records)
+        })
+    }
+
+    /// Lists locally owned publications in stable publication-ID order.
+    pub fn local_publications(&self, identity_id: Option<&str>) -> StoreResult<Vec<PublicationRecord>> {
+        if let Some(identity_id) = identity_id {
+            validate_entity_id(identity_id, "identity ID")?;
+        }
+        let identity = identity_id.map(str::to_owned);
+        self.db.read(move |connection| {
+            let mut records = match identity {
+                Some(identity) => {
+                    let mut statement = connection.prepare(&format!(
+                        "SELECT {PUBLICATION_COLUMNS} FROM publications
+                         WHERE local = 1 AND identity_id = ?1 ORDER BY publication_id ASC"
+                    ))?;
+                    let rows = statement.query_map([identity], publication_from_row)?;
+                    rows.collect::<Result<Vec<_>, _>>()?
+                }
+                None => {
+                    let mut statement = connection.prepare(&format!(
+                        "SELECT {PUBLICATION_COLUMNS} FROM publications
+                         WHERE local = 1 ORDER BY publication_id ASC"
+                    ))?;
+                    let rows = statement.query_map([], publication_from_row)?;
+                    rows.collect::<Result<Vec<_>, _>>()?
+                }
+            };
+            for record in &mut records {
+                record.tags = publication_tags(connection, &record.publication_id)?;
+            }
+            Ok(records)
         })
     }
 
@@ -1455,19 +1553,195 @@ impl Store {
 
     /// Loads one stored publication record by its ID.
     pub fn publication(&self, publication_id: &str) -> StoreResult<PublicationRecord> {
-        validate_content_id(publication_id)?;
+        validate_entity_id(publication_id, "publication ID")?;
         let publication_id = publication_id.to_owned();
         self.db.read(move |connection| {
-            connection
+            let mut record = connection
                 .query_row(
-                    "SELECT publication_id, identity_id, content_id, revision, record_bytes, title,
-                            description, filename, published_at, updated_at, tombstoned
-                     FROM publications WHERE publication_id = ?1",
+                    &format!("SELECT {PUBLICATION_COLUMNS} FROM publications WHERE publication_id = ?1"),
                     [&publication_id],
                     publication_from_row,
                 )
                 .optional()?
-                .ok_or_else(|| StoreError::RecordNotFound(format!("unknown publication {publication_id}")))
+                .ok_or_else(|| StoreError::RecordNotFound(format!("unknown publication {publication_id}")))?;
+            record.tags = publication_tags(connection, &publication_id)?;
+            Ok(record)
+        })
+    }
+
+    /// Loads the tombstone for a publication, if one is stored.
+    pub fn tombstone(&self, publication_id: &str) -> StoreResult<Option<TombstoneRecord>> {
+        validate_entity_id(publication_id, "publication ID")?;
+        let publication_id = publication_id.to_owned();
+        self.db.read(move |connection| {
+            Ok(connection
+                .query_row(
+                    "SELECT publication_id, identity_id, content_id, revision, record_bytes, created_at
+                     FROM tombstones WHERE publication_id = ?1",
+                    [&publication_id],
+                    |row| {
+                        Ok(TombstoneRecord {
+                            publication_id: row.get(0)?,
+                            identity_id: row.get(1)?,
+                            content_id: row.get(2)?,
+                            revision: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+                            record_bytes: row.get(4)?,
+                            created_at: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
+                        })
+                    },
+                )
+                .optional()?)
+        })
+    }
+
+    /// Records whether a publication was announced to the DHT.
+    pub fn mark_publication_announced(&self, publication_id: &str, announced: bool, at: u64) -> StoreResult<()> {
+        validate_entity_id(publication_id, "publication ID")?;
+        let publication_id = publication_id.to_owned();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE publications SET announced = ?2, updated_at = ?3 WHERE publication_id = ?1",
+                params![publication_id, if announced { 1_i64 } else { 0_i64 }, at],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Records whether this device is currently serving a publication.
+    pub fn mark_publication_serving(&self, publication_id: &str, serving: bool, at: u64) -> StoreResult<()> {
+        validate_entity_id(publication_id, "publication ID")?;
+        let publication_id = publication_id.to_owned();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE publications SET serving = ?2, updated_at = ?3 WHERE publication_id = ?1",
+                params![publication_id, if serving { 1_i64 } else { 0_i64 }, at],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Stores the last observed availability for a publication.
+    pub fn set_publication_availability(
+        &self,
+        publication_id: &str,
+        availability: PublicationAvailability,
+        checked_at: Option<u64>,
+    ) -> StoreResult<()> {
+        validate_entity_id(publication_id, "publication ID")?;
+        let publication_id = publication_id.to_owned();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE publications SET availability = ?2, last_checked_at = ?3
+                 WHERE publication_id = ?1",
+                params![
+                    publication_id,
+                    availability.as_str(),
+                    checked_at.map(|value| i64::try_from(value).unwrap_or(i64::MAX))
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Marks a publication as withdrawn while retaining its local bytes.
+    pub fn mark_publication_unpublished(&self, publication_id: &str, at: u64) -> StoreResult<()> {
+        validate_entity_id(publication_id, "publication ID")?;
+        let publication_id = publication_id.to_owned();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE publications
+                 SET tombstoned = 1, serving = 0, announced = 0, availability = 'record_only',
+                     updated_at = ?2
+                 WHERE publication_id = ?1",
+                params![publication_id, at],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Returns whether verified content may be served to a remote peer.
+    ///
+    /// Serving requires a verified blob plus at least one local reason to keep
+    /// it: a non-tombstoned serving publication, an active replica, or a
+    /// retained download.
+    pub fn content_serveable(&self, content_id: &str) -> StoreResult<bool> {
+        validate_content_id(content_id)?;
+        let content_id = content_id.to_owned();
+        self.db.read(move |connection| {
+            let count: i64 = connection.query_row(
+                "SELECT CASE WHEN
+                    EXISTS (SELECT 1 FROM contents WHERE content_id = ?1 AND state = 'verified')
+                    AND (
+                        EXISTS (SELECT 1 FROM publications
+                                WHERE content_id = ?1 AND local = 1 AND serving = 1 AND tombstoned = 0)
+                        OR EXISTS (SELECT 1 FROM replicas
+                                   WHERE content_id = ?1 AND state = 'active')
+                        OR EXISTS (SELECT 1 FROM content_refs
+                                   WHERE content_id = ?1 AND ref_type = 'retained_download')
+                    )
+                 THEN 1 ELSE 0 END",
+                [content_id],
+                |row| row.get(0),
+            )?;
+            Ok(count != 0)
+        })
+    }
+
+    /// Returns whether verified content may still be served for a reason other
+    /// than one specific publication.
+    pub fn content_serveable_except_publication(&self, content_id: &str, publication_id: &str) -> StoreResult<bool> {
+        validate_content_id(content_id)?;
+        validate_entity_id(publication_id, "publication ID")?;
+        let content_id = content_id.to_owned();
+        let publication_id = publication_id.to_owned();
+        self.db.read(move |connection| {
+            let count: i64 = connection.query_row(
+                "SELECT CASE WHEN
+                    EXISTS (SELECT 1 FROM contents WHERE content_id = ?1 AND state = 'verified')
+                    AND (
+                        EXISTS (SELECT 1 FROM publications
+                                WHERE content_id = ?1 AND publication_id <> ?2
+                                  AND local = 1 AND serving = 1 AND tombstoned = 0)
+                        OR EXISTS (SELECT 1 FROM replicas
+                                   WHERE content_id = ?1 AND state = 'active')
+                        OR EXISTS (SELECT 1 FROM content_refs
+                                   WHERE content_id = ?1 AND ref_type = 'retained_download')
+                    )
+                 THEN 1 ELSE 0 END",
+                params![content_id, publication_id],
+                |row| row.get(0),
+            )?;
+            Ok(count != 0)
+        })
+    }
+
+    /// Converts pending streaming-import references into a publication
+    /// original reference.
+    ///
+    /// The content row must exist. Repeating the adoption is idempotent.
+    pub fn adopt_local_import(&self, content_id: &str, publication_id: &str) -> StoreResult<()> {
+        validate_content_id(content_id)?;
+        validate_entity_id(publication_id, "publication ID")?;
+        if !self.content_exists(content_id)? {
+            return Err(StoreError::ContentMissing(content_id.to_owned()));
+        }
+        let content = content_id.to_owned();
+        let publication = publication_id.to_owned();
+        let now = now_secs();
+        self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "DELETE FROM content_refs WHERE content_id = ?1 AND ref_type = 'local_import'",
+                [&content],
+            )?;
+            transaction.execute(
+                "INSERT INTO content_refs (content_id, ref_type, owner_id, created_at)
+                 VALUES (?1, 'publication_original', ?2, ?3)
+                 ON CONFLICT(content_id, ref_type, owner_id) DO NOTHING",
+                params![content, publication, now],
+            )?;
+            transaction.commit()?;
+            Ok(())
         })
     }
 
@@ -1571,6 +1845,42 @@ impl Store {
             }
         }
         Err(StoreError::ManifestMissing(content_id.to_owned()))
+    }
+
+    /// Returns a verified manifest for local content, building and storing one
+    /// from the blob when no stored manifest exists.
+    pub fn ensure_manifest_for_content(&self, content_id: &str) -> StoreResult<Vec<u8>> {
+        validate_content_id(content_id)?;
+        if let Ok(manifest) = self.manifest_for_content(content_id) {
+            return Ok(manifest);
+        }
+        let record = self.content(content_id)?;
+        if record.state != ContentState::Verified || record.size_bytes == 0 {
+            return Err(StoreError::ContentMissing(content_id.to_owned()));
+        }
+        let content_bytes: [u8; 32] = decode_hex_content_id(content_id)?;
+        let path = self.content_path(content_id)?;
+        let mut file = fs::File::open(path)?;
+        let chunk_size = usize::try_from(CHUNK_SIZE_V1).unwrap_or(usize::MAX);
+        let mut remaining = record.size_bytes;
+        let mut chunks = Vec::new();
+        let mut buffer = vec![0_u8; chunk_size];
+        while remaining > 0 {
+            let length = usize::try_from(remaining.min(CHUNK_SIZE_V1)).unwrap_or(chunk_size);
+            file.read_exact(&mut buffer[..length])?;
+            let sha256: [u8; 32] = Sha256::digest(&buffer[..length]).into();
+            chunks.push(ChunkEntry::new(u64::try_from(length).unwrap_or(u64::MAX), sha256));
+            remaining -= u64::try_from(length).unwrap_or(remaining);
+        }
+        let manifest = ManifestV1::new(content_bytes, record.size_bytes, chunks);
+        let bytes = manifest
+            .encode_body()
+            .map_err(|error| StoreError::InvalidManifest(error.to_string()))?;
+        let root = manifest
+            .root()
+            .map_err(|error| StoreError::InvalidManifest(error.to_string()))?;
+        self.put_manifest(&hex_lower(&root), &bytes)?;
+        Ok(bytes)
     }
 
     /// Loads and verifies the manifest referenced by a stored signed publication.
@@ -2060,6 +2370,16 @@ fn validate_content_id(content_id: &str) -> StoreResult<()> {
     }
 }
 
+fn decode_hex_content_id(content_id: &str) -> StoreResult<[u8; 32]> {
+    validate_content_id(content_id)?;
+    let mut bytes = [0_u8; 32];
+    for (index, pair) in content_id.as_bytes().as_chunks::<2>().0.iter().enumerate() {
+        let text = std::str::from_utf8(pair).map_err(|_| StoreError::InvalidContentId(content_id.to_owned()))?;
+        bytes[index] = u8::from_str_radix(text, 16).map_err(|_| StoreError::InvalidContentId(content_id.to_owned()))?;
+    }
+    Ok(bytes)
+}
+
 fn validate_source_peer(source_peer: Option<&str>) -> StoreResult<Option<String>> {
     let Some(source_peer) = source_peer else {
         return Ok(None);
@@ -2107,6 +2427,8 @@ fn content_from_row(row: &Row<'_>) -> rusqlite::Result<ContentRecord> {
 }
 
 fn publication_from_row(row: &Row<'_>) -> rusqlite::Result<PublicationRecord> {
+    let category: String = row.get(11)?;
+    let availability: String = row.get(16)?;
     Ok(PublicationRecord {
         publication_id: row.get(0)?,
         identity_id: row.get(1)?,
@@ -2119,7 +2441,25 @@ fn publication_from_row(row: &Row<'_>) -> rusqlite::Result<PublicationRecord> {
         published_at: u64::try_from(row.get::<_, i64>(8)?).unwrap_or(0),
         updated_at: u64::try_from(row.get::<_, i64>(9)?).unwrap_or(0),
         tombstoned: row.get::<_, i64>(10)? != 0,
+        category: Category::parse(&category).ok_or_else(|| invalid_enum(11, "publication category", &category))?,
+        size_bytes: u64::try_from(row.get::<_, i64>(12)?).unwrap_or(0),
+        tags: Vec::new(),
+        local: row.get::<_, i64>(13)? != 0,
+        serving: row.get::<_, i64>(14)? != 0,
+        announced: row.get::<_, i64>(15)? != 0,
+        availability: PublicationAvailability::parse(&availability)
+            .ok_or_else(|| invalid_enum(16, "publication availability", &availability))?,
+        last_checked_at: row
+            .get::<_, Option<i64>>(17)?
+            .map(|value| u64::try_from(value).unwrap_or(0)),
     })
+}
+
+fn publication_tags(connection: &rusqlite::Connection, publication_id: &str) -> rusqlite::Result<Vec<String>> {
+    let mut statement =
+        connection.prepare("SELECT tag FROM publication_tags WHERE publication_id = ?1 ORDER BY position ASC")?;
+    let rows = statement.query_map([publication_id], |row| row.get::<_, String>(0))?;
+    rows.collect()
 }
 
 fn download_from_row(row: &Row<'_>) -> rusqlite::Result<DownloadRecord> {

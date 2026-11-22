@@ -21,6 +21,8 @@ import io.nexus.presentation.PreviewNetworkState
 import io.nexus.presentation.PreviewScenario
 import io.nexus.presentation.content.previewContentState
 import io.nexus.presentation.demo.DemoCatalog
+import io.nexus.presentation.demo.DemoPreviewKind
+import io.nexus.presentation.demo.DemoPreviewReason
 import io.nexus.presentation.demo.DemoPublication
 import io.nexus.presentation.demo.PublicationAvailability
 import io.nexus.ui.components.AvailabilityBadge
@@ -37,7 +39,9 @@ import io.nexus.ui.components.NexusSectionHeader
 import io.nexus.ui.components.NexusTag
 import io.nexus.ui.components.PreviewStateBar
 import io.nexus.ui.components.RecordVerificationBadge
+import io.nexus.ui.components.ServingBadge
 import io.nexus.ui.components.SourceRow
+import io.nexus.ui.components.StatusBadge
 import io.nexus.ui.components.StatusTone
 import io.nexus.ui.components.UnpublishedBadge
 import io.nexus.ui.components.demoCategoryLabel
@@ -160,6 +164,7 @@ private fun FileDetailsBody(
                     AvailabilitySection(publication)
                     SourcesSection(publication)
                     VerificationSection(publication)
+                    PreviewSection(publication)
                     MetadataSection(publication)
                     DescriptionSection(publication)
                 }
@@ -184,6 +189,7 @@ private fun FileDetailsBody(
                 )
                 SourcesSection(publication)
                 VerificationSection(publication)
+                PreviewSection(publication)
                 MetadataSection(publication)
                 DescriptionSection(publication)
             }
@@ -198,6 +204,7 @@ private fun AvailabilitySection(publication: DemoPublication) {
         NexusSectionHeader(title = strings.fileSectionAvailability)
         Row(horizontalArrangement = Arrangement.spacedBy(NexusSpacing.sm)) {
             AvailabilityBadge(availability = publication.availability)
+            ServingBadge(serving = publication.serving)
             if (publication.unpublished) {
                 UnpublishedBadge()
             }
@@ -208,6 +215,16 @@ private fun AvailabilitySection(publication: DemoPublication) {
         Text(
             text = availabilityDefinition(publication.availability, strings),
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text =
+                if (publication.serving) {
+                    strings.fileServingBody
+                } else {
+                    strings.fileNotServingBody
+                },
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (publication.unpublished) {
@@ -280,8 +297,63 @@ private fun VerificationSection(publication: DemoPublication) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        NexusKeyValue(
+            label = strings.fileSignatureStatusLabel,
+            value =
+                if (publication.recordVerified) {
+                    strings.fileSignatureVerified
+                } else {
+                    strings.fileSignatureUnverified
+                },
+        )
+        NexusKeyValue(
+            label = strings.fileServingStatusLabel,
+            value =
+                if (publication.serving) {
+                    strings.fileServingNow
+                } else {
+                    strings.fileNotServing
+                },
+        )
+        NexusKeyValue(
+            label = strings.fileAvailabilityStatusLabel,
+            value = availabilityLabel(publication.availability, strings),
+        )
         Text(
             text = strings.fileVerificationSeparate,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun PreviewSection(publication: DemoPublication) {
+    val strings = LocalNexusStrings.current
+    val preview = publication.preview
+    NexusCard(modifier = Modifier.fillMaxWidth()) {
+        NexusSectionHeader(title = strings.fileSectionPreview)
+        StatusBadge(
+            text =
+                if (preview.supported) {
+                    strings.filePreviewSupported
+                } else {
+                    strings.filePreviewUnsupported
+                },
+            tone = if (preview.supported) StatusTone.INFO else StatusTone.NEUTRAL,
+            icon = NexusIcons.File,
+        )
+        NexusKeyValue(
+            label = strings.filePreviewKindLabel,
+            value = previewKindLabel(preview.kind, strings),
+        )
+        Text(
+            text = previewReason(preview.reason, strings),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = strings.filePreviewNoAutoExecute,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -399,6 +471,29 @@ private fun ActionsSection(
             )
         }
         if (publication.ownedByViewer) {
+            NexusSectionHeader(title = strings.fileUnpublishLimitsTitle)
+            Text(
+                text = strings.fileUnpublishLimitsBody,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "• ${strings.fileUnpublishStopsServing}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "• ${strings.fileUnpublishRetainsLocal}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "• ${strings.fileUnpublishNotGlobal}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (publication.ownedByViewer) {
             NexusActionRow(
                 title = strings.fileOpenProfile,
                 icon = NexusIcons.User,
@@ -424,4 +519,35 @@ private fun availabilityDefinition(
         PublicationAvailability.SEEN_RECENTLY -> strings.availabilitySeenRecentlyDefinition
         PublicationAvailability.NO_KNOWN_SOURCE -> strings.availabilityNoKnownSourceDefinition
         PublicationAvailability.RECORD_ONLY -> strings.availabilityRecordOnlyDefinition
+    }
+
+private fun availabilityLabel(
+    availability: PublicationAvailability,
+    strings: NexusStrings,
+): String =
+    when (availability) {
+        PublicationAvailability.AVAILABLE_NOW -> strings.availabilityAvailableNow
+        PublicationAvailability.SEEN_RECENTLY -> strings.availabilitySeenRecently
+        PublicationAvailability.NO_KNOWN_SOURCE -> strings.availabilityNoKnownSource
+        PublicationAvailability.RECORD_ONLY -> strings.availabilityRecordOnly
+    }
+
+private fun previewKindLabel(
+    kind: DemoPreviewKind,
+    strings: NexusStrings,
+): String =
+    when (kind) {
+        DemoPreviewKind.TEXT -> strings.filePreviewKindText
+        DemoPreviewKind.IMAGE -> strings.filePreviewKindImage
+        DemoPreviewKind.NONE -> strings.filePreviewKindNone
+    }
+
+private fun previewReason(
+    reason: DemoPreviewReason,
+    strings: NexusStrings,
+): String =
+    when (reason) {
+        DemoPreviewReason.PLAIN_TEXT -> strings.filePreviewReasonPlainText
+        DemoPreviewReason.RASTER_IMAGE -> strings.filePreviewReasonRasterImage
+        DemoPreviewReason.UNSUPPORTED_FORMAT -> strings.filePreviewReasonUnsupported
     }

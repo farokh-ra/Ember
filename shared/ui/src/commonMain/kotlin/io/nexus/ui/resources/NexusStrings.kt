@@ -255,6 +255,29 @@ public interface NexusStrings {
     public val fileBackToExplore: String
     public val fileTags: String
     public val fileDescription: String
+    public val fileServingNow: String
+    public val fileNotServing: String
+    public val fileServingBody: String
+    public val fileNotServingBody: String
+    public val fileSignatureStatusLabel: String
+    public val fileServingStatusLabel: String
+    public val fileAvailabilityStatusLabel: String
+    public val fileSectionPreview: String
+    public val filePreviewSupported: String
+    public val filePreviewUnsupported: String
+    public val filePreviewKindLabel: String
+    public val filePreviewKindText: String
+    public val filePreviewKindImage: String
+    public val filePreviewKindNone: String
+    public val filePreviewReasonPlainText: String
+    public val filePreviewReasonRasterImage: String
+    public val filePreviewReasonUnsupported: String
+    public val filePreviewNoAutoExecute: String
+    public val fileUnpublishLimitsTitle: String
+    public val fileUnpublishLimitsBody: String
+    public val fileUnpublishStopsServing: String
+    public val fileUnpublishRetainsLocal: String
+    public val fileUnpublishNotGlobal: String
     public val fileUnpublishDialogTitle: String
     public val fileUnpublishDialogBody: String
     public val fileUnpublishDialogConfirm: String
@@ -282,6 +305,19 @@ public interface NexusStrings {
     public val publishPublicBody: String
     public val publishNoDeleteTitle: String
     public val publishNoDeleteBody: String
+    public val publishServingTitle: String
+    public val publishServingBody: String
+    public val publishSignatureNote: String
+    public val publishAfterTitle: String
+    public val publishAfterDemo: String
+    public val publishAfterContentId: String
+    public val publishAfterSignature: String
+    public val publishAfterServing: String
+    public val publishAfterAvailability: String
+    public val publishAfterSignatureVerified: String
+    public val publishAfterServingOnline: String
+    public val publishAfterAvailabilityValue: String
+    public val publishAfterNote: String
     public val publishPlannedTitle: String
     public val publishStepOne: String
     public val publishStepTwo: String
@@ -711,7 +747,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val fileContentNotVerified: String = "Content not verified"
     override val fileContentNotVerifiedBody: String = "No complete verified local copy exists."
     override val fileVerificationSeparate: String =
-        "Record verification and content verification are separate states."
+        "Signature, content, serving, and availability are separate states."
     override val fileNoSources: String = "No known source"
     override val fileNoSourcesBody: String =
         "The record exists, but the content is not available now. This does not mean the file was deleted."
@@ -725,7 +761,7 @@ public object EnglishNexusStrings : NexusStrings {
         "Downloading does not make you a host. Hosting requires an explicit action."
     override val fileUnpublish: String = "Unpublish"
     override val fileUnpublishDemo: String =
-        "Opens a demo confirmation. No network action is performed."
+        "Stops serving and records an unpublish statement (demo)."
     override val fileAlreadyUnpublished: String = "Already unpublished by the uploader."
     override val fileUnpublishedWarning: String =
         "Unpublished by the uploader. Copies held by other peers may still exist."
@@ -738,10 +774,44 @@ public object EnglishNexusStrings : NexusStrings {
     override val fileBackToExplore: String = "Back to Explore"
     override val fileTags: String = "Tags"
     override val fileDescription: String = "Description"
+    override val fileServingNow: String = "Serving from this device"
+    override val fileNotServing: String = "Not serving"
+    override val fileServingBody: String =
+        "This device is sharing verified content while the app is online. " +
+            "Closing the app or unpublishing stops serving."
+    override val fileNotServingBody: String =
+        "This device is not sharing the content now. The signed record can still be discovered, " +
+            "but availability depends on another source."
+    override val fileSignatureStatusLabel: String = "Signature"
+    override val fileServingStatusLabel: String = "Serving"
+    override val fileAvailabilityStatusLabel: String = "Availability"
+    override val fileSectionPreview: String = "Safe preview"
+    override val filePreviewSupported: String = "Preview available"
+    override val filePreviewUnsupported: String = "No preview"
+    override val filePreviewKindLabel: String = "Preview type"
+    override val filePreviewKindText: String = "Plain text"
+    override val filePreviewKindImage: String = "Raster image"
+    override val filePreviewKindNone: String = "Not previewable"
+    override val filePreviewReasonPlainText: String =
+        "Plain text is shown as inert text. Links and scripts are not run."
+    override val filePreviewReasonRasterImage: String =
+        "Raster images are decoded for display only. SVG and HTML are never previewed."
+    override val filePreviewReasonUnsupported: String =
+        "This format is not previewed. Open it only after downloading and verifying it."
+    override val filePreviewNoAutoExecute: String =
+        "Previews never run or open a file automatically."
+    override val fileUnpublishLimitsTitle: String = "Unpublish limits"
+    override val fileUnpublishLimitsBody: String =
+        "Unpublishing stops this device from serving the file and publishes a signed unpublish statement. " +
+            "The local copy stays in your library."
+    override val fileUnpublishStopsServing: String = "Serving stops immediately."
+    override val fileUnpublishRetainsLocal: String = "Local bytes are retained."
+    override val fileUnpublishNotGlobal: String = "Copies held by other peers may remain."
     override val fileUnpublishDialogTitle: String = "Unpublish this demo publication?"
     override val fileUnpublishDialogBody: String =
-        "Unpublishing stops you from serving this publication and records an unpublish statement. " +
-            "It does not delete copies that other peers already hold. In this preview, no network action is performed."
+        "Unpublishing stops this device from serving the publication and records a signed unpublish " +
+            "statement. The local copy stays, and copies other peers already hold may remain. " +
+            "In this preview, no network action is performed."
     override val fileUnpublishDialogConfirm: String = "Unpublish (demo)"
     override val fileUnpublishDone: String =
         "Demo only — the publication was not changed."
@@ -749,14 +819,15 @@ public object EnglishNexusStrings : NexusStrings {
     override val publishTitle: String = "Publish a file"
     override val publishSubtitle: String =
         "Publishing creates a signed record and makes the file discoverable. It is an explicit action."
-    override val publishUnavailableTitle: String = "Publishing is not active in this preview"
+    override val publishUnavailableTitle: String = "Publishing is a demo in this preview"
     override val publishUnavailableBody: String =
-        "File import, hashing, signing, and network announcement arrive in later stages. " +
-            "The form and planned flow are shown for review only."
+        "The Rust core supports signed publications, but this form is sample data. " +
+            "It does not import, sign, or announce a file."
     override val publishDemoForm: String = "Demo form — nothing is uploaded."
     override val publishFileLabel: String = "File"
     override val publishFileValue: String = "Choose a file"
-    override val publishFileUnavailable: String = "File selection is not available yet."
+    override val publishFileUnavailable: String =
+        "File selection is demo-only here. Real publishing imports the file into the managed store."
     override val publishNameLabel: String = "Title"
     override val publishNamePlaceholder: String = "A clear, descriptive title"
     override val publishDescriptionLabel: String = "Description"
@@ -766,24 +837,45 @@ public object EnglishNexusStrings : NexusStrings {
     override val publishCategoryLabel: String = "Category"
     override val publishRightsLabel: String = "Rights and license"
     override val publishRightsPlaceholder: String = "Confirm that you have the right to share this file."
-    override val publishPublicTitle: String = "Publishing is public"
+    override val publishPublicTitle: String = "Publishing is explicit and public"
     override val publishPublicBody: String =
-        "Published profile metadata and file records can be seen by peers. Peers may see network addresses. " +
-            "Ember does not guarantee anonymity."
+        "Peers can discover the signed record and the metadata you choose to share. " +
+            "The file itself is served only while this device is online and serving it. " +
+            "Peers may see network addresses; Ember does not guarantee anonymity."
     override val publishNoDeleteTitle: String = "Unpublishing is not a global delete"
     override val publishNoDeleteBody: String =
-        "You can stop serving and sign an unpublish statement, but copies held by other peers may remain."
-    override val publishPlannedTitle: String = "Planned flow"
-    override val publishStepOne: String = "Choose a file and check its size and type."
-    override val publishStepTwo: String = "Hash the content and create a stable content ID."
+        "Unpublishing stops your device from serving and records a signed statement. " +
+            "It cannot delete copies other peers already hold."
+    override val publishServingTitle: String = "Serving while online"
+    override val publishServingBody: String =
+        "After publishing, this device serves the verified file only while the app is running " +
+            "and the publication is serving. Availability is not permanent."
+    override val publishSignatureNote: String =
+        "The Rust core signs the publication with your local identity. " +
+            "The private key never enters the record or the network."
+    override val publishAfterTitle: String = "Publication states"
+    override val publishAfterDemo: String = "Sample states — no record exists."
+    override val publishAfterContentId: String = "Content ID"
+    override val publishAfterSignature: String = "Signature"
+    override val publishAfterServing: String = "Serving"
+    override val publishAfterAvailability: String = "Availability"
+    override val publishAfterSignatureVerified: String = "Verified (sample)"
+    override val publishAfterServingOnline: String = "While this device is online (sample)"
+    override val publishAfterAvailabilityValue: String = "Available now (sample)"
+    override val publishAfterNote: String =
+        "These states are independent. A verified signature does not promise that a source is online."
+    override val publishPlannedTitle: String = "What publishing does"
+    override val publishStepOne: String = "Choose a file and confirm its title, category, tags, and description."
+    override val publishStepTwo: String = "Import and hash the bytes locally to create a stable content ID."
     override val publishStepThree: String = "Sign the publication record with your local identity."
-    override val publishStepFour: String = "Store the record locally, even while offline."
-    override val publishStepFive: String = "Announce the record when the node is online and publishing is enabled."
+    override val publishStepFour: String = "Announce the signed record and serve the file while this device is online."
+    override val publishStepFive: String =
+        "Unpublish at any time to stop serving and publish a signed unpublish statement."
     override val publishVerificationNote: String =
-        "A download is marked complete only after the full file is verified against its content ID and chunk proofs."
-    override val publishButton: String = "Publish (not available)"
+        "The signed record can be discovered before anyone downloads it. Serving depends on this device staying online."
+    override val publishButton: String = "Publish (demo only)"
     override val publishButtonNote: String =
-        "Publishing will be enabled when the local core and identity stages are complete."
+        "The Rust core handles real imports, signing, and serving. This preview does not publish anything."
 
     override val downloadsTitle: String = "Downloads"
     override val downloadsSubtitle: String =

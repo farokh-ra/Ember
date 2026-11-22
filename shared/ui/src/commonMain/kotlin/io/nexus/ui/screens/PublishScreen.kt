@@ -157,11 +157,50 @@ private fun PublishNotices(modifier: Modifier = Modifier) {
             icon = NexusIcons.Globe,
         )
         NexusInfoBanner(
+            title = strings.publishServingTitle,
+            body = strings.publishServingBody,
+            tone = StatusTone.INFO,
+            icon = NexusIcons.Hosted,
+        )
+        NexusInfoBanner(
             title = strings.publishNoDeleteTitle,
             body = strings.publishNoDeleteBody,
             tone = StatusTone.CAUTION,
             icon = NexusIcons.Warning,
         )
+        NexusCard(modifier = Modifier.fillMaxWidth()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(NexusSpacing.sm)) {
+                NexusDemoBadge()
+                Text(
+                    text = strings.publishAfterDemo,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            NexusSectionHeader(title = strings.publishAfterTitle)
+            NexusKeyValue(
+                label = strings.publishAfterContentId,
+                value = "21eb3e82…388ac7",
+                monospace = true,
+            )
+            NexusKeyValue(
+                label = strings.publishAfterSignature,
+                value = strings.publishAfterSignatureVerified,
+            )
+            NexusKeyValue(
+                label = strings.publishAfterServing,
+                value = strings.publishAfterServingOnline,
+            )
+            NexusKeyValue(
+                label = strings.publishAfterAvailability,
+                value = strings.publishAfterAvailabilityValue,
+            )
+            Text(
+                text = strings.publishAfterNote,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         NexusCard(modifier = Modifier.fillMaxWidth()) {
             NexusSectionHeader(title = strings.publishPlannedTitle)
             PlannedStep(index = 1, text = strings.publishStepOne)
@@ -169,6 +208,11 @@ private fun PublishNotices(modifier: Modifier = Modifier) {
             PlannedStep(index = 3, text = strings.publishStepThree)
             PlannedStep(index = 4, text = strings.publishStepFour)
             PlannedStep(index = 5, text = strings.publishStepFive)
+            Text(
+                text = strings.publishSignatureNote,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Text(
                 text = strings.publishVerificationNote,
                 style = MaterialTheme.typography.bodySmall,

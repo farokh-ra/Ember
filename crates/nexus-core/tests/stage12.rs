@@ -3,8 +3,10 @@
 //! the verified content in its managed library.
 //!
 //! Both engines listen on loopback only. The source imports its file through
-//! the public streaming import API; the receiver connects with a multiaddr from
-//! the source status method and downloads by content ID.
+//! the public streaming import API and explicitly publishes it, because Stage
+//! 14 only serves content with a local serving publication. The receiver
+//! connects with a multiaddr from the source status method and downloads by
+//! content ID.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,6 +19,7 @@ use nexus_core::{
 };
 use nexus_crypto::to_hex;
 use nexus_crypto::{CborLimits, Value, decode};
+use nexus_identity::{IdentityVault, LocalEncryptionKey};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -56,6 +59,11 @@ fn config(root: &Path) -> CoreConfig {
 }
 
 fn start(root: &Path, key: u8) -> Engine {
+    let local_key = LocalEncryptionKey::new([key; 32]);
+    IdentityVault::new(root.to_path_buf())
+        .expect("identity vault")
+        .create(&local_key)
+        .expect("create identity");
     let engine = Engine::create(config(root), &[key; 32]).expect("create engine");
     engine.start().expect("start engine");
     engine
@@ -202,6 +210,20 @@ fn import_file(engine: &Engine, name: &str, content: &[u8]) -> (String, String) 
     (text_field(&value, "content_id"), text_field(&value, "manifest_root"))
 }
 
+fn publish_file(engine: &Engine, content_id: &str, display_filename: &str) -> Value {
+    success(invoke(
+        engine,
+        0x0501,
+        params(vec![
+            ("content_id", Value::Text(content_id.to_owned())),
+            ("display_filename", Value::Text(display_filename.to_owned())),
+            ("description", Value::Text("Stage 12 integration file".to_owned())),
+            ("category", Value::Text("data".to_owned())),
+            ("tags", Value::Array(vec![Value::Text("stage12".to_owned())])),
+        ]),
+    ))
+}
+
 fn decode_hex_32(hex: &str) -> [u8; 32] {
     assert_eq!(hex.len(), 64, "content ID must be 32-byte hex");
     let mut bytes = [0_u8; 32];
@@ -241,6 +263,13 @@ fn engines_exchange_a_verified_file_and_keep_it_in_the_library() {
     let (content_id, manifest_root) = import_file(&source, "stage12-source.bin", &content);
     assert_eq!(content_id.len(), 64);
     assert_eq!(manifest_root.len(), 64);
+
+    // Stage 14 serves only explicitly published content. Publishing also
+    // announces the source as a provider for the content ID.
+    let publication = publish_file(&source, &content_id, "stage12-source.bin");
+    let published = wait_for_event(&source, "publication.published", Duration::from_secs(30));
+    assert_eq!(published.op_id, Some(unsigned_field(&publication, "op_id")));
+    assert_eq!(map_get(&published.data, "serving").and_then(Value::as_bool), Some(true));
 
     let source_peer = text_field(&status(&source), "peer_id");
     let connect_op = connect(&destination, &dial_address(&source));

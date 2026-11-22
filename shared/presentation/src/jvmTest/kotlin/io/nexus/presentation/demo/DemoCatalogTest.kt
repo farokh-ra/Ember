@@ -89,6 +89,43 @@ class DemoCatalogTest {
     }
 
     @Test
+    fun servingIsOnlyClaimedForOwnedActivePublications() {
+        DemoCatalog.publications.forEach { publication ->
+            if (publication.serving) {
+                assertTrue(publication.ownedByViewer, publication.recordId)
+                assertFalse(publication.unpublished, publication.recordId)
+            }
+        }
+        assertTrue(DemoCatalog.publications.any(DemoPublication::serving))
+    }
+
+    @Test
+    fun previewsNeverAutoExecuteAndMatchSupportedFormats() {
+        DemoCatalog.publications.forEach { publication ->
+            assertFalse(publication.preview.autoExecute, publication.recordId)
+            if (publication.preview.supported) {
+                assertTrue(publication.preview.kind != DemoPreviewKind.NONE, publication.recordId)
+                assertTrue(
+                    publication.preview.reason != DemoPreviewReason.UNSUPPORTED_FORMAT,
+                    publication.recordId,
+                )
+            } else {
+                assertEquals(DemoPreviewKind.NONE, publication.preview.kind, publication.recordId)
+                assertEquals(
+                    DemoPreviewReason.UNSUPPORTED_FORMAT,
+                    publication.preview.reason,
+                    publication.recordId,
+                )
+            }
+        }
+        assertTrue(
+            DemoCatalog.publications.any {
+                it.preview.supported && it.preview.kind == DemoPreviewKind.TEXT
+            },
+        )
+    }
+
+    @Test
     fun completedDownloadsAreFullyVerifiedAndOthersAreNotComplete() {
         DemoCatalog.downloads.forEach { download ->
             if (download.status == DownloadStatus.COMPLETE) {
