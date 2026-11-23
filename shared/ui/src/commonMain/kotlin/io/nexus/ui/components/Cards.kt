@@ -269,6 +269,8 @@ private fun downloadNote(
 @Composable
 public fun HostedFileCard(
     hosted: DemoHostedFile,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -296,7 +298,14 @@ public fun HostedFileCard(
             HostedStatusBadge(verification = hosted.verification)
         }
         Text(
-            text = strings.sampleReplica,
+            text = strings.hostedPublication(hosted.publicationId),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = strings.hostedYouHost,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -320,16 +329,45 @@ public fun HostedFileCard(
         ) {
             Text(
                 modifier = Modifier.weight(1f),
-                text =
-                    buildString {
-                        append(hosted.sizeLabel)
-                        append(" · ")
-                        append(strings.hostedPeers(hosted.peersServed))
-                    },
+                text = hosted.sizeLabel,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
+                text = strings.hostedStorageUse(hosted.storageLabel),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(NexusSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                modifier = Modifier.weight(1f),
+                text = if (hosted.serving) strings.hostedServing else strings.hostedNotServing,
+                style = MaterialTheme.typography.bodySmall,
+                color =
+                    if (hosted.serving) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+            )
+            Text(
+                text = strings.hostedPeers(hosted.peersServed),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(NexusSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                modifier = Modifier.weight(1f),
                 text =
                     hosted.lastVerifiedLabel
                         ?.let(strings.hostedLastVerified)
@@ -337,6 +375,13 @@ public fun HostedFileCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            hosted.lastSeenLabel?.let { lastSeen ->
+                Text(
+                    text = strings.hostedLastSeen(lastSeen),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         if (hosted.verification == ReplicaVerification.FAILED) {
             NexusInfoBanner(
@@ -346,7 +391,32 @@ public fun HostedFileCard(
                 icon = NexusIcons.Error,
             )
         }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(NexusSpacing.xs, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            when {
+                hosted.verification == ReplicaVerification.VERIFYING -> {
+                    // No hosting action while the copy is still being verified.
+                }
+
+                hosted.serving -> {
+                    NexusTertiaryButton(
+                        text = strings.hostedPause,
+                        onClick = onPause,
+                        icon = NexusIcons.Pause,
+                    )
+                }
+
+                else -> {
+                    NexusTertiaryButton(
+                        text = strings.hostedResume,
+                        onClick = onResume,
+                        icon = NexusIcons.Play,
+                    )
+                }
+            }
             NexusTertiaryButton(
                 text = strings.hostedRemove,
                 onClick = onRemove,

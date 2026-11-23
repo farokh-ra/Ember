@@ -143,13 +143,31 @@ class DemoCatalogTest {
         DemoCatalog.hostedFiles.forEach { hosted ->
             assertTrue(hosted.isDemo)
             assertFalse(hosted.originalUploader == DemoCatalog.profile.displayName)
-            if (hosted.verification == ReplicaVerification.FAILED) {
-                assertEquals(0, hosted.peersServed)
+            assertTrue(hosted.publicationId.matches(Regex("^[0-9a-f]{64}$")), hosted.id)
+            assertTrue(hosted.storageLabel.isNotBlank(), hosted.id)
+            assertEquals(
+                hosted.verification == ReplicaVerification.VERIFIED,
+                hosted.serving,
+                hosted.id,
+            )
+            if (hosted.verification != ReplicaVerification.VERIFIED) {
+                assertEquals(0, hosted.peersServed, hosted.id)
             }
             if (hosted.verification == ReplicaVerification.VERIFYING) {
-                assertEquals(0, hosted.peersServed)
+                val progress = assertNotNull(hosted.progress, hosted.id)
+                assertTrue(progress in 0f..1f, hosted.id)
             }
         }
+        assertTrue(
+            DemoCatalog.hostedFiles.any {
+                it.verification == ReplicaVerification.VERIFIED && it.serving
+            },
+        )
+        assertTrue(
+            DemoCatalog.hostedFiles.any {
+                it.verification == ReplicaVerification.PAUSED && !it.serving
+            },
+        )
     }
 
     @Test

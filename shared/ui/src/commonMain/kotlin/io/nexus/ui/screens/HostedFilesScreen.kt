@@ -13,6 +13,7 @@ import io.nexus.presentation.PreviewScenario
 import io.nexus.presentation.content.previewContentState
 import io.nexus.presentation.demo.DemoCatalog
 import io.nexus.presentation.demo.DemoHostedFile
+import io.nexus.presentation.demo.ReplicaVerification
 import io.nexus.ui.components.ContentStateHost
 import io.nexus.ui.components.ContentStatePanel
 import io.nexus.ui.components.HostedFileCard
@@ -38,12 +39,24 @@ public fun HostedFilesScreen(
 ) {
     val strings = LocalNexusStrings.current
     var hidden by remember { mutableStateOf(emptySet<String>()) }
+    var overrides by remember { mutableStateOf(emptyMap<String, ReplicaVerification>()) }
     var pendingRemove by remember { mutableStateOf<DemoHostedFile?>(null) }
-    val visible = DemoCatalog.hostedFiles.filterNot { it.id in hidden }
+    val visible =
+        DemoCatalog.hostedFiles
+            .filterNot { it.id in hidden }
+            .map { hosted ->
+                val verification = overrides[hosted.id] ?: hosted.verification
+                hosted.copy(
+                    verification = verification,
+                    serving = verification == ReplicaVerification.VERIFIED,
+                    progress = if (verification == ReplicaVerification.VERIFIED) 1f else hosted.progress,
+                )
+            }
     val content = previewContentState(scenario) { visible }
 
     fun restore() {
         hidden = emptySet()
+        overrides = emptyMap()
         onScenarioChange(PreviewScenario.READY)
     }
 
@@ -98,6 +111,14 @@ public fun HostedFilesScreen(
                     hostedFiles.forEach { hosted ->
                         HostedFileCard(
                             hosted = hosted,
+                            onPause = {
+                                overrides = overrides + (hosted.id to ReplicaVerification.PAUSED)
+                                onShowMessage(strings.hostedPausedDone)
+                            },
+                            onResume = {
+                                overrides = overrides + (hosted.id to ReplicaVerification.VERIFIED)
+                                onShowMessage(strings.hostedResumedDone)
+                            },
                             onRemove = { pendingRemove = hosted },
                         )
                     }
@@ -114,6 +135,7 @@ public fun HostedFilesScreen(
             confirmLabel = strings.hostedRemoveDialogConfirm,
             onConfirm = {
                 hidden = hidden + removing.id
+                overrides = overrides - removing.id
                 pendingRemove = null
                 onShowMessage(strings.hostedRemovedDone)
             },

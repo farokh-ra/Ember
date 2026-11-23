@@ -202,11 +202,15 @@ public data class DemoHostedFile(
     public val id: String,
     public val title: String,
     public val originalUploader: String,
+    public val publicationId: String,
     public val sizeLabel: String,
+    public val storageLabel: String,
     public val verification: ReplicaVerification,
+    public val serving: Boolean,
     public val progress: Float?,
     public val peersServed: Int,
     public val lastVerifiedLabel: String?,
+    public val lastSeenLabel: String?,
     public val isDemo: Boolean = true,
 )
 

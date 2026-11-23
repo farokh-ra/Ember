@@ -78,7 +78,7 @@ fn record(
 fn local_profile_moves_from_draft_to_pending_to_published() {
     let root = TempRoot::new("local-lifecycle");
     let store = open(&root);
-    assert_eq!(store.schema_version().expect("schema"), 7);
+    assert_eq!(store.schema_version().expect("schema"), 8);
 
     let draft = record("nx1alice", 1, Some("ada"), ProfileState::Draft, b"draft-1");
     store.store_local_profile(&draft, None).expect("store draft");

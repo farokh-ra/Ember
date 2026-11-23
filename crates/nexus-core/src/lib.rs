@@ -11,10 +11,12 @@ mod engine;
 mod envelope;
 mod error;
 mod event;
+mod hosting;
 mod network;
 mod ops;
 mod profiles;
 mod publications;
+mod replicas;
 mod streaming;
 
 pub use config::{ConfigError, CoreConfig, LogLevel, MAX_CONFIG_BYTES};
@@ -30,6 +32,7 @@ pub use nexus_store::StoreError;
 pub use ops::{CancelOutcome, CancelToken, OPERATION_WORKERS, OperationRegistry, WorkerPool};
 pub use profiles::PROFILE_CACHE_STALE_MS;
 pub use publications::{PUBLICATION_AVAILABILITY_STALE_MS, UNPUBLISH_LIMITS};
+pub use replicas::{REPLICA_LIMITS, REPLICA_REVERIFY_INTERVAL_MS};
 pub use streaming::{ExportCursor, FinishedImport, ImportError, ImportSession, MAX_STREAM_CHUNK};
 
 use nexus_observability::LogInitError;
@@ -38,7 +41,7 @@ use nexus_observability::LogInitError;
 pub const ABI_VERSION: u32 = 1;
 
 /// Protocol version implemented by this build.
-pub const PROTOCOL_VERSION: &str = "0.1.0-stage-14";
+pub const PROTOCOL_VERSION: &str = "0.1.0-stage-15";
 
 /// Static build information exposed to shells and diagnostics.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -88,7 +91,7 @@ mod tests {
     #[test]
     fn reports_abi_version() {
         assert_eq!(ABI_VERSION, info().abi_version);
-        assert_eq!("0.1.0-stage-14", info().protocol_version);
+        assert_eq!("0.1.0-stage-15", info().protocol_version);
     }
 
     #[test]

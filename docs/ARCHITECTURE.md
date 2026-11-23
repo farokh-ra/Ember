@@ -418,7 +418,8 @@ Pending -> Downloading -> Completed (promoted; row removed)
 - Replication is an explicit per-file action. Downloading does not create a hosting obligation.
 - Before advertising, the core verifies the complete file, manifest, and original signed record.
 - The original signed record is served unchanged; the replica is shown as a source, not the uploader.
-- Replicas are re-verified on startup, after a detected local change, and at least every 7 days. Failure stops advertising and serving.
+- Replicas are re-verified on startup, at least every 7 days, and on explicit verification. Failure stops advertising and serving.
+- Hosting can be paused, resumed, or removed per file. Storage quota, upload rate, metered-network, and battery limits gate all inbound serving. Pausing or removing never rewrites the original signed record.
 - Unpublish stops local serving, signs and publishes a tombstone, and warns that copies held by others may remain.
 - A replica that learns of a tombstone labels the file "unpublished by uploader" and may continue serving. The UI never implies uploader endorsement or global deletion.
 

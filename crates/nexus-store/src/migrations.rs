@@ -51,10 +51,15 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "explicit publication serving state",
         sql: include_str!("../migrations/0007_publications.sql"),
     },
+    Migration {
+        version: 8,
+        name: "replica verification and availability",
+        sql: include_str!("../migrations/0008_replication.sql"),
+    },
 ];
 
 /// Newest schema version understood by this build.
-pub(crate) const LATEST_VERSION: i64 = 7;
+pub(crate) const LATEST_VERSION: i64 = 8;
 
 /// Runs all outstanding migrations on the writer connection.
 pub(crate) fn run(conn: &mut Connection) -> StoreResult<()> {

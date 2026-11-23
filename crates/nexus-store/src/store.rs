@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use rusqlite::types::Type;
@@ -17,10 +18,10 @@ use crate::db::Database;
 use crate::error::{StoreError, StoreResult};
 use crate::managed_store::ManagedStore;
 use crate::model::{
-    ContentRecord, ContentReference, ContentState, DownloadRecord, DownloadState, IdentityReference, ImportedContent,
-    PeerObservation, ProfileCacheOutcome, ProfileConflict, ProfileFreshness, ProfileRecord, ProfileState,
-    PublicationAvailability, PublicationCacheOutcome, PublicationRecord, ReferenceType, ReleaseOutcome, ReplicaRecord,
-    ReplicaState, TombstoneRecord,
+    ContentRecord, ContentReference, ContentState, DownloadRecord, DownloadState, HostingLimits, IdentityReference,
+    ImportedContent, PeerObservation, ProfileCacheOutcome, ProfileConflict, ProfileFreshness, ProfileRecord,
+    ProfileState, PublicationAvailability, PublicationCacheOutcome, PublicationRecord, ReferenceType, ReleaseOutcome,
+    ReplicaRecord, ReplicaState, ReplicaUsage, TombstoneRecord,
 };
 use crate::paths::{safe_display_name, unique_export_path, validate_store_component};
 use crate::quota::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage};
@@ -30,6 +31,11 @@ const CONTENT_COLUMNS: &str = "content_id, size_bytes, state, blob_path, verifie
 const DOWNLOAD_COLUMNS: &str = "download_id, content_id, display_name, expected_size, verified_prefix, state, partial_file, created_at, updated_at, last_error, manifest_root, source_peer";
 const PROFILE_COLUMNS: &str = "identity_id, revision, record_bytes, display_name, username, bio, avatar_content_id, updated_at, updated_at_ms, state, published_at, last_checked_at, freshness";
 const PUBLICATION_COLUMNS: &str = "publication_id, identity_id, content_id, revision, record_bytes, title, description, filename, published_at, updated_at, tombstoned, category, size_bytes, local, serving, announced, availability, last_checked_at";
+const REPLICA_COLUMNS: &str = "replica_id, content_id, publication_id, state, source_peer, verified_size_bytes, last_verified_at, last_checked_at, last_seen_at, failure_count, last_error, announced, created_at, updated_at";
+const QUOTA_SETTING: &str = "storage.quota_bytes";
+const UPLOAD_LIMIT_SETTING: &str = "hosting.upload_bytes_per_second";
+const ALLOW_METERED_SETTING: &str = "hosting.allow_metered";
+const BATTERY_MIN_SETTING: &str = "hosting.battery_min_percent";
 
 /// Tunable storage limits.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,6 +105,7 @@ pub struct Store {
     db: Database,
     managed: ManagedStore,
     config: StoreConfig,
+    quota: Mutex<QuotaPolicy>,
     reconciliation: ReconciliationReport,
 }
 
@@ -130,11 +137,29 @@ impl Store {
         let database_path = root.join("db").join("nexus.sqlite3");
         let db = Database::open(&database_path, config.busy_timeout, config.cache_size_kib)?;
 
+        // A quota changed through `store.set_quota` persists independently of
+        // the host-provided config. An invalid persisted value falls back to
+        // the validated config instead of preventing the store from opening.
+        let persisted_quota = db
+            .read(|connection| {
+                Ok(connection
+                    .query_row("SELECT value FROM settings WHERE key = ?1", [QUOTA_SETTING], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .optional()?)
+            })
+            .ok()
+            .flatten()
+            .and_then(|value| value.parse::<u64>().ok())
+            .and_then(|bytes| QuotaPolicy::new(bytes).ok());
+        let quota = persisted_quota.unwrap_or(config.quota);
+
         let mut store = Self {
             root: root.to_path_buf(),
             db,
             managed,
             config,
+            quota: Mutex::new(quota),
             reconciliation: ReconciliationReport::default(),
         };
         store.reconciliation = store.reconcile_internal()?;
@@ -165,10 +190,29 @@ impl Store {
         self.managed.temporary_directory()
     }
 
-    /// Active limits.
+    /// Active limits, including the effective quota.
     #[must_use]
-    pub const fn config(&self) -> StoreConfig {
-        self.config
+    pub fn config(&self) -> StoreConfig {
+        let mut config = self.config;
+        config.quota = self.quota_policy();
+        config
+    }
+
+    /// Current quota policy.
+    #[must_use]
+    pub fn quota_policy(&self) -> QuotaPolicy {
+        *self.quota.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Changes the managed quota and persists it for later opens.
+    ///
+    /// Existing usage is never evicted. The returned policy is effective even
+    /// when current usage already exceeds it.
+    pub fn set_quota(&self, quota_bytes: u64) -> StoreResult<QuotaPolicy> {
+        let policy = QuotaPolicy::new(quota_bytes)?;
+        self.set_setting(QUOTA_SETTING, &quota_bytes.to_string())?;
+        *self.quota.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = policy;
+        Ok(policy)
     }
 
     /// Reconciliation result from the most recent open or explicit call.
@@ -215,10 +259,11 @@ impl Store {
 
     /// Verifies that `incoming` more bytes fit the quota and reserve.
     pub fn ensure_capacity(&self, incoming: u64) -> StoreResult<()> {
-        self.config.quota.check_file_size(incoming, self.config.max_file_size)?;
+        let quota = self.quota_policy();
+        quota.check_file_size(incoming, self.config.max_file_size)?;
         let usage = self.usage()?;
         let available = self.managed.available_space()?;
-        self.config.quota.check(usage, incoming, available)
+        quota.check(usage, incoming, available)
     }
 
     /// Verifies that `incoming` more bytes fit the managed quota.
@@ -226,9 +271,10 @@ impl Store {
     /// This is used after bytes are already staged on the same volume, where
     /// charging the free-space reserve a second time would double-count them.
     pub fn ensure_quota(&self, incoming: u64) -> StoreResult<()> {
-        self.config.quota.check_file_size(incoming, self.config.max_file_size)?;
+        let quota = self.quota_policy();
+        quota.check_file_size(incoming, self.config.max_file_size)?;
         let usage = self.usage()?;
-        self.config.quota.check(usage, incoming, u64::MAX)
+        quota.check(usage, incoming, u64::MAX)
     }
 
     /// Imports a source file as a publication original.
@@ -363,9 +409,8 @@ impl Store {
     ) -> StoreResult<ImportedContent> {
         validate_entity_id(owner_id, "owner ID")?;
         let source_size = fs::metadata(source)?.len();
-        self.config
-            .quota
-            .check_file_size(source_size, self.config.max_file_size)?;
+        let quota = self.quota_policy();
+        quota.check_file_size(source_size, self.config.max_file_size)?;
 
         // If the quota is already full, the source may still be bytes we
         // already hold. Stage and hash it before refusing so identical bytes
@@ -376,11 +421,11 @@ impl Store {
                 return Err(preflight.expect_err("checked failure"));
             }
             let available = self.managed.available_space()?;
-            if available.saturating_sub(source_size) < self.config.quota.reserve_bytes() {
+            if available.saturating_sub(source_size) < quota.reserve_bytes() {
                 return Err(StoreError::FreeSpaceReserve {
                     available,
                     incoming: source_size,
-                    reserve: self.config.quota.reserve_bytes(),
+                    reserve: quota.reserve_bytes(),
                 });
             }
         }
@@ -1916,24 +1961,50 @@ impl Store {
         if let Some(publication_id) = &record.publication_id {
             validate_entity_id(publication_id, "publication ID")?;
         }
+        if let Some(source_peer) = &record.source_peer {
+            validate_entity_id(source_peer, "source peer ID")?;
+        }
+        if let Some(error) = &record.last_error
+            && error.len() > 512
+        {
+            return Err(StoreError::InvalidConfig(
+                "replica error message exceeds 512 bytes".to_owned(),
+            ));
+        }
         let record = record.clone();
         self.db.write(move |connection| {
             connection.execute(
                 "INSERT INTO replicas
-                 (replica_id, content_id, publication_id, state, last_verified_at, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 (replica_id, content_id, publication_id, state, source_peer, verified_size_bytes,
+                  last_verified_at, last_checked_at, last_seen_at, failure_count, last_error, announced,
+                  created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                  ON CONFLICT(replica_id) DO UPDATE SET
                      content_id = excluded.content_id,
                      publication_id = excluded.publication_id,
                      state = excluded.state,
+                     source_peer = excluded.source_peer,
+                     verified_size_bytes = excluded.verified_size_bytes,
                      last_verified_at = excluded.last_verified_at,
+                     last_checked_at = excluded.last_checked_at,
+                     last_seen_at = excluded.last_seen_at,
+                     failure_count = excluded.failure_count,
+                     last_error = excluded.last_error,
+                     announced = excluded.announced,
                      updated_at = excluded.updated_at",
                 params![
                     record.replica_id,
                     record.content_id,
                     record.publication_id,
                     record.state.as_str(),
+                    record.source_peer,
+                    record.verified_size_bytes,
                     record.last_verified_at,
+                    record.last_checked_at,
+                    record.last_seen_at,
+                    i64::try_from(record.failure_count).unwrap_or(i64::MAX),
+                    record.last_error,
+                    record.announced,
                     record.created_at,
                     record.updated_at
                 ],
@@ -1942,27 +2013,257 @@ impl Store {
         })
     }
 
+    /// Returns one replica record.
+    pub fn replica(&self, replica_id: &str) -> StoreResult<ReplicaRecord> {
+        validate_entity_id(replica_id, "replica ID")?;
+        let replica_id = replica_id.to_owned();
+        self.db.read(move |connection| {
+            connection
+                .query_row(
+                    &format!("SELECT {REPLICA_COLUMNS} FROM replicas WHERE replica_id = ?1"),
+                    [&replica_id],
+                    replica_from_row,
+                )
+                .optional()?
+                .ok_or(StoreError::RecordNotFound(replica_id))
+        })
+    }
+
     /// Lists hosted replicas.
     pub fn replicas(&self) -> StoreResult<Vec<ReplicaRecord>> {
         self.db.read(|connection| {
-            let mut statement = connection.prepare(
-                "SELECT replica_id, content_id, publication_id, state, last_verified_at,
-                        created_at, updated_at
-                 FROM replicas ORDER BY created_at ASC",
-            )?;
-            let rows = statement.query_map([], |row| {
-                let state: String = row.get(3)?;
-                Ok(ReplicaRecord {
-                    replica_id: row.get(0)?,
-                    content_id: row.get(1)?,
-                    publication_id: row.get(2)?,
-                    state: ReplicaState::parse(&state).ok_or_else(|| invalid_enum(3, "replica state", &state))?,
-                    last_verified_at: row.get(4)?,
-                    created_at: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
-                    updated_at: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
-                })
-            })?;
+            let mut statement = connection.prepare(&format!(
+                "SELECT {REPLICA_COLUMNS} FROM replicas ORDER BY created_at ASC"
+            ))?;
+            let rows = statement.query_map([], replica_from_row)?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Lists one stable page of replicas ordered by replica ID.
+    ///
+    /// `cursor` is the last replica ID of the previous page. Removed rows are
+    /// hidden unless `include_removed` is true.
+    pub fn replicas_page(
+        &self,
+        cursor: Option<&str>,
+        limit: usize,
+        include_removed: bool,
+    ) -> StoreResult<Vec<ReplicaRecord>> {
+        if limit == 0 || limit > 100 {
+            return Err(StoreError::InvalidConfig(
+                "replica page size must be between 1 and 100".to_owned(),
+            ));
+        }
+        if let Some(cursor) = cursor {
+            validate_entity_id(cursor, "replica cursor")?;
+        }
+        let cursor = cursor.map(str::to_owned);
+        let limit = i64::try_from(limit).unwrap_or(100);
+        self.db.read(move |connection| {
+            let mut statement = connection.prepare(&format!(
+                "SELECT {REPLICA_COLUMNS} FROM replicas
+                 WHERE (?1 IS NULL OR replica_id > ?1)
+                   AND (?2 = 1 OR state <> 'removed')
+                 ORDER BY replica_id ASC LIMIT ?3"
+            ))?;
+            let rows = statement.query_map(params![cursor, include_removed, limit], replica_from_row)?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Counts non-removed replicas.
+    pub fn replica_count(&self) -> StoreResult<usize> {
+        self.db.read(|connection| {
+            let count: i64 =
+                connection.query_row("SELECT COUNT(*) FROM replicas WHERE state <> 'removed'", [], |row| {
+                    row.get(0)
+                })?;
+            Ok(usize::try_from(count).unwrap_or(usize::MAX))
+        })
+    }
+
+    /// Aggregate hosted storage and state counts.
+    pub fn replica_usage(&self) -> StoreResult<ReplicaUsage> {
+        self.db.read(|connection| {
+            let (total, active, paused, failed): (i64, i64, i64, i64) = connection.query_row(
+                "SELECT COUNT(*),
+                        COALESCE(SUM(CASE WHEN state = 'active' THEN 1 ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN state = 'paused' THEN 1 ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN state = 'verification_failed' THEN 1 ELSE 0 END), 0)
+                 FROM replicas WHERE state <> 'removed'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+            let storage: i64 = connection.query_row(
+                "SELECT COALESCE(SUM(contents.size_bytes), 0)
+                 FROM (SELECT DISTINCT content_id FROM replicas WHERE state <> 'removed') hosted
+                 JOIN contents ON contents.content_id = hosted.content_id",
+                [],
+                |row| row.get(0),
+            )?;
+            Ok(ReplicaUsage {
+                total_count: u64::try_from(total).unwrap_or(0),
+                active_count: u64::try_from(active).unwrap_or(0),
+                paused_count: u64::try_from(paused).unwrap_or(0),
+                failed_count: u64::try_from(failed).unwrap_or(0),
+                storage_bytes: u64::try_from(storage).unwrap_or(0),
+            })
+        })
+    }
+
+    /// Changes a replica lifecycle state.
+    pub fn set_replica_state(&self, replica_id: &str, state: ReplicaState, at: u64) -> StoreResult<()> {
+        validate_entity_id(replica_id, "replica ID")?;
+        let replica_id = replica_id.to_owned();
+        self.db.write(move |connection| {
+            let updated = connection.execute(
+                "UPDATE replicas SET state = ?2, updated_at = ?3 WHERE replica_id = ?1",
+                params![replica_id, state.as_str(), at],
+            )?;
+            if updated == 0 {
+                return Err(StoreError::RecordNotFound(replica_id));
+            }
+            Ok(())
+        })
+    }
+
+    /// Records one verification attempt.
+    ///
+    /// A success updates the verified size and clears the failure count. A
+    /// failure increments the count and stores a bounded redacted message.
+    pub fn record_replica_check(
+        &self,
+        replica_id: &str,
+        checked_at: u64,
+        verified_size: Option<u64>,
+        error: Option<&str>,
+    ) -> StoreResult<()> {
+        validate_entity_id(replica_id, "replica ID")?;
+        if let Some(error) = error
+            && error.len() > 512
+        {
+            return Err(StoreError::InvalidConfig(
+                "replica error message exceeds 512 bytes".to_owned(),
+            ));
+        }
+        let replica_id = replica_id.to_owned();
+        let error = error.map(str::to_owned);
+        self.db.write(move |connection| {
+            let updated = if let Some(size) = verified_size {
+                connection.execute(
+                    "UPDATE replicas
+                     SET last_checked_at = ?2, last_verified_at = ?2, verified_size_bytes = ?3,
+                         failure_count = 0, last_error = NULL, updated_at = ?2
+                     WHERE replica_id = ?1",
+                    params![replica_id, checked_at, size],
+                )?
+            } else {
+                connection.execute(
+                    "UPDATE replicas
+                     SET last_checked_at = ?2, failure_count = failure_count + 1,
+                         last_error = ?3, updated_at = ?2
+                     WHERE replica_id = ?1",
+                    params![replica_id, checked_at, error],
+                )?
+            };
+            if updated == 0 {
+                return Err(StoreError::RecordNotFound(replica_id));
+            }
+            Ok(())
+        })
+    }
+
+    /// Records whether this node advertises the replica as a provider.
+    pub fn mark_replica_announced(&self, replica_id: &str, announced: bool, at: u64) -> StoreResult<()> {
+        validate_entity_id(replica_id, "replica ID")?;
+        let replica_id = replica_id.to_owned();
+        self.db.write(move |connection| {
+            let updated = if announced {
+                connection.execute(
+                    "UPDATE replicas SET announced = 1, last_seen_at = ?2, updated_at = ?2 WHERE replica_id = ?1",
+                    params![replica_id, at],
+                )?
+            } else {
+                connection.execute(
+                    "UPDATE replicas SET announced = 0, updated_at = ?2 WHERE replica_id = ?1",
+                    params![replica_id, at],
+                )?
+            };
+            if updated == 0 {
+                return Err(StoreError::RecordNotFound(replica_id));
+            }
+            Ok(())
+        })
+    }
+
+    /// Records that this node served or advertised one content ID.
+    pub fn record_replica_seen(&self, content_id: &str, at: u64) -> StoreResult<()> {
+        validate_content_id(content_id)?;
+        let content_id = content_id.to_owned();
+        self.db.write(move |connection| {
+            connection.execute(
+                "UPDATE replicas SET last_seen_at = ?2, updated_at = ?2
+                 WHERE content_id = ?1 AND state = 'active'",
+                params![content_id, at],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Reads persisted hosting limits.
+    pub fn hosting_limits(&self) -> StoreResult<HostingLimits> {
+        let read = |key: &str| {
+            self.db.read(|connection| {
+                Ok(connection
+                    .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .optional()?)
+            })
+        };
+        let upload = read(UPLOAD_LIMIT_SETTING)?
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        let allow_metered = read(ALLOW_METERED_SETTING)?.as_deref() == Some("true");
+        let battery_min = read(BATTERY_MIN_SETTING)?
+            .and_then(|value| value.parse::<u8>().ok())
+            .unwrap_or(0);
+        let limits = HostingLimits {
+            upload_bytes_per_second: upload,
+            allow_metered,
+            battery_min_percent: battery_min,
+        };
+        // Invalid persisted values fall back to safe defaults rather than
+        // preventing the core from starting.
+        if limits.validate().is_err() {
+            return Ok(HostingLimits::default());
+        }
+        Ok(limits)
+    }
+
+    /// Persists all hosting limits atomically.
+    pub fn set_hosting_limits(&self, limits: &HostingLimits) -> StoreResult<()> {
+        limits.validate()?;
+        let now = now_secs();
+        let upload = limits.upload_bytes_per_second.to_string();
+        let allow_metered = if limits.allow_metered { "true" } else { "false" }.to_owned();
+        let battery_min = limits.battery_min_percent.to_string();
+        self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            for (key, value) in [
+                (UPLOAD_LIMIT_SETTING, upload),
+                (ALLOW_METERED_SETTING, allow_metered),
+                (BATTERY_MIN_SETTING, battery_min),
+            ] {
+                transaction.execute(
+                    "INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                    params![key, value, now],
+                )?;
+            }
+            transaction.commit()?;
+            Ok(())
         })
     }
 
@@ -2477,6 +2778,34 @@ fn download_from_row(row: &Row<'_>) -> rusqlite::Result<DownloadRecord> {
         last_error: row.get(9)?,
         manifest_root: row.get(10)?,
         source_peer: row.get(11)?,
+    })
+}
+
+fn replica_from_row(row: &Row<'_>) -> rusqlite::Result<ReplicaRecord> {
+    let state: String = row.get(3)?;
+    Ok(ReplicaRecord {
+        replica_id: row.get(0)?,
+        content_id: row.get(1)?,
+        publication_id: row.get(2)?,
+        state: ReplicaState::parse(&state).ok_or_else(|| invalid_enum(3, "replica state", &state))?,
+        source_peer: row.get(4)?,
+        verified_size_bytes: row
+            .get::<_, Option<i64>>(5)?
+            .map(|value| u64::try_from(value).unwrap_or(0)),
+        last_verified_at: row
+            .get::<_, Option<i64>>(6)?
+            .map(|value| u64::try_from(value).unwrap_or(0)),
+        last_checked_at: row
+            .get::<_, Option<i64>>(7)?
+            .map(|value| u64::try_from(value).unwrap_or(0)),
+        last_seen_at: row
+            .get::<_, Option<i64>>(8)?
+            .map(|value| u64::try_from(value).unwrap_or(0)),
+        failure_count: u64::try_from(row.get::<_, i64>(9)?).unwrap_or(0),
+        last_error: row.get(10)?,
+        announced: row.get::<_, i64>(11)? != 0,
+        created_at: u64::try_from(row.get::<_, i64>(12)?).unwrap_or(0),
+        updated_at: u64::try_from(row.get::<_, i64>(13)?).unwrap_or(0),
     })
 }
 

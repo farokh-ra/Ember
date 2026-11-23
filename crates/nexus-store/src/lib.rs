@@ -21,10 +21,10 @@ pub use backup::{ExportReport, RestoreReport};
 pub use error::{StoreError, StoreResult};
 pub use managed_store::ManagedStore;
 pub use model::{
-    ContentRecord, ContentReference, ContentState, DownloadRecord, DownloadState, IdentityReference, ImportedContent,
-    PeerObservation, ProfileCacheOutcome, ProfileConflict, ProfileFreshness, ProfileRecord, ProfileState,
-    PublicationAvailability, PublicationCacheOutcome, PublicationRecord, ReferenceType, ReleaseOutcome, ReplicaRecord,
-    ReplicaState, TombstoneRecord,
+    ContentRecord, ContentReference, ContentState, DownloadRecord, DownloadState, HostingLimits, IdentityReference,
+    ImportedContent, MAX_UPLOAD_BYTES_PER_SECOND, MIN_UPLOAD_BYTES_PER_SECOND, PeerObservation, ProfileCacheOutcome,
+    ProfileConflict, ProfileFreshness, ProfileRecord, ProfileState, PublicationAvailability, PublicationCacheOutcome,
+    PublicationRecord, ReferenceType, ReleaseOutcome, ReplicaRecord, ReplicaState, ReplicaUsage, TombstoneRecord,
 };
 pub use paths::{
     FALLBACK_FILENAME, MAX_FILENAME_BYTES, safe_display_name, unique_export_path, validate_store_component,
