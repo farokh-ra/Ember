@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/ember-banner.png" alt="Ember — local-first, peer-to-peer file sharing for Android and Windows" width="100%" />
+  <img src="docs/assets/ember-banner.png?v=2" alt="Ember — local-first, peer-to-peer file sharing for Android and Windows" width="100%" />
 </p>
 
 <h1 align="center">Ember</h1>
