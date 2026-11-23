@@ -10,7 +10,7 @@ name for ABI and format stability: Kotlin packages (`io.nexus`), Rust crates
 (`nexus-*`), the native library (`nexus_core`), and signed record tags
 (`NEXUS-*`).
 
-This repository is at the end of **Stage 15: voluntary replication and
+This repository has completed **Stage 15: voluntary replication and
 availability**. The Android and Windows shells still run the shared, clickable UI
 prototype with visibly labelled mock data. Underneath it, the Rust core now owns
 an embedded SQLite schema, migrations, a content-addressed managed file store,
@@ -35,8 +35,9 @@ labels. Publications bind metadata to verified content, are served only while th
 publisher keeps a local serving reason, and report signature, serving, and
 availability separately. Hosting is an explicit per-file action that verifies
 the complete local copy before advertising, preserves the original signed
-attribution, and can be paused, resumed, or removed. Search remains a later
-stage.
+attribution, and can be paused, resumed, or removed. Stage 16 adds local and
+distributed search; it has not started and requires explicit project-owner
+approval.
 
 ## Current status
 
@@ -96,7 +97,7 @@ stage.
 | Formatting, linting, and static analysis | Enforced locally and in CI |
 | CI workflow and dependency review | Defined |
 | Developer setup and contribution guides | Complete |
-| Product features | Mock UI prototypes; storage, crypto, publication, native, network, transfer, profile, publishing, and hosting foundations complete; search later |
+| Product features | Mock UI prototypes; storage, crypto, publication, native, network, transfer, profile, publishing, and hosting foundations complete; search is Stage 16 and has not started |
 
 See [docs/progress/STAGE_15.md](docs/progress/STAGE_15.md) for the exact
 evidence and commands used to verify this stage. The byte-level record, identity,
@@ -252,7 +253,7 @@ workflow and release conventions.
 | [docs/architecture/NAT_TRAVERSAL.md](docs/architecture/NAT_TRAVERSAL.md) | Relay fallback, hole punching, NAT status, path reporting, and bounds. |
 | [docs/architecture/FILE_TRANSFER.md](docs/architecture/FILE_TRANSFER.md) | `/nexus/file/1`, chunk verification, resume, failover, bounds, and limitations. |
 | [docs/operations/RELAY_NODES.md](docs/operations/RELAY_NODES.md) | Relay setup, capacity, firewall rules, monitoring, and privacy. |
-| [docs/progress/STAGE_14.md](docs/progress/STAGE_14.md) | Stage 14 scope, architecture, tests, and verification evidence. |
+| [docs/progress/STAGE_15.md](docs/progress/STAGE_15.md) | Stage 15 scope, architecture, tests, and verification evidence. |
 | [docs/decisions](docs/decisions/README.md) | Accepted architecture decision records. |
 | [docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md) | Repeatable Windows setup and troubleshooting. |
 | [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) | Branches, commits, pull requests, releases, and CI. |
@@ -268,12 +269,30 @@ described in [SECURITY.md](SECURITY.md); do not open a public issue with exploit
 details. Debug logs must be redacted according to
 [docs/LOGGING_POLICY.md](docs/LOGGING_POLICY.md).
 
-## Next stage
+## Stage roadmap
 
-Stage 15 adds voluntary replication and availability: an explicit host action,
-replica verification before advertising, pause and remove controls, storage and
-bandwidth limits, and Android metered-network and battery controls. It must not
-begin until Stage 14 is reviewed and approved by the project owner. Android JNI
-runtime verification and remote CI execution remain outstanding from Stage 08,
-and Android on-device networking, transfer, profile, and publishing evidence
-remain outstanding from Stages 09, 12, 13, and 14.
+Stage 15 is **complete and merged** into `main` through PR #18
+(`264dcbb`). It adds explicit per-file hosting with full verification before
+advertisement, pause/resume/remove controls, storage quota and bandwidth limits,
+metered-network and battery gates, startup and seven-day re-verification, and
+preserved signed attribution. The evidence and commands are recorded in
+[docs/progress/STAGE_15.md](docs/progress/STAGE_15.md).
+
+Stage 16 is **next and has not started**. It covers local and distributed
+search: a verified local FTS5 index, the Explore search experience, signed
+index-provider records, coverage labels, pagination, provider-loss handling, and
+bounded query deadlines. Stage 16 requires explicit approval from the project
+owner before work begins.
+
+| Stage | Scope | Status |
+|---|---|---|
+| 15 | Explicit replication, hosted files, re-verification, serving limits | Complete and merged |
+| 16 | Local and distributed search, Explore, coverage, pagination, provider loss | Next; awaiting approval |
+| 17 | Full UI, settings, Android foreground service, Windows tray | Later |
+| 18 | Threat model, abuse tests, dependency and protocol hardening | Later |
+| 19 | Signed release artifacts, install/upgrade/uninstall, performance and parity evidence | Later |
+
+Android JNI runtime verification and remote CI execution remain outstanding from
+Stage 08, and Android on-device networking, transfer, profile, publishing, and
+replication evidence remain outstanding from Stages 09, 12, 13, 14, and 15.
+Those gaps do not block the completed Windows-loopback evidence for Stage 15.
