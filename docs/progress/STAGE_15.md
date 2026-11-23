@@ -1,9 +1,11 @@
 # Stage 15 - Voluntary Replication and Availability
 
-**Status:** Complete
+**Status:** Complete and merged
 **Completed:** 2026-11-23
+**Merged:** PR #18 into `main` as `264dcbb` on 2026-11-23
 **Progress guide:** 70-75%
-**Next stage:** 16 - local and distributed search (requires user permission)
+**Next stage:** 16 - local and distributed search (not started; requires explicit
+project-owner approval)
 
 ## 1. Scope
 
@@ -384,5 +386,6 @@ This is not claimed as Android runtime evidence.
 ## 17. Next stage
 
 Stage 16 adds local and distributed search, Explore, coverage, pagination, and
-provider-loss handling. It must not begin until Stage 15 is reviewed and
-approved by the project owner.
+provider-loss handling. It has not started and requires explicit project-owner
+approval before work begins. Stage 15 is merged into `main` as `264dcbb`, so the
+next branch should be created from that commit.

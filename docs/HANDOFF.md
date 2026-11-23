@@ -1,10 +1,12 @@
 # Ember Project Handoff
 
 **Current stage:** 15 - voluntary replication and availability
-**Stage status:** Complete
+**Stage status:** Complete and merged
 **Last updated:** 2026-11-23
-**Branch:** `feat/15-replication` (from `feat/14-publishing` at `3412ba3`)
-**Next stage:** 16 - local and distributed search (waiting for user permission)
+**Branch:** `main` at `264dcbb` (Stage 15 merged through PR #18; feature branch
+`feat/15-replication` at `3558a03`)
+**Next stage:** 16 - local and distributed search (not started; requires
+explicit project-owner approval)
 
 ## What was implemented
 
@@ -236,12 +238,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Exact next action
 
-1. Review `docs/progress/STAGE_15.md`, the updated
-   `docs/architecture/FFI_INTERFACE.md` and `docs/ARCHITECTURE.md`, the
-   `nexus-store`, `nexus-net`, and `nexus-core` Stage 15 changes, and the Stage
-   15 PR.
-2. Merge Stage 15 after approval. Stage 14 (PR #13) is already merged into
-   `main` as `766f23a`.
-3. Give explicit approval to start Stage 16. Stage 16 adds local and distributed
+1. Stage 15 is reviewed, approved, and merged into `main` as `264dcbb`; no
+   further merge action is required.
+2. Give explicit approval to start Stage 16. Stage 16 adds local and distributed
    search, Explore, coverage, pagination, and provider-loss handling. Do not
    begin it before that approval.
+3. Stage 16 should begin from `main` at `264dcbb`, with a new feature branch,
+   and must keep FTS5 indexing limited to verified local records.
