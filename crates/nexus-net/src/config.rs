@@ -84,6 +84,10 @@ pub const MAX_RELAY_CIRCUIT_DURATION: Duration = Duration::from_secs(60 * 60);
 pub const MAX_RELAY_CIRCUIT_BYTES: u64 = 16 * 1024 * 1024;
 /// Smallest accepted bytes forwarded over one relayed circuit.
 pub const MIN_RELAY_CIRCUIT_BYTES: u64 = 1_024;
+/// Smallest accepted upload rate for hosted content.
+pub const MIN_UPLOAD_BYTES_PER_SECOND: u64 = 256 * 1024;
+/// Largest accepted upload rate for hosted content.
+pub const MAX_UPLOAD_BYTES_PER_SECOND: u64 = 64 * 1024 * 1024;
 
 /// Role this node takes in the Kademlia DHT.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -183,6 +187,9 @@ pub struct NetworkConfig {
     pub autonat_enabled: bool,
     /// Whether relayed connections try a DCUtR direct upgrade.
     pub dcutr_enabled: bool,
+    /// Maximum upload rate for served file chunks in bytes per second; zero
+    /// means unlimited.
+    pub upload_bytes_per_second: u64,
 }
 
 impl NetworkConfig {
@@ -223,6 +230,7 @@ impl NetworkConfig {
             relay_max_circuit_bytes: DEFAULT_RELAY_MAX_CIRCUIT_BYTES,
             autonat_enabled: true,
             dcutr_enabled: true,
+            upload_bytes_per_second: 0,
         }
     }
 
@@ -325,6 +333,11 @@ impl NetworkConfig {
         }
         if !(MIN_RELAY_CIRCUIT_BYTES..=MAX_RELAY_CIRCUIT_BYTES).contains(&self.relay_max_circuit_bytes) {
             return Err(NetError::InvalidConfig("relay_max_circuit_bytes"));
+        }
+        if self.upload_bytes_per_second != 0
+            && !(MIN_UPLOAD_BYTES_PER_SECOND..=MAX_UPLOAD_BYTES_PER_SECOND).contains(&self.upload_bytes_per_second)
+        {
+            return Err(NetError::InvalidConfig("upload_bytes_per_second"));
         }
         Ok(())
     }

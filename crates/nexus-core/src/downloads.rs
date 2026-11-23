@@ -28,6 +28,7 @@ use crate::engine::{Engine, MethodOutcome};
 use crate::envelope::error_value;
 use crate::error::{CoreError, DomainCode, DomainError};
 use crate::event::{EventQueue, PendingEvent};
+use crate::hosting::HostingState;
 use crate::network::domain_error as network_domain_error;
 
 /// Number of worker threads dedicated to downloads.
@@ -48,19 +49,25 @@ const MAX_DOWNLOAD_ID_BYTES: usize = 128;
 /// Storage-backed source for inbound `/nexus/file/1` requests.
 pub(crate) struct CoreFileProvider {
     store: Arc<Store>,
+    hosting: Arc<HostingState>,
 }
 
 impl CoreFileProvider {
-    pub(crate) fn new(store: Arc<Store>) -> Self {
-        Self { store }
+    pub(crate) fn new(store: Arc<Store>, hosting: Arc<HostingState>) -> Self {
+        Self { store, hosting }
     }
 
     fn serveable(&self, content_id: &str, expected_size: u64) -> bool {
-        self.store.content(content_id).is_ok_and(|record| {
-            record.state == ContentState::Verified
-                && record.size_bytes == expected_size
-                && self.store.content_serveable(content_id).unwrap_or(false)
-        })
+        self.hosting.serving_allowed()
+            && self.store.content(content_id).is_ok_and(|record| {
+                record.state == ContentState::Verified
+                    && record.size_bytes == expected_size
+                    && self.store.content_serveable(content_id).unwrap_or(false)
+            })
+    }
+
+    fn record_served(&self, content_id: &str) {
+        let _ = self.store.record_replica_seen(content_id, now_secs());
     }
 
     fn metadata_for_publication(&self, publication_id: &str) -> Option<FileMetadata> {
@@ -108,10 +115,16 @@ impl CoreFileProvider {
 impl FileProvider for CoreFileProvider {
     fn metadata(&self, selector: FileSelector) -> Option<FileMetadata> {
         let id = hex_lower(&selector.id());
-        match selector {
+        let metadata = match selector {
             FileSelector::ContentId(_) => self.metadata_for_content(&id),
             FileSelector::PublicationId(_) => self.metadata_for_publication(&id),
+        };
+        if let Some(metadata) = &metadata
+            && let Ok(parsed) = ManifestV1::parse_body(&metadata.manifest)
+        {
+            self.record_served(&hex_lower(&parsed.content_id));
         }
+        metadata
     }
 
     fn chunk(&self, content_id: &[u8; 32], index: u32, offset: u32, length: u32) -> Option<Vec<u8>> {
@@ -131,9 +144,12 @@ impl FileProvider for CoreFileProvider {
         }
         let chunk_start = u64::from(index).checked_mul(CHUNK_SIZE_V1)?;
         let absolute = chunk_start.checked_add(u64::from(offset))?;
-        self.store
+        let data = self
+            .store
             .read_content_slice(&content_id_text, absolute, usize::try_from(length).ok()?)
-            .ok()
+            .ok()?;
+        self.record_served(&content_id_text);
+        Some(data)
     }
 }
 
@@ -1011,6 +1027,12 @@ fn hex_lower(bytes: &[u8]) -> String {
         out.push(HEX[usize::from(byte & 0x0f)] as char);
     }
     out
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
 }
 
 // ---------------------------------------------------------------------------

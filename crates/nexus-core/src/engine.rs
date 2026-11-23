@@ -16,11 +16,13 @@ use crate::downloads::{CoreFileProvider, DOWNLOAD_WORKERS};
 use crate::envelope::{MAX_RESPONSE_BYTES, Request, encode_failure, encode_success, error_value};
 use crate::error::{CoreError, DomainCode, DomainError};
 use crate::event::{EventQueue, PendingEvent};
+use crate::hosting::HostingState;
 use crate::network::{
     CoreNetworkObserver, connected_peer_value, connectivity_value, domain_error as network_domain_error, peer_value,
     status_value, test_reply_value,
 };
 use crate::ops::{CancelOutcome, CancelToken, OPERATION_WORKERS, OperationRegistry, WorkerPool};
+use crate::replicas::MaintenanceHandle;
 use crate::streaming::{ExportCursor, FinishedImport, ImportError, ImportSession, MAX_STREAM_CHUNK};
 
 /// Lifecycle state of one core instance.
@@ -112,6 +114,8 @@ pub struct Engine {
     pub(crate) pool: WorkerPool,
     pub(crate) download_pool: WorkerPool,
     pub(crate) downloads: Arc<Mutex<HashMap<String, Arc<crate::downloads::DownloadControl>>>>,
+    pub(crate) hosting: Arc<HostingState>,
+    pub(crate) maintenance: Mutex<Option<MaintenanceHandle>>,
     imports: Mutex<HashMap<u64, ImportSession>>,
     exports: Mutex<HashMap<u64, ExportCursor>>,
     network: Mutex<Option<Arc<Network>>>,
@@ -140,6 +144,7 @@ impl Engine {
         };
         let store = Store::open_with_config(&config.data_root, store_config)?;
         store.pause_interrupted_downloads()?;
+        let hosting = HostingState::new(store.hosting_limits()?);
         let pool = WorkerPool::new("nexus-core-op", OPERATION_WORKERS)?;
         let download_pool = WorkerPool::new("nexus-core-download", DOWNLOAD_WORKERS)?;
         Ok(Self {
@@ -153,6 +158,8 @@ impl Engine {
             pool,
             download_pool,
             downloads: Arc::new(Mutex::new(HashMap::new())),
+            hosting,
+            maintenance: Mutex::new(None),
             imports: Mutex::new(HashMap::new()),
             exports: Mutex::new(HashMap::new()),
             network: Mutex::new(None),
@@ -225,6 +232,7 @@ impl Engine {
                 ));
             }
             self.start_network();
+            self.start_replica_maintenance();
             Ok(())
         })();
 
@@ -251,6 +259,7 @@ impl Engine {
             }
         }
         self.emit_state("stopping");
+        self.stop_replica_maintenance();
         self.ops.cancel_all();
         self.imports
             .lock()
@@ -528,6 +537,7 @@ impl Engine {
             0x0302 => self.profile_publish(&params),
             0x0303 => self.profile_lookup(&params),
             0x0401 => self.store_usage().map(MethodOutcome::Result),
+            0x0402 => self.store_set_quota(&params),
             0x0501 => self.publication_create(&params),
             0x0502 => self.publication_unpublish(&params),
             0x0503 => self.publication_get(&params),
@@ -552,6 +562,14 @@ impl Engine {
             0x0804 => self.download_resume(&params),
             0x0805 => self.download_cancel(&params),
             0x0806 => self.download_remove(&params),
+            0x0901 => self.replica_add(&params),
+            0x0902 => self.replica_list(&params),
+            0x0903 => self.replica_pause(&params),
+            0x0904 => self.replica_resume(&params),
+            0x0905 => self.replica_remove(&params),
+            0x0906 => self.replica_verify(&params),
+            0x0907 => self.hosting_limits_get(),
+            0x0908 => self.hosting_limits_set(&params),
             0x0B01 => Ok(MethodOutcome::Result(self.test_echo(&params)?)),
             0x0B02 => self.test_fault(&params),
             _ => Err(CoreError::Unsupported(method_id)),
@@ -591,6 +609,14 @@ impl Engine {
             "download.resume",
             "download.cancel",
             "download.remove",
+            "replica.add",
+            "replica.list",
+            "replica.pause",
+            "replica.resume",
+            "replica.remove",
+            "replica.verify",
+            "hosting.limits_get",
+            "hosting.limits_set",
         ]
         .into_iter()
         .chain(
@@ -787,6 +813,25 @@ impl Engine {
         ))
     }
 
+    /// Changes the persisted managed quota without evicting existing data.
+    fn store_set_quota(&self, params: &Value) -> Result<MethodOutcome, CoreError> {
+        self.require_running()?;
+        let quota_bytes =
+            optional_unsigned(params, "quota_bytes")?.ok_or(CoreError::InvalidArgument("quota_bytes is required"))?;
+        if let Err(error) = self.store.set_quota(quota_bytes) {
+            return Ok(MethodOutcome::Domain(DomainError::from_store(&error)));
+        }
+        let usage = self.store.usage()?;
+        let available = self.store.available_space()?;
+        let quota = self.store.config().quota;
+        Ok(MethodOutcome::Result(storage_value(
+            usage,
+            available,
+            quota.quota_bytes(),
+            quota.reserve_bytes(),
+        )))
+    }
+
     fn test_echo(&self, params: &Value) -> Result<Value, CoreError> {
         let payload =
             map_get(params, "payload").ok_or(CoreError::InvalidArgument("test.echo requires a payload field"))?;
@@ -942,7 +987,11 @@ impl Engine {
         config.dht_mode = self.config.dht_mode;
         config.relay_fallback = self.config.relay_fallback;
         config.relay_server_enabled = self.config.relay_server;
-        let provider = Arc::new(CoreFileProvider::new(Arc::clone(&self.store)));
+        config.upload_bytes_per_second = self.hosting.upload_bytes_per_second();
+        let provider = Arc::new(CoreFileProvider::new(
+            Arc::clone(&self.store),
+            Arc::clone(&self.hosting),
+        ));
         match Network::start_with_provider(config, &key, observer, provider) {
             Ok(network) => {
                 let status = network.status();

@@ -41,8 +41,8 @@ pub use config::{
     MAX_BOOTSTRAP_PEERS, MAX_CONNECTION_LIMIT, MAX_DHT_PROVIDED_KEYS, MAX_DHT_QUERY_TIMEOUT, MAX_DHT_RECORD_TTL,
     MAX_DHT_STORE_PROVIDERS, MAX_DHT_STORE_RECORDS, MAX_EXTERNAL_ADDRESSES, MAX_LISTEN_ADDRESSES,
     MAX_RELAY_CIRCUIT_BYTES, MAX_RELAY_CIRCUIT_DURATION, MAX_RELAY_CIRCUITS, MAX_RELAY_RESERVATION_TIMEOUT,
-    MAX_RELAY_RESERVATIONS, MAX_RELAYS, MIN_RELAY_CIRCUIT_BYTES, NetworkConfig, QUIC_LISTEN_ADDRESS,
-    TCP_LISTEN_ADDRESS, require_peer_id,
+    MAX_RELAY_RESERVATIONS, MAX_RELAYS, MAX_UPLOAD_BYTES_PER_SECOND, MIN_RELAY_CIRCUIT_BYTES,
+    MIN_UPLOAD_BYTES_PER_SECOND, NetworkConfig, QUIC_LISTEN_ADDRESS, TCP_LISTEN_ADDRESS, require_peer_id,
 };
 pub use error::NetError;
 pub use file::{FileMetadata, FileProvider};
@@ -396,6 +396,21 @@ impl Network {
     pub fn notify_network_change(&self) -> Result<(), NetError> {
         let (respond, receiver) = oneshot::channel();
         self.send(Command::NetworkChanged { respond })?;
+        receiver.blocking_recv().map_err(|_| NetError::NotRunning)
+    }
+
+    /// Changes the served-file upload rate. Zero disables throttling.
+    pub fn set_upload_rate(&self, bytes_per_second: u64) -> Result<(), NetError> {
+        if bytes_per_second != 0
+            && !(MIN_UPLOAD_BYTES_PER_SECOND..=MAX_UPLOAD_BYTES_PER_SECOND).contains(&bytes_per_second)
+        {
+            return Err(NetError::InvalidConfig("upload_bytes_per_second"));
+        }
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::SetUploadRate {
+            bytes_per_second,
+            respond,
+        })?;
         receiver.blocking_recv().map_err(|_| NetError::NotRunning)
     }
 

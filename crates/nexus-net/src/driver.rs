@@ -127,9 +127,19 @@ pub(crate) enum Command {
     NetworkChanged {
         respond: oneshot::Sender<()>,
     },
+    SetUploadRate {
+        bytes_per_second: u64,
+        respond: oneshot::Sender<()>,
+    },
     Shutdown {
         respond: oneshot::Sender<()>,
     },
+}
+
+struct DelayedFileResponse {
+    due: Instant,
+    channel: ResponseChannel<Vec<u8>>,
+    body: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -254,6 +264,9 @@ pub(crate) struct Driver {
     rate: HashMap<PeerId, RateWindow>,
     file_rate: HashMap<PeerId, RateWindow>,
     file_provider: Arc<dyn FileProvider>,
+    upload_bytes_per_second: u64,
+    next_upload_slot: Instant,
+    delayed_file_responses: VecDeque<DelayedFileResponse>,
     dht_bootstrapped: bool,
     last_bootstrap: Option<Instant>,
     routing_peers: usize,
@@ -327,6 +340,7 @@ impl Driver {
             swarm.add_external_address(address.clone());
         }
 
+        let upload_bytes_per_second = config.upload_bytes_per_second;
         let mut driver = Self {
             swarm,
             shared,
@@ -344,6 +358,9 @@ impl Driver {
             rate: HashMap::new(),
             file_rate: HashMap::new(),
             file_provider,
+            upload_bytes_per_second,
+            next_upload_slot: Instant::now(),
+            delayed_file_responses: VecDeque::new(),
             dht_bootstrapped: false,
             last_bootstrap: None,
             routing_peers: 0,
@@ -388,6 +405,7 @@ impl Driver {
                         self.pending_requests.clear();
                         self.pending_file_requests.clear();
                         self.pending_queries.clear();
+                        self.delayed_file_responses.clear();
                         let _ = respond.send(());
                         return;
                     }
@@ -440,6 +458,14 @@ impl Driver {
             }
             Command::NetworkChanged { respond } => {
                 self.network_changed();
+                let _ = respond.send(());
+            }
+            Command::SetUploadRate {
+                bytes_per_second,
+                respond,
+            } => {
+                self.upload_bytes_per_second = bytes_per_second;
+                self.next_upload_slot = Instant::now();
                 let _ = respond.send(());
             }
             Command::Shutdown { respond } => {
@@ -1190,6 +1216,7 @@ impl Driver {
 
     fn on_tick(&mut self) {
         let now = Instant::now();
+        self.flush_delayed_file_responses();
 
         let expired: Vec<PeerId> = self
             .pending_dials
@@ -2036,34 +2063,85 @@ impl Driver {
             }
             return;
         }
-        let response = match decode_file_request(&request) {
+        let (response, upload_bytes) = match decode_file_request(&request) {
             Ok(FileRequest::Metadata(selector)) => match self.file_provider.metadata(selector) {
-                Some(metadata) => FileResponse {
-                    manifest: Some(metadata.manifest),
-                    publication: metadata.publication,
-                    ..FileResponse::default()
-                },
-                None => unavailable_response(),
+                Some(metadata) => (
+                    FileResponse {
+                        manifest: Some(metadata.manifest),
+                        publication: metadata.publication,
+                        ..FileResponse::default()
+                    },
+                    0,
+                ),
+                None => (unavailable_response(), 0),
             },
             Ok(FileRequest::Chunk(chunk)) => {
                 match self
                     .file_provider
                     .chunk(&chunk.content_id, chunk.index, chunk.offset, chunk.length)
                 {
-                    Some(data) if data.len() == usize::try_from(chunk.length).unwrap_or(usize::MAX) => FileResponse {
-                        data: Some(data),
-                        ..FileResponse::default()
-                    },
-                    _ => unavailable_response(),
+                    Some(data) if data.len() == usize::try_from(chunk.length).unwrap_or(usize::MAX) => {
+                        let upload_bytes = data.len();
+                        (
+                            FileResponse {
+                                data: Some(data),
+                                ..FileResponse::default()
+                            },
+                            upload_bytes,
+                        )
+                    }
+                    _ => (unavailable_response(), 0),
                 }
             }
-            Err(_) => FileResponse {
-                error: Some("malformed".to_owned()),
-                ..FileResponse::default()
-            },
+            Err(_) => (
+                FileResponse {
+                    error: Some("malformed".to_owned()),
+                    ..FileResponse::default()
+                },
+                0,
+            ),
         };
         if let Ok(body) = encode_file_response(&response) {
+            self.queue_file_response(channel, body, upload_bytes);
+        }
+    }
+
+    /// Sends a response immediately or schedules it to keep the configured
+    /// average upload rate. Metadata and errors are never delayed.
+    fn queue_file_response(&mut self, channel: ResponseChannel<Vec<u8>>, body: Vec<u8>, upload_bytes: usize) {
+        if self.upload_bytes_per_second == 0 || upload_bytes == 0 {
             let _ = self.swarm.behaviour_mut().file.send_response(channel, body);
+            return;
+        }
+        let rate = u64::try_from(upload_bytes).unwrap_or(u64::MAX);
+        let duration = Duration::from_secs_f64(rate as f64 / self.upload_bytes_per_second as f64);
+        let now = Instant::now();
+        let mut due = self.next_upload_slot.max(now) + duration;
+        // Keep a single response inside the peer's request deadline. The next
+        // slot still advances by the full amount so bursts cannot reset the
+        // average rate.
+        let deadline = now + self.config.request_timeout.saturating_sub(Duration::from_secs(1));
+        due = due.min(deadline);
+        self.next_upload_slot = self.next_upload_slot.max(now) + duration;
+        self.delayed_file_responses
+            .push_back(DelayedFileResponse { due, channel, body });
+    }
+
+    fn flush_delayed_file_responses(&mut self) {
+        let now = Instant::now();
+        while self
+            .delayed_file_responses
+            .front()
+            .is_some_and(|response| response.due <= now)
+        {
+            let Some(response) = self.delayed_file_responses.pop_front() else {
+                break;
+            };
+            let _ = self
+                .swarm
+                .behaviour_mut()
+                .file
+                .send_response(response.channel, response.body);
         }
     }
 

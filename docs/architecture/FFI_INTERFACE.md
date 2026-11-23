@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-FFI-001 |
-| Version | 1.7.0 (ABI 1) |
-| Status | Implemented through Stage 14; Android runtime verification deferred |
-| Date | 2026-11-22 |
+| Version | 1.8.0 (ABI 1) |
+| Status | Implemented through Stage 15; Android runtime verification deferred |
+| Date | 2026-11-23 |
 | Header | [nexus_core.h](nexus_core.h) |
 | Related | [ADR-0003](../decisions/ADR-0003-ffi-c-abi-jni-jna.md), [Architecture](../ARCHITECTURE.md) |
 
@@ -219,7 +219,7 @@ All production methods are available on both Android and Windows. Method IDs are
 | 0x0302 | `profile.publish` | A | `display_name?`, `username?`, `bio?`, `avatar_content_id?`, `publication_refs?`, `publish?`, `expected_revision?` | `profile.draft_saved` when `publish` is false, otherwise `profile.published` with revision and announcement outcome. |
 | 0x0303 | `profile.lookup` | A | `identity_id` | `profile.lookup_completed` with a verified record, freshness, conflicts, and username-label collisions. |
 | 0x0401 | `store.usage` | S | none | Quota, used bytes by category, free space, reserve. |
-| 0x0402 | `store.set_quota` | S | `quota_bytes` | Effective quota and whether current usage exceeds it. |
+| 0x0402 | `store.set_quota` | S | `quota_bytes` | Effective quota, usage, free space, reserve, and storage health. |
 | 0x0403 | `store.cleanup_preview` | S | none | Reclaimable bytes and items requiring confirmation. |
 | 0x0404 | `store.cleanup` | A | `selection` | `store.cleanup_completed` with reclaimed bytes. |
 | 0x0501 | `publication.create` | A | `content_id`, `display_filename`, `description?`, `category?`, `tags?`, `parent_content_id?`, `parent_publication_id?` | `publication.published` with publication ID, announcement and provider outcome, serving, availability, and preview. |
@@ -249,12 +249,14 @@ All production methods are available on both Android and Windows. Method IDs are
 | 0x0804 | `download.resume` | A | `download_id` | `download.resumed` and transfer events. |
 | 0x0805 | `download.cancel` | A | `download_id`, `keep_partial` | `download.cancelled`. |
 | 0x0806 | `download.remove` | A | `download_id`, `confirmation` | `download.removed`; bytes removed only if unreferenced. |
-| 0x0901 | `replica.add` | A | `publication_id` | `replica.verifying` and terminal active or failed. |
-| 0x0902 | `replica.list` | S | `cursor`, `limit` | Replicas with size, verification time, serving state. |
-| 0x0903 | `replica.pause` | A | `replica_id` | `replica.paused`. |
-| 0x0904 | `replica.resume` | A | `replica_id` | `replica.resumed`. |
-| 0x0905 | `replica.remove` | A | `replica_id`, `confirmation` | `replica.removed`. |
-| 0x0906 | `replica.verify` | A | `replica_id` | `replica.verified` or failed. |
+| 0x0901 | `replica.add` | A | `publication_id?`, `content_id?`, `source_peer?`, `confirmation`, `metered?`, `battery_percent?` | `replica.verifying` then `replica.active` or `replica.failed`; only an already verified local copy can be hosted. |
+| 0x0902 | `replica.list` | S | `cursor?`, `limit?`, `include_removed?` | Replicas with publication attribution, size, verification and serving state, timestamps, usage, and hosting policy. |
+| 0x0903 | `replica.pause` | A | `replica_id` | `replica.paused`; bytes and the original record are retained. |
+| 0x0904 | `replica.resume` | A | `replica_id`, `metered?`, `battery_percent?` | Re-verifies, then `replica.resumed` and `replica.active`, or `replica.failed`. |
+| 0x0905 | `replica.remove` | A | `replica_id`, `confirmation` | `replica.removed`; stops serving and releases the local hosting reference. |
+| 0x0906 | `replica.verify` | A | `replica_id` | `replica.verified` or `replica.verification_failed`; a paused replica stays paused. |
+| 0x0907 | `hosting.limits_get` | S | none | Effective hosting limits, metered and battery signals, serving decision, and limits notice. |
+| 0x0908 | `hosting.limits_set` | S | `upload_bytes_per_second?`, `allow_metered?`, `battery_min_percent?`, `metered?`, `battery_percent?` | Persisted limits and current serving decision; emits `hosting.limits_changed`. |
 | 0x0A01 | `settings.get` | S | none | Persisted settings. |
 | 0x0A02 | `settings.set` | S | changed fields | Effective settings and restart requirements. |
 | 0x0A03 | `diagnostics.export` | A | `sections` | `diagnostics.ready` with redacted archive bytes. |
@@ -263,7 +265,7 @@ All production methods are available on both Android and Windows. Method IDs are
 
 Method IDs are grouped by domain. A future minor ABI may add methods in unused IDs; a released ID is never renumbered. Unknown IDs return `NEXUS_STATUS_UNSUPPORTED` with a domain error.
 
-Stage 14 implements thirty-three callable methods: `system.info`, `system.health`, `system.snapshot`, the three `profile.*` methods above, the five `publication.*` methods above, `store.usage`, the thirteen `network.*` methods above, the six `download.*` methods, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
+Stage 15 implements forty-two callable methods: `system.info`, `system.health`, `system.snapshot`, the three `profile.*` methods above, the five `publication.*` methods above, `store.usage`, `store.set_quota`, the thirteen `network.*` methods above, the six `download.*` methods, the six `replica.*` methods, the two `hosting.*` methods, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
 
 ### 6.1 Network method semantics
 
@@ -334,9 +336,30 @@ Stage 14 implements thirty-three callable methods: `system.info`, `system.health
 - Provider lookup returns bounded `{peer_id, addresses}` hints. Availability values are `local`, `available_now`, `seen_recently`, `no_known_source`, and `record_only`. A provider hint does not prove the peer will answer; availability is a last-observed hint, not a guarantee.
 - `publication.unpublish` requires `confirmation: true` and a local publication owned by the current identity. It signs a tombstone bound to the identity, publication ID, content ID, and revision, verifies it against the publication, stores it, marks the row tombstoned and not serving, announces the tombstone, and withdraws the provider unless another local serving reason remains. Local bytes and the local original reference are retained. A non-owner, missing confirmation, or already-tombstoned row returns `conflict`.
 - `publication.unpublished` carries `publication_id`, `tombstone_id` (`"{publication_id}:{revision}"`), `revision`, `record_verified`, `tombstone_announced`, `provider_withdrawn`, `serving`, `local_bytes_retained`, `record_removed`, `availability`, `limits`, and an optional `error` map. `record_removed` is always false.
-- A serving node answers file metadata and chunk requests only when the content is verified and a local serving publication, active replica, or retained completed download exists. A cached remote publication never makes this device a source.
+- A serving node answers file metadata and chunk requests only when the content is verified, the hosting policy allows serving, and a local serving publication, active replica, or retained completed download exists. A cached remote publication never makes this device a source.
 - Previews are metadata only: `{kind, supported, auto_execute: false, reason}`. `kind` is `text`, `image`, or `none`; `reason` is `plain_text`, `raster_image`, or `unsupported_format`. Only plain-text and raster-image extensions are eligible. SVG, HTML, PDF, archives, binaries, and executable script extensions are never previewed, and no path executes a file automatically.
 - `publication.create`, `publication.unpublish`, and `publication.lookup` are cancellable. Cancellation emits `publication.publish_cancelled`, `publication.unpublish_cancelled`, or `publication.lookup_cancelled`. A verification or storage failure during lookup emits `publication.lookup_failed`.
+
+### 6.6 Replica method semantics
+
+- Hosting is explicit. `replica.add` requires `confirmation: true` and a running core. It accepts `publication_id`, `content_id`, or both as 32-byte hex; when both are present, the publication must describe the content. `source_peer` is optional attribution, not a download source: the method never downloads bytes.
+- The content must already exist locally, verify against its content ID, and have a canonical manifest. When a publication is named, its exact signed bytes must verify, bind the publication ID, and validate the manifest. An incomplete or corrupt copy returns `verification_failed`; no active row or provider advertisement is created.
+- A metered network that is not allowed, or a known battery level below a nonzero threshold, refuses `replica.add` and `replica.resume` with `conflict` and a `reason` detail before verification work begins.
+- A successful add stores or reactivates the deterministic row `replica-<content_id>`, adopts an `active_replica` reference, and returns `{op_id, accepted, replica, usage, attribution_preserved, limits}` immediately. A worker starts providing the content ID and emits `replica.active`; if networking is unavailable, the replica stays active and the event reports `announced: false` with an error.
+- `replica.list` is paginated by replica ID. `limit` is 1-100 and defaults to 50; `include_removed` defaults to false. Each replica includes `replica_id`, `content_id`, `publication_id`, `state`, `source_peer`, `verified_size_bytes`, `last_verified_at_ms`, `last_checked_at_ms`, `last_seen_at_ms`, `failure_count`, `last_error`, `announced`, `serving`, `attribution_preserved`, `created_at_ms`, and `updated_at_ms`. The result also includes `usage` (`total_count`, `active_count`, `paused_count`, `failed_count`, `storage_bytes`) and `hosting`.
+- `serving` is true only while the row is active and the hosting policy allows serving. It is not a claim that another peer downloaded recently. `last_seen_at_ms` records the last successful advertisement or served metadata/chunk request.
+- `replica.pause` is idempotent, keeps bytes, marks the row paused and not announced, and withdraws the provider if no other local serving reason remains. `replica.resume` re-verifies the complete file and manifest before the row becomes active; a corrupt copy returns `verification_failed` and stays failed. `replica.remove` requires `confirmation: true`, stops serving, releases the active replica reference, and never rewrites the original signed publication. Re-adding the same content reactivates the same row.
+- `replica.verify` runs a full verification and emits `replica.verified` or `replica.verification_failed`. A successful verification of a paused replica updates its size and timestamps but does not resume it. A failed replica becomes active only on a later explicit `replica.resume`.
+- Startup verifies active replicas before advertising them. A maintenance thread re-checks replicas whose last successful verification is older than seven days and emits `replica.maintenance_completed`. A failed verification marks the row `verification_failed`, clears advertisement, and withdraws the provider unless another serving reason remains.
+- `replica.add`, `replica.resume`, `replica.remove`, and `replica.verify` are cancellable. Missing confirmation or an invalid lifecycle transition returns `conflict`.
+
+### 6.7 Hosting limits and quota
+
+- `hosting.limits_get` returns `limits` (`upload_bytes_per_second`, `allow_metered`, `battery_min_percent`), `metered`, `battery_percent`, `serving_allowed`, `blocked_reason`, and `limits_notice`.
+- `hosting.limits_set` merges supplied fields. The upload limit is `0` (unlimited) or 256 KiB/s-64 MiB/s. `battery_min_percent` is 0-100; 0 disables the battery gate. `allow_metered` defaults to false. Optional `metered` and `battery_percent` update host-reported signals without changing the persisted limits. The method persists the limits and applies the upload rate to the running network.
+- `blocked_reason` is `metered_network` when the network is metered and not allowed, or `battery_low` when a known battery level is below a nonzero threshold. An unknown battery level never blocks. While blocked, inbound file metadata and chunk requests, including publication serving, are refused; stored replicas and their records remain intact.
+- `store.set_quota` sets the managed-blob quota from 1 to 500 GiB, persists it, and returns quota, managed usage, free space, reserve, and storage health. A replica add or resume checks the quota first and returns `quota_exceeded` rather than evicting an existing publication or replica.
+- Upload throttling spaces inbound file-chunk responses to the configured average rate. Metadata and error responses are not delayed. The current response is kept inside the peer request deadline, and bursts cannot reset the average.
 
 ## 7. Domain error codes
 
@@ -433,7 +456,7 @@ NexusStatus nexus_core_export_close(
 
 Events use the envelope in section 5.4.
 
-Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. Stage 13 adds the `profile.*` signed-profile family. Stage 14 adds the `publication.*` publishing family. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
+Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. Stage 13 adds the `profile.*` signed-profile family. Stage 14 adds the `publication.*` publishing family. Stage 15 adds the `replica.*` hosting family and `hosting.limits_changed`. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
 
 | Event | Meaning | Data |
 |---|---|---|
@@ -478,7 +501,17 @@ Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stop
 | `download.failed` | Terminal failure. | `download_id`, `error`, `verified_bytes` |
 | `download.cancelled` | Cancelled. | `download_id`, `partial_kept` |
 | `download.removed` | Incomplete download removed. | `download_id`, `removed` |
-| `replica.state` | Replica state changed. | `replica_id`, `state`, `last_verified_at?` |
+| `replica.verifying` | A full replica verification started. | `replica_id`, `content_id` |
+| `replica.active` | Replica verified and provider advertisement attempted. | `replica_id`, `content_id`, `state`, `announced`, `verified`, `attribution_preserved`, `error?` |
+| `replica.failed` | Hosting or resume verification failed. | `replica_id`, `error` |
+| `replica.paused` | Hosting paused; bytes and the original record retained. | `replica_id`, `content_id` |
+| `replica.resumed` | A paused or failed replica verified and resumed. | `replica_id`, `content_id` |
+| `replica.removed` | Hosting stopped and the local reference released. | `replica_id`, `content_id`, `publication_id`, `publication_preserved`, `attribution_preserved` |
+| `replica.verified` | Explicit re-verification succeeded. | `replica_id`, `content_id`, `verified`, `verified_size_bytes`, `state`, `announced`, `checked_at_ms`, `error?` |
+| `replica.verification_failed` | Full verification failed; advertising and serving stopped. | `replica_id`, `content_id`, `error` |
+| `replica.cancelled` | Replica verification or announcement cancelled. | `replica_id`, `action` |
+| `replica.maintenance_completed` | Startup or periodic verification pass finished. | `checked`, `failed`, `skipped`, `cancelled` |
+| `hosting.limits_changed` | Hosting limits or host signals changed. | `limits`, `hosting` |
 | `search.page` | Search or Explore results page. | `op_id`, `items`, `next_cursor?`, `coverage` |
 | `search.completed` | Search terminal result. | `op_id`, `coverage`, `conflicts` |
 | `diagnostics.ready` | Redacted diagnostics archive ready. | `archive_bytes`, `sections` |
@@ -596,10 +629,13 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 | 13 | A newer revision supersedes a cached one, and an unreachable publisher leaves a stale-labeled cache instead of a false success. | Passed in `nexus-core/tests/stage13.rs` and the `nexus-core` profile worker tests. |
 | 14 | A publisher imports, signs, announces, serves, and withdraws a publication; a second engine discovers and verifies the record, downloads the content, and observes the signed tombstone. | Passed in `nexus-core/tests/stage14.rs`. |
 | 14 | The serving gate refuses unowned or tombstoned content, and unpublish retains local bytes while reporting the limits. | Passed in `nexus-store/tests/stage14.rs` and the `nexus-core` publication worker tests. |
+| 15 | A host explicitly replicates a file, verifies it before advertising, serves it to another peer after the original publisher withdraws, and keeps the original signed attribution. | Passed in `nexus-core/tests/stage15.rs`. |
+| 15 | Pause, resume, remove, quota, metered, and battery policies stop serving without deleting the original record; a paused replica stays paused through verification. | Passed in `nexus-core/tests/stage15.rs` and `nexus-store/tests/stage15.rs`. |
+| 15 | Corrupt local bytes are detected by explicit and startup verification, stop advertising and serving, and recover only after a valid re-verification. | Passed in `nexus-core/tests/stage15.rs`. |
 | 19 | Fuzzing covers malformed CBOR, oversized buffers, invalid handles, and cancellation races. | Not yet implemented. |
 
 The detailed evidence, commands, and test counts are in
 [STAGE_08.md](../progress/STAGE_08.md), [STAGE_09.md](../progress/STAGE_09.md),
 [STAGE_10.md](../progress/STAGE_10.md), [STAGE_11.md](../progress/STAGE_11.md),
-[STAGE_12.md](../progress/STAGE_12.md), [STAGE_13.md](../progress/STAGE_13.md), and
-[STAGE_14.md](../progress/STAGE_14.md).
+[STAGE_12.md](../progress/STAGE_12.md), [STAGE_13.md](../progress/STAGE_13.md),
+[STAGE_14.md](../progress/STAGE_14.md), and [STAGE_15.md](../progress/STAGE_15.md).

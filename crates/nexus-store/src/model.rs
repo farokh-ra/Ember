@@ -2,6 +2,8 @@
 
 use nexus_protocol::Category;
 
+use crate::error::{StoreError, StoreResult};
+
 /// The reason a content blob is retained.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ReferenceType {
@@ -531,16 +533,82 @@ pub struct ReplicaRecord {
     pub replica_id: String,
     /// Content being hosted.
     pub content_id: String,
-    /// Original publication identifier, if known.
+    /// Original publication identifier, if known. This is attribution only;
+    /// the signed publication bytes are never rewritten.
     pub publication_id: Option<String>,
     /// Current hosting state.
     pub state: ReplicaState,
+    /// Peer that served the original verified copy, when known.
+    pub source_peer: Option<String>,
+    /// Size recorded by the last successful verification.
+    pub verified_size_bytes: Option<u64>,
     /// Last successful re-verification time.
     pub last_verified_at: Option<u64>,
+    /// Last verification attempt time, successful or not.
+    pub last_checked_at: Option<u64>,
+    /// Last time this node successfully advertised or served the replica.
+    pub last_seen_at: Option<u64>,
+    /// Consecutive verification or advertisement failures.
+    pub failure_count: u64,
+    /// Last redacted failure message.
+    pub last_error: Option<String>,
+    /// Whether this node currently advertises the content ID as a provider.
+    pub announced: bool,
     /// Creation time.
     pub created_at: u64,
     /// Last update time.
     pub updated_at: u64,
+}
+
+/// Aggregate hosted-replica storage and state counts.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ReplicaUsage {
+    /// Rows that are not removed.
+    pub total_count: u64,
+    /// Rows in the active state.
+    pub active_count: u64,
+    /// Rows in the paused state.
+    pub paused_count: u64,
+    /// Rows in the verification-failed state.
+    pub failed_count: u64,
+    /// Distinct verified bytes attributed to non-removed replicas.
+    pub storage_bytes: u64,
+}
+
+/// Smallest accepted upload limit for hosting.
+pub const MIN_UPLOAD_BYTES_PER_SECOND: u64 = 256 * 1024;
+/// Largest accepted upload limit for hosting.
+pub const MAX_UPLOAD_BYTES_PER_SECOND: u64 = 64 * 1024 * 1024;
+
+/// User-controlled hosting limits.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct HostingLimits {
+    /// Maximum upload rate in bytes per second; zero means unlimited.
+    pub upload_bytes_per_second: u64,
+    /// Whether hosting and serving may continue on a metered network.
+    pub allow_metered: bool,
+    /// Minimum battery percentage for hosting; zero disables the check.
+    pub battery_min_percent: u8,
+}
+
+impl HostingLimits {
+    /// Validates the documented bounds.
+    pub fn validate(&self) -> StoreResult<()> {
+        if self.upload_bytes_per_second != 0
+            && !(MIN_UPLOAD_BYTES_PER_SECOND..=MAX_UPLOAD_BYTES_PER_SECOND).contains(&self.upload_bytes_per_second)
+        {
+            return Err(StoreError::InvalidConfig(format!(
+                "upload limit must be zero or between {MIN_UPLOAD_BYTES_PER_SECOND} and \
+                 {MAX_UPLOAD_BYTES_PER_SECOND} bytes per second"
+            )));
+        }
+        if self.battery_min_percent > 100 {
+            return Err(StoreError::InvalidConfig(
+                "battery minimum must be between 0 and 100 percent".to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// A bounded peer observation record.

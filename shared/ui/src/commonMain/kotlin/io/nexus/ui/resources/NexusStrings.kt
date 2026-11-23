@@ -368,11 +368,20 @@ public interface NexusStrings {
     public val hostedStatusPaused: String
     public val hostedStatusFailed: String
     public val hostedOriginalUploader: String
+    public val hostedPublication: (String) -> String
+    public val hostedStorageUse: (String) -> String
+    public val hostedServing: String
+    public val hostedNotServing: String
+    public val hostedLastSeen: (String) -> String
     public val hostedYouHost: String
     public val hostedPeers: (Int) -> String
     public val hostedLastVerified: (String) -> String
     public val hostedNotVerified: String
     public val hostedFailedNote: String
+    public val hostedPause: String
+    public val hostedResume: String
+    public val hostedPausedDone: String
+    public val hostedResumedDone: String
     public val hostedRemove: String
     public val hostedRemoveDialogTitle: String
     public val hostedRemoveDialogBody: String
@@ -926,12 +935,21 @@ public object EnglishNexusStrings : NexusStrings {
     override val hostedStatusPaused: String = "Hosting paused"
     override val hostedStatusFailed: String = "Verification failed"
     override val hostedOriginalUploader: String = "Original uploader"
+    override val hostedPublication: (String) -> String = { value -> "Publication: $value" }
+    override val hostedStorageUse: (String) -> String = { value -> "Storage use: $value" }
+    override val hostedServing: String = "Serving to peers"
+    override val hostedNotServing: String = "Not serving"
+    override val hostedLastSeen: (String) -> String = { value -> "Last served: $value" }
     override val hostedYouHost: String = "You host this replica"
     override val hostedPeers: (Int) -> String = { count -> "Peers served (demo): $count" }
     override val hostedLastVerified: (String) -> String = { value -> "Last verified: $value" }
     override val hostedNotVerified: String = "Not verified yet"
     override val hostedFailedNote: String =
         "Verification failed. This replica is not advertised or served."
+    override val hostedPause: String = "Pause hosting (demo)"
+    override val hostedResume: String = "Resume hosting (demo)"
+    override val hostedPausedDone: String = "Demo only — hosting was paused in this preview."
+    override val hostedResumedDone: String = "Demo only — hosting was resumed in this preview."
     override val hostedRemove: String = "Stop hosting"
     override val hostedRemoveDialogTitle: String = "Stop hosting this demo replica?"
     override val hostedRemoveDialogBody: String =

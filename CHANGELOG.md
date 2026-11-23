@@ -255,6 +255,40 @@ All notable changes to Ember are recorded here. The format follows
   unpublish limits in the demo Publish and File Details screens.
 - 16 new Stage 14 Rust tests, for 281 Rust tests total.
 - Stage 14 evidence record.
+- Explicit voluntary file hosting with mandatory per-file confirmation, no
+  automatic download or seeding, and a deterministic `replica-<content_id>` row
+  that reactivates on re-add.
+- Full verification of the content ID, canonical manifest, and signed
+  publication binding before any provider advertisement.
+- Replica lifecycle states `active`, `paused`, `verification_failed`, and
+  `removed`, with pause, resume, remove, and manual verify operations.
+- Startup re-verification and an hourly maintenance pass that re-checks
+  replicas whose last successful verification is older than seven days.
+- Storage quota control through `store.set_quota` across the 1-500 GiB product
+  range.
+- Upload bandwidth, metered-network, and battery-threshold policy through
+  `hosting.limits_get` and `hosting.limits_set`, enforced for all inbound file
+  serving.
+- A serving gate that combines verified content, a local serving reason, and the
+  current hosting policy.
+- Last-seen, last-verified, last-checked, failure-count, redacted-error, and
+  announcement tracking per replica.
+- A demo Hosted Files screen showing publication, size, verification, last
+  verification time, serving state, storage use, and pause, resume, remove, and
+  restore actions.
+- Nine new core methods: `store.set_quota` (0x0402), `replica.add` (0x0901),
+  `replica.list` (0x0902), `replica.pause` (0x0903), `replica.resume` (0x0904),
+  `replica.remove` (0x0905), `replica.verify` (0x0906),
+  `hosting.limits_get` (0x0907), and `hosting.limits_set` (0x0908).
+- Eleven hosting events: `replica.verifying`, `replica.active`,
+  `replica.failed`, `replica.paused`, `replica.resumed`, `replica.removed`,
+  `replica.verified`, `replica.verification_failed`, `replica.cancelled`,
+  `replica.maintenance_completed`, and `hosting.limits_changed`.
+- Schema version 8 with replica source attribution, verified size, check and
+  seen timestamps, failure count, redacted error, announcement state, and a
+  state index.
+- 5 new Stage 15 Rust tests, for 286 Rust tests total.
+- Stage 15 evidence record.
 
 ### Changed
 
@@ -322,6 +356,19 @@ All notable changes to Ember are recorded here. The format follows
   justifies it.
 - The committed `Cargo.lock` now resolves `url` 2.5.9 and `form_urlencoded`
   1.2.3, fixing RUSTSEC-2026-0592. The package count remains 411.
+- The SQLite schema is now version 8; replicas carry source peer, verified size,
+  check and seen timestamps, failure count, redacted error, and announcement
+  state, with a state index for lifecycle queries.
+- The protocol version is now `0.1.0-stage-15`; the ABI remains 1.
+- The FFI interface document is at version 1.8.0 with forty-two callable
+  methods.
+- The identify protocol remains `/nexus/0.1.0-stage-12` because Stage 15 adds no
+  new network protocol or frame type.
+- The core file provider now also applies the hosting policy, so a paused,
+  failed, removed, metered, or low-battery host stops serving while its records
+  and bytes remain.
+- Inbound file-chunk responses are throttled to the configured average upload
+  rate; metadata and error responses stay immediate.
 
 ### Fixed
 
@@ -435,6 +482,21 @@ All notable changes to Ember are recorded here. The format follows
   depends on later hosting and republication work.
 - Previews are metadata classification only. The core does not render text or
   images, and the demo screens do not open files.
+- Stage 15 requires a locally verified copy before hosting; `replica.add` never
+  downloads bytes for the user.
+- Metered-network and battery values are host-reported signals. Android and
+  Windows platform integrations that supply them, and foreground-service
+  hosting limits, remain later work.
+- Hosted-file rows are retained after removal as audit history; there is no
+  purge or compaction UI yet.
+- Hosting has no seeding incentive, availability guarantee, or remote-erasure
+  mechanism. Removing a replica stops local serving and cannot delete copies
+  other peers hold.
+- The Kotlin Hosted Files screen shows demo data and pause, resume, and remove
+  actions; it is not connected to the core yet.
+- Android runtime replication, metered detection, and battery-aware serving are
+  not exercised locally; the Android libraries cross-build with the same hosting
+  code.
 - Usernames are labels, not unique accounts. There is no registry, reservation,
   or first-claim rule, and collision detection covers only profiles the local
   store has seen.

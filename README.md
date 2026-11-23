@@ -10,17 +10,18 @@ name for ABI and format stability: Kotlin packages (`io.nexus`), Rust crates
 (`nexus-*`), the native library (`nexus_core`), and signed record tags
 (`NEXUS-*`).
 
-This repository is at the end of **Stage 14: publishing and file pages**. The
-Android and Windows shells still run the shared, clickable UI prototype with
-visibly labelled mock data. Underneath it, the Rust core now owns an embedded
-SQLite schema, migrations, a content-addressed managed file store, quota
-accounting, reference-counted cleanup, startup reconciliation, metadata
+This repository is at the end of **Stage 15: voluntary replication and
+availability**. The Android and Windows shells still run the shared, clickable UI
+prototype with visibly labelled mock data. Underneath it, the Rust core now owns
+an embedded SQLite schema, migrations, a content-addressed managed file store,
+quota accounting, reference-counted cleanup, startup reconciliation, metadata
 export/restore, local Ed25519 identities, stable `nx1...` identity IDs, canonical
 signed records, encrypted identity storage, passphrase-encrypted backups,
 streaming content IDs, chunk manifests, publication revisions, signed
 tombstones, the versioned native boundary, an authenticated libp2p transport
-stack, direct peer-to-peer file transfer, signed public profiles, and explicit
-signed file publishing. A C harness, Android JNI shim, and Windows JNA adapter
+stack, direct peer-to-peer file transfer, signed public profiles, explicit
+signed file publishing, and voluntary file hosting with user-controlled storage
+and bandwidth limits. A C harness, Android JNI shim, and Windows JNA adapter
 exercise the same lifecycle, dispatch, event, cancellation, and streaming
 contract. Networking supports QUIC v1 and TCP + Noise + Yamux, direct
 connections, persisted bootstrap peers, bounded reconnection, Kademlia peer
@@ -32,7 +33,10 @@ Profiles are signed, published under an identity-derived DHT key, verified befor
 caching, labelled stale when unconfirmed, and treat usernames as non-unique
 labels. Publications bind metadata to verified content, are served only while the
 publisher keeps a local serving reason, and report signature, serving, and
-availability separately. Hosting and search remain later stages.
+availability separately. Hosting is an explicit per-file action that verifies
+the complete local copy before advertising, preserves the original signed
+attribution, and can be paused, resumed, or removed. Search remains a later
+stage.
 
 ## Current status
 
@@ -50,7 +54,7 @@ availability separately. Hosting and search remain later stages.
 | Loading, empty, offline, error, and retry states | Complete on data-driven screens |
 | Accessibility and keyboard support | Implemented; focus, keyboard, and Escape checks passed |
 | Stage 04 desktop test pass | Complete; journeys, five states, themes, and compact layout verified |
-| SQLite schema and transactional migrations | Complete; schema version 7 |
+| SQLite schema and transactional migrations | Complete; schema version 8 |
 | Managed content-addressed file store | Complete; atomic import, no-copy staged adoption, and exclusive lock |
 | Quota, free-space reserve, and file limits | Complete; 10 GiB default, 1 GiB reserve, 4 GiB file cap |
 | Reference-counted deletion and cleanup | Complete; published originals and replicas require confirmation |
@@ -62,7 +66,7 @@ availability separately. Hosting and search remain later stages.
 | Publication revisions and signed tombstones | Complete; immutability, attribution, and revision rules |
 | Encrypted identity at rest and backup | Complete; LEK/HKDF at rest, Argon2id/XChaCha20-Poly1305 backup |
 | C ABI and versioned CBOR envelopes | Complete; 17 functions, opaque handles, panic containment |
-| Core lifecycle, dispatch, and event queue | Complete; thirty-three methods, four operation workers, two download workers, coalescing queue |
+| Core lifecycle, dispatch, and event queue | Complete; forty-two methods, four operation workers, two download workers, coalescing queue |
 | Streaming import/export through the ABI | Complete; 1 MiB chunks, staged adoption, bounded export |
 | Device peer identity and encrypted peer key | Complete; independent of the user signing identity |
 | QUIC v1 and TCP/Noise/Yamux transports | Complete on Windows loopback; Android runtime deferred |
@@ -82,15 +86,19 @@ availability separately. Hosting and search remain later stages.
 | Profile methods and events | Complete; three `profile.*` methods and six profile events |
 | Explicit file publishing | Complete on Windows loopback; signed metadata, DHT announcement, provider serving, and separate signature/serving/availability states |
 | Publication methods and events | Complete; five `publication.*` methods and eight publication events |
+| Voluntary file hosting | Complete on Windows loopback; explicit confirmation, full verification before advertisement, pause/resume/remove, and preserved attribution |
+| Replica methods and events | Complete; six `replica.*` methods, two `hosting.*` methods, and eleven hosting events |
+| Hosting limits and quota | Complete in the core; storage quota, upload rate, metered-network, and battery gates |
+| Startup and seven-day re-verification | Complete; active replicas re-checked before advertising and hourly maintenance |
 | Safe file previews | Complete in the core metadata contract; plain text and raster images only, never auto-executed; demo UI only |
 | JNI and JNA adapters | Complete on Windows JNA and a Windows-hosted JNI proxy; Android runtime execution deferred |
 | C harness and adapter contract tests | Complete; 100 lifecycle cycles and 2.5 MB round-trip |
 | Formatting, linting, and static analysis | Enforced locally and in CI |
 | CI workflow and dependency review | Defined |
 | Developer setup and contribution guides | Complete |
-| Product features | Mock UI prototypes; storage, crypto, publication, native, network, transfer, profile, and publishing foundations complete, hosting and search later |
+| Product features | Mock UI prototypes; storage, crypto, publication, native, network, transfer, profile, publishing, and hosting foundations complete; search later |
 
-See [docs/progress/STAGE_14.md](docs/progress/STAGE_14.md) for the exact
+See [docs/progress/STAGE_15.md](docs/progress/STAGE_15.md) for the exact
 evidence and commands used to verify this stage. The byte-level record, identity,
 manifest, tombstone, profile, at-rest, and backup formats are specified in
 [docs/architecture/SIGNED_RECORD_FORMATS.md](docs/architecture/SIGNED_RECORD_FORMATS.md),

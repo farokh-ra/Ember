@@ -1,81 +1,83 @@
 # Ember Project Handoff
 
-**Current stage:** 14 - publishing and file pages
+**Current stage:** 15 - voluntary replication and availability
 **Stage status:** Complete
-**Last updated:** 2026-11-22
-**Branch:** `feat/14-publishing` (from `main` after Stage 13 merged)
-**Next stage:** 15 - voluntary replication and availability (waiting for user permission)
+**Last updated:** 2026-11-23
+**Branch:** `feat/15-replication` (from `feat/14-publishing` at `3412ba3`)
+**Next stage:** 16 - local and distributed search (waiting for user permission)
 
 ## What was implemented
 
-Stage 14 adds explicit signed file publishing on top of the Stage 07 publication
-format, the Stage 10 DHT, the Stage 12 transfer stack, and the Stage 13 identity
-workflow:
+Stage 15 turns the Stage 14 serving gate into explicit, user-controlled hosting
+on top of the Stage 05 managed store, the Stage 10 DHT and provider records, the
+Stage 12 transfer stack, and the Stage 14 signed publication workflow:
 
-- A publish flow that takes a verified content ID from the streaming import API
-  and binds it to a signed record with display filename, description, category,
-  tags, size, manifest root, revision, and timestamp.
-- DHT announcement under `sha256("NEXUS-DHT-PUB-v1" + publication_id)`, plus a
-  content provider record so other peers can find the publisher by content ID.
-- A serving gate that shares verified bytes only when a local non-tombstoned
-  publication is serving, an active replica exists, or a completed download is
-  retained.
-- `publication.get` and `publication.list_local` with metadata, tags, local and
-  serving state, announced state, availability, signature status, and preview.
-- `publication.lookup` with signature, publication ID, and derived-key
-  verification, signed-tombstone lookup, cache conflict retention, provider
-  hints, and a separate availability result.
-- Unpublish with explicit confirmation and ownership checks. It signs and
-  announces a tombstone, stops local serving, withdraws the provider unless
-  another local serving reason remains, and retains local bytes.
-- A metadata-only preview contract for plain text and raster images with
-  `auto_execute` always false. SVG, HTML, PDF, archives, binaries, and executable
-  script extensions are never previewed.
-- Five new core methods: `publication.create` (0x0501),
-  `publication.unpublish` (0x0502), `publication.get` (0x0503),
-  `publication.list_local` (0x0504), and `publication.lookup` (0x0505).
-- Eight publication events: `publication.published`,
-  `publication.publish_failed`, `publication.unpublished`,
-  `publication.publish_cancelled`, `publication.unpublish_cancelled`,
-  `publication.lookup_completed`, `publication.lookup_failed`, and
-  `publication.lookup_cancelled`.
-- Schema version 7 with publication category, size, tags, local/serving/
-  announced state, availability, and last-check timestamps.
-- A demo Publish flow and File Details page that show signature, serving, and
-  availability as separate states, with safe-preview and unpublish-limit copy.
-- 16 new Rust tests, for 281 total, and 2 new Kotlin demo catalogue tests.
+- Explicit per-file hosting through `replica.add`, with mandatory confirmation,
+  a locally verified copy, and no automatic download or silent seeding.
+- Full verification of the content ID, canonical manifest, and signed
+  publication binding before any provider advertisement.
+- Replica lifecycle states `active`, `paused`, `verification_failed`, and
+  `removed`, with pause, resume, remove, and manual verify operations.
+- Startup re-verification and an hourly maintenance pass that re-checks replicas
+  whose last successful verification is older than seven days.
+- Storage quota control through `store.set_quota` across the 1-500 GiB product
+  range.
+- Upload bandwidth, metered-network, and battery-threshold policy through
+  `hosting.limits_get` and `hosting.limits_set`, enforced for all inbound file
+  serving.
+- A serving gate that combines verified content, a local serving reason, and the
+  current hosting policy.
+- Last-seen, last-verified, last-checked, failure-count, redacted-error, and
+  announcement tracking per replica.
+- Nine new core methods: `store.set_quota` (0x0402), `replica.add` (0x0901),
+  `replica.list` (0x0902), `replica.pause` (0x0903), `replica.resume` (0x0904),
+  `replica.remove` (0x0905), `replica.verify` (0x0906),
+  `hosting.limits_get` (0x0907), and `hosting.limits_set` (0x0908).
+- Eleven hosting events: `replica.verifying`, `replica.active`,
+  `replica.failed`, `replica.paused`, `replica.resumed`, `replica.removed`,
+  `replica.verified`, `replica.verification_failed`, `replica.cancelled`,
+  `replica.maintenance_completed`, and `hosting.limits_changed`.
+- Schema version 8 with replica source attribution, verified size, check and
+  seen timestamps, failure count, redacted error, announcement state, and a
+  state index.
+- A demo Hosted Files screen that shows publication, size, verification, last
+  verification time, serving state, storage use, and pause, resume, remove, and
+  restore actions with visible demo labels.
+- 5 new Rust tests, for 286 total, and extended Kotlin demo catalogue checks.
 
 ## Files changed
 
 Protocol crate:
 
-- `crates/nexus-protocol/src/publication.rs`
+- No changes. Stage 15 reuses the existing manifest, publication, provider, and
+  file-transfer formats.
 
 Core crate:
 
-- `crates/nexus-core/src/publications.rs` (new)
+- `crates/nexus-core/src/hosting.rs` (new)
+- `crates/nexus-core/src/replicas.rs` (new)
 - `crates/nexus-core/src/downloads.rs`
 - `crates/nexus-core/src/engine.rs`
 - `crates/nexus-core/src/lib.rs`
-- `crates/nexus-core/tests/stage12.rs`
-- `crates/nexus-core/tests/stage14.rs` (new)
+- `crates/nexus-core/tests/stage15.rs` (new)
 
 Network crate:
 
+- `crates/nexus-net/src/config.rs`
 - `crates/nexus-net/src/driver.rs`
 - `crates/nexus-net/src/lib.rs`
 
 Store crate:
 
-- `crates/nexus-store/migrations/0007_publications.sql` (new)
+- `crates/nexus-store/migrations/0008_replication.sql` (new)
 - `crates/nexus-store/src/lib.rs`
 - `crates/nexus-store/src/migrations.rs`
 - `crates/nexus-store/src/model.rs`
 - `crates/nexus-store/src/store.rs`
 - `crates/nexus-store/tests/local_import.rs`
 - `crates/nexus-store/tests/profiles.rs`
-- `crates/nexus-store/tests/stage07.rs`
-- `crates/nexus-store/tests/stage14.rs` (new)
+- `crates/nexus-store/tests/stage14.rs`
+- `crates/nexus-store/tests/stage15.rs` (new)
 - `crates/nexus-store/tests/storage.rs`
 
 Shared Kotlin:
@@ -83,24 +85,21 @@ Shared Kotlin:
 - `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/demo/DemoModels.kt`
 - `shared/presentation/src/commonMain/kotlin/io/nexus/presentation/demo/DemoCatalog.kt`
 - `shared/presentation/src/jvmTest/kotlin/io/nexus/presentation/demo/DemoCatalogTest.kt`
-- `shared/ui/src/commonMain/kotlin/io/nexus/ui/components/Status.kt`
+- `shared/ui/src/commonMain/kotlin/io/nexus/ui/components/Cards.kt`
 - `shared/ui/src/commonMain/kotlin/io/nexus/ui/resources/NexusStrings.kt`
-- `shared/ui/src/commonMain/kotlin/io/nexus/ui/screens/FileDetailsScreen.kt`
-- `shared/ui/src/commonMain/kotlin/io/nexus/ui/screens/PublishScreen.kt`
+- `shared/ui/src/commonMain/kotlin/io/nexus/ui/screens/HostedFilesScreen.kt`
 
 Documentation:
 
-- `docs/progress/STAGE_14.md` (new)
-- `docs/architecture/FFI_INTERFACE.md` (version 1.7.0)
-- `docs/architecture/DHT_DESIGN.md`
-- `docs/architecture/FILE_TRANSFER.md`
+- `docs/progress/STAGE_15.md` (new)
+- `docs/architecture/FFI_INTERFACE.md` (version 1.8.0)
+- `docs/ARCHITECTURE.md`
 - `docs/HANDOFF.md`
 - `README.md`, `CHANGELOG.md`
 
 Dependency lock:
 
-- `Cargo.lock` (`url` 2.5.8 -> 2.5.9, `form_urlencoded` 1.2.2 -> 1.2.3, for
-  RUSTSEC-2026-0592)
+- No change. `Cargo.lock` remains at 411 packages.
 
 ## Commands and results
 
@@ -110,19 +109,16 @@ Dependency lock:
 cargo test --workspace -- --test-threads=1
 ```
 
-Result: PASS, 281 tests, 0 failures.
+Result: PASS, 286 tests, 0 failures.
 
-Stage 14-specific suites:
+Stage 15-specific suites:
 
 ```text
-cargo test -p nexus-core --lib publications:: -- --test-threads=1
-cargo test -p nexus-core --test stage14 -- --test-threads=1
-cargo test -p nexus-store --test stage14 -- --test-threads=1
-cargo test -p nexus-store --lib migrations:: -- --test-threads=1
+cargo test -p nexus-core --test stage15 -- --test-threads=1
+cargo test -p nexus-store --test stage15 -- --test-threads=1
 ```
 
-Result: PASS, 9, 1, 5, and 6 tests respectively. The migration suite includes
-the Stage 14 backfill test.
+Result: PASS, 3 and 2 tests respectively.
 
 ### Test breakdown
 
@@ -135,6 +131,7 @@ the Stage 14 backfill test.
 | `nexus-core` Stage 12 tests | 1 | 0 |
 | `nexus-core` Stage 13 tests | 1 | 0 |
 | `nexus-core` Stage 14 tests | 1 | 0 |
+| `nexus-core` Stage 15 tests | 3 | 0 |
 | `nexus-crypto` unit tests | 24 | 0 |
 | `nexus-ffi` unit tests | 4 | 0 |
 | `nexus-ffi` C ABI tests | 6 | 0 |
@@ -152,16 +149,17 @@ the Stage 14 backfill test.
 | `nexus-store` unit tests | 18 | 0 |
 | `nexus-store` local-import tests | 4 | 0 |
 | `nexus-store` profile tests | 5 | 0 |
-| `nexus-store` Stage 14 tests | 5 | 0 |
 | `nexus-store` Stage 07 tests | 4 | 0 |
+| `nexus-store` Stage 14 tests | 5 | 0 |
+| `nexus-store` Stage 15 tests | 2 | 0 |
 | `nexus-store` storage tests | 12 | 0 |
 | `nexus-transfer` unit tests | 7 | 0 |
 | `nexus-transfer` integration tests | 7 | 0 |
 | `nexus-types` unit tests | 1 | 0 |
-| **Rust total** | **281** | **0** |
+| **Rust total** | **286** | **0** |
 
-Stage 13 had 265 tests. Stage 14 adds 9 core publication tests, 5 store Stage 14
-tests, 1 migration test, and 1 core Stage 14 test.
+Stage 14 had 281 tests. Stage 15 adds 3 core integration tests and 2 store
+integration tests.
 
 ### Kotlin checks
 
@@ -172,8 +170,10 @@ gradlew --no-daemon --console=plain spotlessCheck detekt
 ```
 
 Result: PASS, including the desktop distributable and Android debug APK. Gradle
-uses `GRADLE_USER_HOME=NeededToolsHere/gradle-home`, so packaging downloads stay
-inside the repository. The Stage 14 demo changes add two `DemoCatalogTest` cases.
+uses `GRADLE_USER_HOME=F:\Ember\NeededToolsHere\gradle-home`, so the wrapper,
+dependency cache, and WiX packaging download stay inside the repository. The
+Stage 15 demo changes extend `DemoCatalogTest` with publication-ID, storage,
+serving-state, and verification invariants.
 
 ### Formatting, linting, and dependency policy
 
@@ -183,70 +183,65 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 - Formatting and Clippy with warnings denied: PASS.
-- Stage 14 adds no direct dependency; `Cargo.lock` remains at 411 packages.
-- The first CI run failed only `cargo deny check` with RUSTSEC-2026-0592, a stack
-  overflow in `Url::origin()` on nested `blob:` URLs in the transitive `url`
-  crate 2.5.8. The lockfile was updated to `url` 2.5.9 and
-  `form_urlencoded` 1.2.3, and the workspace suite was re-run after the update.
-- The native artifact build was not re-run because the ABI and exported surface
-  did not change. The six C ABI tests still pass in the workspace suite.
-- `cargo deny check` and `cargo audit` run in CI. The advisory that failed the
-  first Stage 14 run is fixed by the lockfile update above.
+- Stage 15 adds no direct dependency; `Cargo.lock` remains at 411 packages.
+- `cargo deny check` and `cargo audit` run in CI with the Stage 14 lockfile.
+- The FFI interface document is at version 1.8.0 with forty-two callable
+  methods.
+- The ABI remains 1; the core protocol version is `0.1.0-stage-15`. The identify
+  protocol remains `/nexus/0.1.0-stage-12` because no network frame changed.
 
 ## Errors and failed attempts
 
-1. Stage 12's integration test assumed imported content could be downloaded
-   without a publication. The Stage 14 serving gate correctly refuses that, so
-   the test now creates an identity and publishes the imported content first.
-2. A publish to a client-only DHT peer fails with `NetError::Rejected`. The
-   Stage 14 integration test runs both publisher and reader as DHT servers so
-   the publisher can store its record with a reachable peer.
-3. The existing `publications` table referenced local identities and contents,
-   and `replicas` referenced publications. A verified remote publication has
-   neither a local identity row nor local bytes, so migration 7 rebuilds both
-   tables and treats `publication_id` on a replica as optional attribution.
-4. Clippy rejected `chunks_exact(2)` and a redundant closure in the new code;
-   both were simplified.
-5. The preview allowlist originally included shell and PowerShell extensions.
-   They were removed because a preview must never normalize opening a program.
+1. `Engine::stop` does not drop the `Store`; restart tests initially held the
+   old handle and failed to reopen the same data root. The tests now drop the
+   engine before creating the next one.
+2. The managed blob path is
+   `<data_root>/store/blobs/<id[0..2]>/<id[2..4]>/<content_id>`; the corruption
+   test uses that path instead of assuming a flat blob directory.
+3. Clippy rejected a `Default` field reassignment in the store test helper; the
+   test now builds the record with struct update syntax.
+4. The first replica-serving test needed the original publisher to withdraw
+   before the replica download, proving the replica was the source rather than
+   the original uploader.
+5. A failed `replica.add` originally risked leaving an announced provider. The
+   implementation now verifies before advertisement and withdraws on failure.
+6. A paused replica could be resumed accidentally by verification. The
+   implementation now keeps paused replicas paused and requires an explicit
+   resume.
+7. The first Gradle run in the new worktree tried to resolve Android Gradle
+   Plugin jars from Google Maven and received 404 responses. The populated
+   repository cache at `F:\Ember\NeededToolsHere\gradle-home` was used instead,
+   and the gate passed.
 
 ## Decisions and unresolved questions
 
-- Stage 14 was explicitly authorized by the project owner and branches from
-  `main` after Stage 13 merged in PR #12.
-- `publication.create` accepts a verified content ID instead of file paths. File
-  selection and streaming import remain host responsibilities.
-- Publishing sets `serving = 1` immediately. The record is useful locally even
-  when the announcement is deferred.
-- Unpublishing retains local bytes and the local original reference. A separate
-  cleanup action may remove them later.
-- A tombstone ID is the local display identifier `"{publication_id}:{revision}"`;
-  the DHT key remains derived from the publication ID.
-- A missing tombstone is not an error; an invalid tombstone fails the lookup.
-- Availability is a last-observed hint, not a guarantee. A provider record does
-  not prove the peer will answer.
-- Preview support is an extension allowlist, not content sniffing. Unsupported
-  formats require an explicit download and verification.
-- Publication editing and revision chains are deferred; Stage 14 creates
-  revision 1 only.
-- Stage 14 announces records on publish and unpublish but does not run a
-  periodic re-announcement worker. The 24 h DHT TTL makes long-term
-  discoverability a later hosting concern.
-- The Kotlin publishing and file pages remain labeled demo data; core wiring is
-  a later UI stage.
-- The ABI remains 1; the core protocol version is `0.1.0-stage-14`. The identify
-  protocol remains `/nexus/0.1.0-stage-12` because no network frame changed.
-- Android runtime publishing and serving evidence is deferred because no
-  emulator or device is available.
+- Replica IDs are deterministic (`replica-<content_id>`) so re-adding the same
+  file reactivates one row and preserves its audit history.
+- Hosting requires a locally verified copy. Stage 15 does not auto-download a
+  file as part of `replica.add`.
+- A removed row is retained. `replica.list` hides it unless
+  `include_removed: true`.
+- Verification of a paused replica updates metadata but does not resume it.
+- Metered and battery signals are host-reported; Android and Windows platform
+  integrations are later work. An unknown battery level never blocks.
+- Upload throttling delays only file-chunk responses. Metadata and errors stay
+  immediate so discovery and failure reporting are not slowed.
+- The provider is withdrawn only when no other local serving reason remains for
+  the content.
+- The original signed publication is never modified by replica operations.
+- The Kotlin Hosted Files screen remains labeled demo data; core wiring is a
+  later UI stage.
+- Android runtime replication, metered detection, and battery-aware serving
+  evidence is deferred because no emulator or device is available.
 
 ## Exact next action
 
-1. Review `docs/progress/STAGE_14.md`, the updated `docs/architecture/`
-   documents, the `nexus-protocol`, `nexus-store`, `nexus-net`, and
-   `nexus-core` Stage 14 changes, and the Stage 14 PR.
-2. Merge Stage 14 after approval. Stage 13 (PR #12) is already merged.
-3. Give explicit approval to start Stage 15. Stage 15 adds voluntary replication
-   and availability: an explicit host action, replica verification before
-   advertising, pause and remove controls, storage and bandwidth limits, and
-   Android metered-network and battery controls. Do not begin it before that
-   approval.
+1. Review `docs/progress/STAGE_15.md`, the updated
+   `docs/architecture/FFI_INTERFACE.md` and `docs/ARCHITECTURE.md`, the
+   `nexus-store`, `nexus-net`, and `nexus-core` Stage 15 changes, and the Stage
+   15 PR.
+2. Merge Stage 15 after approval. Stage 14 (PR #13) is already merged into
+   `main` as `766f23a`.
+3. Give explicit approval to start Stage 16. Stage 16 adds local and distributed
+   search, Explore, coverage, pagination, and provider-loss handling. Do not
+   begin it before that approval.
