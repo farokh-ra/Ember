@@ -9,14 +9,13 @@
 <p align="center">Android · Windows · Kotlin Multiplatform · Compose · Rust · libp2p</p>
 
 <p align="center">
-  <a href="https://github.com/farokh-ra/Ember/actions/workflows/ci.yml"><img src="https://github.com/farokh-ra/Ember/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+  <a href="https://github.com/farokh-ra/Ember/actions/workflows/ci.yml"><img src="https://github.com/farokh-ra/Ember/actions/workflows/ci.yml/badge.svg?branch=main&amp;style=flat-square" alt="CI" /></a>
   <img src="https://img.shields.io/badge/status-Stage%2015%20complete-2EA043?style=flat-square" alt="Stage 15 complete" />
   <img src="https://img.shields.io/badge/license-proprietary-B91C1C?style=flat-square" alt="Proprietary license" />
   <img src="https://img.shields.io/badge/Android-28%2B-3DDC84?style=flat-square&amp;logo=android&amp;logoColor=white" alt="Android 28+" />
   <img src="https://img.shields.io/badge/Windows-10%2F11-0078D4?style=flat-square&amp;logo=windows11&amp;logoColor=white" alt="Windows 10 and 11" />
   <img src="https://img.shields.io/badge/Rust-1.99.1-000000?style=flat-square&amp;logo=rust" alt="Rust 1.99.1" />
   <img src="https://img.shields.io/badge/Kotlin-2.4.21-7F52FF?style=flat-square&amp;logo=kotlin&amp;logoColor=white" alt="Kotlin 2.4.21" />
-  <img src="https://img.shields.io/badge/Compose%20Multiplatform-1.12.2-4285F4?style=flat-square&amp;logo=jetpackcompose&amp;logoColor=white" alt="Compose Multiplatform 1.12.2" />
 </p>
 
 <p align="center">
