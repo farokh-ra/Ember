@@ -9,6 +9,7 @@ mod envelope;
 mod error;
 mod fields;
 mod file;
+mod index;
 mod manifest;
 mod profile;
 mod publication;
@@ -26,6 +27,12 @@ pub use file::{
     ChunkRequest, FILE_WIRE_VERSION, FileRequest, FileResponse, FileSelector, MAX_CHUNK_SLICE_BYTES,
     MAX_FILE_ERROR_BYTES, MAX_FILE_MESSAGE_BYTES, decode_file_request, decode_file_response, encode_file_request,
     encode_file_response,
+};
+pub use index::{
+    INDEX_WIRE_VERSION, IndexKind, IndexRecord, IndexRequest, IndexResponse, MAX_INDEX_CURSOR_BYTES,
+    MAX_INDEX_ERROR_BYTES, MAX_INDEX_MESSAGE_BYTES, MAX_INDEX_PAGE_SIZE, MAX_INDEX_QUERY_BYTES, MAX_INDEX_TAG_BYTES,
+    MAX_INDEX_TAG_FILTERS, decode_index_request, decode_index_response, encode_index_request, encode_index_response,
+    index_provider_key,
 };
 pub use manifest::{ChunkEntry, MANIFEST_SCHEMA_VERSION, MAX_CHUNKS, MAX_MANIFEST_BYTES, ManifestV1, manifest_root};
 pub use profile::{

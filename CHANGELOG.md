@@ -289,6 +289,33 @@ All notable changes to Ember are recorded here. The format follows
   state index.
 - 5 new Stage 15 Rust tests, for 286 Rust tests total.
 - Stage 15 evidence record.
+- A verified local FTS5 search index over published and remote profiles and
+  non-tombstoned publications, maintained incrementally and rebuildable from
+  stored signed records.
+- Schema version 9 with `search_meta` generation state and a `search_docs`
+  rowid map that keeps incremental index replacement logarithmic.
+- Bounded search input and filters: 128 UTF-8 bytes, 12 tokens, kind, category,
+  up to 5 exact tags, and relevance, recency, or availability ordering.
+- Synchronous local `search.query` pages with generation- and query-bound
+  opaque cursors, a 20-row page cap, total matches, and candidate-limit
+  metadata.
+- Local Explore modes for category counts, recent records, and a seeded bounded
+  random sample, with no popularity or engagement signal.
+- Optional signed index providers over `/nexus/index/1`, with 1 MiB message
+  bounds, at most 8 providers, one 10-second total deadline, and 120 requests per
+  peer per minute.
+- Provider records are verified in memory before display. Unsigned, tampered,
+  wrong-kind, oversized, and malformed records are rejected without affecting
+  local or other-provider results, and search never writes them to storage.
+- `search.result_page` streaming and one terminal `search.completed` event with
+  per-provider state, coverage notes, conflict counts, cancellation, new-result
+  count, and elapsed time.
+- `search.cancel`, the opt-in `search_provider` config flag, and best-effort DHT
+  announcement of the optional provider role.
+- Kotlin Explore and Search demo states for coverage, partial results, offline
+  and cached labels, and pagination.
+- 44 new Stage 16 Rust tests, for 330 Rust tests total.
+- Stage 16 evidence record.
 
 ### Changed
 
@@ -369,6 +396,20 @@ All notable changes to Ember are recorded here. The format follows
   and bytes remain.
 - Inbound file-chunk responses are throttled to the configured average upload
   rate; metadata and error responses stay immediate.
+- The SQLite schema is now version 9; `search_meta` tracks the index generation
+  and last refresh time, and `search_docs` maps record IDs to FTS rowids.
+- The protocol version is now `0.1.0-stage-16`; the ABI remains 1.
+- The FFI interface document is at version 1.9.0 with forty-five callable
+  methods.
+- The identify protocol remains `/nexus/0.1.0-stage-12`; Stage 16 adds the
+  separate `/nexus/index/1` request and response protocol.
+- `search.query` now returns a synchronous local page and exactly one
+  `search.completed` event per cursorless first page. Provider results stream as
+  `search.result_page`; there is no separate `search.page` event.
+- Search config accepts flat `kind`, `category`, `tags`, and `sort` fields, with
+  a compatibility fallback to a nested `filters` map.
+- The Kotlin Explore and Search screens show sample coverage, partial, cached,
+  offline, and pagination states instead of advertising complete results.
 
 ### Fixed
 
@@ -455,9 +496,10 @@ All notable changes to Ember are recorded here. The format follows
   are visibly labelled mock content. The native core and Kotlin client exist, but
   the product screens are not connected to them yet.
 - Networking, publishing, hosting, and search product flows are not implemented
-  yet. The native boundary, lifecycle, events, streaming, and test methods exist;
-  networking, direct transfer, profile publication, and file publication are
-  implemented at the core and network layers.
+  in the Kotlin client yet. The native boundary, lifecycle, events, streaming,
+  and test methods exist; networking, direct transfer, profile publication, file
+  publication, hosting, and search are implemented at the core and network
+  layers.
 - Direct transfer is implemented and tested on Windows loopback. The product
   screens remain mock content and are not connected to it.
 - Stage 12 uses one connected source at a time. It does not run parallel chunk
@@ -539,7 +581,21 @@ All notable changes to Ember are recorded here. The format follows
   device is available and the Android application does not yet host the core.
 - The storage-management screen remains a prototype; the settings and quota
   model exist in the data layer.
-- FTS5 search is schema-only and is populated in Stage 16.
+- Stage 16 distributed coverage is inherently partial. Index providers are
+  optional peers; search never claims complete network coverage and cannot make
+  an offline provider answer.
+- Only the cursorless first page queries index providers. Later pages are local
+  pages bound to the same index generation; a new provider view requires a new
+  search.
+- Provider records are verified and shown but are not cached or written to local
+  storage by search. A later profile or publication lookup may cache them.
+- Search has no global relevance model. Ranking is local and provider results
+  are merged without popularity, reputation, or engagement signals.
+- The Kotlin Explore and Search screens remain demo data with honest coverage,
+  partial, cached, offline, and pagination labels; they are not connected to the
+  core yet.
+- Android runtime search and index-provider behavior are not exercised locally;
+  the Android libraries cross-build with the same search code.
 - Metadata restore replaces the database but does not restore file bytes; the
   managed store is reconciled separately.
 - Shared UI copy is English-only; locale-aware formatting and translated

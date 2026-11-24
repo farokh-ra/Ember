@@ -138,6 +138,10 @@ public interface NexusStrings {
     public val exploreEmptyFilterTitle: String
     public val exploreEmptyFilterBody: String
     public val exploreDemoNotice: String
+    public val exploreCoverageOffline: String
+    public val exploreCoveragePartial: String
+    public val exploreShowing: (Int, Int) -> String
+    public val exploreLoadMore: String
     public val exploreStatusGuideTitle: String
     public val categoryAll: String
     public val categoryDocuments: String
@@ -176,6 +180,10 @@ public interface NexusStrings {
     public val searchNoResultsBody: String
     public val searchClearFilters: String
     public val searchPartial: String
+    public val searchCoverageOffline: String
+    public val searchCoveragePartial: String
+    public val searchShowing: (Int, Int) -> String
+    public val searchLoadMore: String
     public val searchOpen: String
 
     // Profile.
@@ -646,6 +654,14 @@ public object EnglishNexusStrings : NexusStrings {
     override val exploreEmptyFilterBody: String = "Choose another category or switch the preview state."
     override val exploreDemoNotice: String =
         "All records are sample data. Availability is simulated and is not a live observation."
+    override val exploreCoverageOffline: String =
+        "Offline · cached local sample data only · network records may be missing"
+    override val exploreCoveragePartial: String =
+        "Partial coverage · some index providers are unavailable · results may be incomplete"
+    override val exploreShowing: (Int, Int) -> String = { shown, total ->
+        "Showing $shown of $total sample records"
+    }
+    override val exploreLoadMore: String = "Load more records"
     override val exploreStatusGuideTitle: String = "Status terms"
     override val categoryAll: String = "All"
     override val categoryDocuments: String = "Documents"
@@ -691,6 +707,14 @@ public object EnglishNexusStrings : NexusStrings {
     override val searchClearFilters: String = "Clear filters"
     override val searchPartial: String =
         "Partial results: this preview searches sample metadata only."
+    override val searchCoverageOffline: String =
+        "Offline · cached local sample data only · results may be incomplete"
+    override val searchCoveragePartial: String =
+        "Partial coverage · some index providers are unavailable · results may be incomplete"
+    override val searchShowing: (Int, Int) -> String = { shown, total ->
+        "Showing $shown of $total results"
+    }
+    override val searchLoadMore: String = "Load more results"
     override val searchOpen: String = "Open file details"
 
     override val profileTitle: String = "Profile"

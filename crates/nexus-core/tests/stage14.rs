@@ -55,6 +55,7 @@ fn config(root: &Path, server: bool) -> CoreConfig {
         },
         relay_fallback: false,
         relay_server: false,
+        search_provider: false,
         quota_bytes: 1024 * 1024 * 1024,
         enable_test_methods: false,
     }

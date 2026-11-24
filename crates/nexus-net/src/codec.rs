@@ -1,4 +1,5 @@
-//! Bounded length-prefixed framing for `/nexus/test/1`.
+//! Bounded length-prefixed framing for `/nexus/test/1`, `/nexus/file/1`, and
+//! `/nexus/index/1`.
 //!
 //! The request-response behaviour does not frame messages for us, so this
 //! codec writes a four-byte big-endian length followed by the canonical CBOR
@@ -10,12 +11,14 @@ use std::io;
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use libp2p::request_response::Codec;
 use libp2p::swarm::StreamProtocol;
-use nexus_protocol::{MAX_FILE_MESSAGE_BYTES, MAX_TEST_MESSAGE_BYTES};
+use nexus_protocol::{MAX_FILE_MESSAGE_BYTES, MAX_INDEX_MESSAGE_BYTES, MAX_TEST_MESSAGE_BYTES};
 
 /// Protocol ID of the Stage 09 diagnostic request/response protocol.
 pub const TEST_PROTOCOL_NAME: &str = "/nexus/test/1";
 /// Protocol ID of the Stage 12 file metadata and chunk protocol.
 pub const FILE_PROTOCOL_NAME: &str = "/nexus/file/1";
+/// Protocol ID of the Stage 16 optional index-provider protocol.
+pub const INDEX_PROTOCOL_NAME: &str = "/nexus/index/1";
 
 const LENGTH_PREFIX_BYTES: usize = 4;
 
@@ -77,6 +80,60 @@ pub fn test_protocol() -> StreamProtocol {
 #[must_use]
 pub fn file_protocol() -> StreamProtocol {
     StreamProtocol::new(FILE_PROTOCOL_NAME)
+}
+
+/// Returns the optional index-provider stream protocol.
+#[must_use]
+pub fn index_protocol() -> StreamProtocol {
+    StreamProtocol::new(INDEX_PROTOCOL_NAME)
+}
+
+/// Bounded request/response codec carrying canonical CBOR index messages.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IndexCodec;
+
+impl Codec for IndexCodec {
+    type Protocol = StreamProtocol;
+    type Request = Vec<u8>;
+    type Response = Vec<u8>;
+
+    async fn read_request<T>(&mut self, _protocol: &Self::Protocol, io: &mut T) -> io::Result<Self::Request>
+    where
+        T: AsyncRead + Unpin + Send,
+    {
+        read_frame_with(io, MAX_INDEX_MESSAGE_BYTES, "index").await
+    }
+
+    async fn read_response<T>(&mut self, _protocol: &Self::Protocol, io: &mut T) -> io::Result<Self::Response>
+    where
+        T: AsyncRead + Unpin + Send,
+    {
+        read_frame_with(io, MAX_INDEX_MESSAGE_BYTES, "index").await
+    }
+
+    async fn write_request<T>(
+        &mut self,
+        _protocol: &Self::Protocol,
+        io: &mut T,
+        request: Self::Request,
+    ) -> io::Result<()>
+    where
+        T: AsyncWrite + Unpin + Send,
+    {
+        write_frame_with(io, &request, MAX_INDEX_MESSAGE_BYTES, "index").await
+    }
+
+    async fn write_response<T>(
+        &mut self,
+        _protocol: &Self::Protocol,
+        io: &mut T,
+        response: Self::Response,
+    ) -> io::Result<()>
+    where
+        T: AsyncWrite + Unpin + Send,
+    {
+        write_frame_with(io, &response, MAX_INDEX_MESSAGE_BYTES, "index").await
+    }
 }
 
 /// Bounded request/response codec carrying canonical CBOR file messages.

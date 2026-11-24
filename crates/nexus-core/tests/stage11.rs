@@ -97,6 +97,7 @@ fn config(root: &Path) -> CoreConfig {
         dht_mode: nexus_core::DhtMode::Client,
         relay_fallback: true,
         relay_server: false,
+        search_provider: false,
         quota_bytes: 1024 * 1024 * 1024,
         enable_test_methods: false,
     }

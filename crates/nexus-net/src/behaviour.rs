@@ -11,7 +11,7 @@ use libp2p::swarm::{NetworkBehaviour, StreamProtocol};
 use libp2p::{Multiaddr, autonat, connection_limits, dcutr, identify, kad, ping, relay, request_response};
 use nexus_protocol::DHT_MAX_VALUE_BYTES;
 
-use crate::codec::{FileCodec, TestCodec, file_protocol, test_protocol};
+use crate::codec::{FileCodec, IndexCodec, TestCodec, file_protocol, index_protocol, test_protocol};
 use crate::config::{DhtMode, NetworkConfig};
 
 /// Protocol version advertised through identify.
@@ -57,6 +57,7 @@ pub(crate) struct Behaviour {
     pub(crate) autonat: Toggle<autonat::v1::Behaviour>,
     pub(crate) test: request_response::Behaviour<TestCodec>,
     pub(crate) file: request_response::Behaviour<FileCodec>,
+    pub(crate) index: request_response::Behaviour<IndexCodec>,
 }
 
 impl Behaviour {
@@ -124,6 +125,11 @@ impl Behaviour {
         let file = request_response::Behaviour::with_codec(
             FileCodec,
             [(file_protocol(), request_response::ProtocolSupport::Full)],
+            request_config.clone(),
+        );
+        let index = request_response::Behaviour::with_codec(
+            IndexCodec,
+            [(index_protocol(), request_response::ProtocolSupport::Full)],
             request_config,
         );
 
@@ -173,6 +179,7 @@ impl Behaviour {
             autonat,
             test,
             file,
+            index,
         }
     }
 }

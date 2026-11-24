@@ -20,8 +20,9 @@ use libp2p::swarm::{DialError, SwarmEvent};
 use libp2p::{Multiaddr, PeerId, Swarm, autonat, identify, ping, relay};
 use nexus_protocol::{
     DHT_KEY_BYTES, DHT_MAX_VALUE_BYTES, DhtRecord, DhtRecordDecision, FileRequest, FileResponse, FileSelector,
-    TestResponse, decode_file_request, decode_file_response, decode_test_request, decode_test_response,
-    encode_file_request, encode_file_response, encode_test_request, encode_test_response, validate_provider_addresses,
+    IndexResponse, TestResponse, decode_file_request, decode_file_response, decode_index_request,
+    decode_index_response, decode_test_request, decode_test_response, encode_file_request, encode_file_response,
+    encode_index_response, encode_test_request, encode_test_response, validate_provider_addresses,
     validate_provider_key,
 };
 use tokio::sync::{mpsc, oneshot};
@@ -31,6 +32,7 @@ use crate::bootstrap;
 use crate::config::{NetworkConfig, split_peer_address};
 use crate::error::NetError;
 use crate::file::{FileMetadata, FileProvider};
+use crate::index::IndexProvider;
 use crate::relay as relay_list;
 use crate::shared::Shared;
 use crate::state::{ConnectedPeer, DhtValue, DiscoveredPeer, NetworkState, PeerDiscovery, TestReply};
@@ -54,6 +56,9 @@ const RELAY_RETRY: Duration = Duration::from_secs(5);
 /// Inbound file requests allowed per peer per minute. A 64 KiB slice means
 /// this permits roughly 12 MiB/s per peer while still bounding abuse.
 const MAX_FILE_REQUESTS_PER_PEER_PER_MINUTE: u32 = 12_000;
+/// Inbound index requests allowed per peer per minute. A page is at most twenty
+/// signed records, and ordinary clients query a handful of pages per search.
+const MAX_INDEX_REQUESTS_PER_PEER_PER_MINUTE: u32 = 120;
 
 pub(crate) enum Command {
     Dial {
@@ -78,6 +83,11 @@ pub(crate) enum Command {
         offset: u32,
         length: u32,
         respond: oneshot::Sender<Result<Vec<u8>, NetError>>,
+    },
+    FetchIndex {
+        peer_id: PeerId,
+        request: Vec<u8>,
+        respond: oneshot::Sender<Result<IndexResponse, NetError>>,
     },
     DhtDiscover {
         target: Option<[u8; DHT_KEY_BYTES]>,
@@ -255,6 +265,7 @@ pub(crate) struct Driver {
     pending_dials: HashMap<PeerId, PendingDial>,
     pending_requests: HashMap<OutboundRequestId, PendingRequest>,
     pending_file_requests: HashMap<OutboundRequestId, PendingFileRequest>,
+    pending_index_requests: HashMap<OutboundRequestId, (Instant, oneshot::Sender<Result<IndexResponse, NetError>>)>,
     pending_queries: HashMap<kad::QueryId, PendingQuery>,
     backoff: HashMap<PeerId, Backoff>,
     targets: BTreeMap<PeerId, Vec<Multiaddr>>,
@@ -263,7 +274,9 @@ pub(crate) struct Driver {
     background_relay_attempted: HashSet<PeerId>,
     rate: HashMap<PeerId, RateWindow>,
     file_rate: HashMap<PeerId, RateWindow>,
+    index_rate: HashMap<PeerId, RateWindow>,
     file_provider: Arc<dyn FileProvider>,
+    index_provider: Arc<dyn IndexProvider>,
     upload_bytes_per_second: u64,
     next_upload_slot: Instant,
     delayed_file_responses: VecDeque<DelayedFileResponse>,
@@ -280,6 +293,7 @@ impl Driver {
         shared: Arc<Shared>,
         commands: mpsc::Receiver<Command>,
         file_provider: Arc<dyn FileProvider>,
+        index_provider: Arc<dyn IndexProvider>,
     ) -> Result<Self, NetError> {
         let mut targets: BTreeMap<PeerId, Vec<Multiaddr>> = BTreeMap::new();
         for address in &config.bootstrap {
@@ -349,6 +363,7 @@ impl Driver {
             pending_dials: HashMap::new(),
             pending_requests: HashMap::new(),
             pending_file_requests: HashMap::new(),
+            pending_index_requests: HashMap::new(),
             pending_queries: HashMap::new(),
             backoff: HashMap::new(),
             targets,
@@ -357,7 +372,9 @@ impl Driver {
             background_relay_attempted: HashSet::new(),
             rate: HashMap::new(),
             file_rate: HashMap::new(),
+            index_rate: HashMap::new(),
             file_provider,
+            index_provider,
             upload_bytes_per_second,
             next_upload_slot: Instant::now(),
             delayed_file_responses: VecDeque::new(),
@@ -404,6 +421,7 @@ impl Driver {
                         self.pending_dials.clear();
                         self.pending_requests.clear();
                         self.pending_file_requests.clear();
+                        self.pending_index_requests.clear();
                         self.pending_queries.clear();
                         self.delayed_file_responses.clear();
                         let _ = respond.send(());
@@ -442,6 +460,11 @@ impl Driver {
                 length,
                 respond,
             } => self.fetch_file_chunk(peer_id, content_id, index, offset, length, respond),
+            Command::FetchIndex {
+                peer_id,
+                request,
+                respond,
+            } => self.fetch_index(peer_id, request, respond),
             Command::DhtDiscover { target, respond } => self.dht_discover(target, respond),
             Command::DhtPublish { key, value, respond } => self.dht_publish(key, value, respond),
             Command::DhtLookup { key, respond } => self.dht_lookup(key, respond),
@@ -853,6 +876,22 @@ impl Driver {
                 deadline: now + self.config.request_timeout + REQUEST_GRACE,
             },
         );
+    }
+
+    fn fetch_index(
+        &mut self,
+        peer_id: PeerId,
+        request: Vec<u8>,
+        respond: oneshot::Sender<Result<IndexResponse, NetError>>,
+    ) {
+        if !self.shared.is_connected(&peer_id.to_string()) {
+            let _ = respond.send(Err(NetError::NotConnected));
+            return;
+        }
+        let now = Instant::now();
+        let request_id = self.swarm.behaviour_mut().index.send_request(&peer_id, request);
+        self.pending_index_requests
+            .insert(request_id, (now + self.config.request_timeout + REQUEST_GRACE, respond));
     }
 
     fn send_test(&mut self, peer_id: PeerId, payload: Vec<u8>, respond: oneshot::Sender<Result<TestReply, NetError>>) {
@@ -1268,6 +1307,18 @@ impl Driver {
                     let _ = respond.send(Err(NetError::Timeout));
                 }
                 None => {}
+            }
+        }
+
+        let expired: Vec<OutboundRequestId> = self
+            .pending_index_requests
+            .iter()
+            .filter(|(_, (deadline, _))| *deadline <= now)
+            .map(|(request_id, _)| *request_id)
+            .collect();
+        for request_id in expired {
+            if let Some((_, respond)) = self.pending_index_requests.remove(&request_id) {
+                let _ = respond.send(Err(NetError::Timeout));
             }
         }
 
@@ -1916,6 +1967,24 @@ impl Driver {
             BehaviourEvent::File(request_response::Event::InboundFailure { error, .. }) => {
                 self.shared.record_last_error(map_inbound_failure(&error));
             }
+            BehaviourEvent::Index(request_response::Event::Message { peer, message, .. }) => match message {
+                request_response::Message::Request { request, channel, .. } => {
+                    self.on_inbound_index_request(peer, request, channel);
+                }
+                request_response::Message::Response { request_id, response } => {
+                    self.on_index_response(request_id, response);
+                }
+            },
+            BehaviourEvent::Index(request_response::Event::OutboundFailure { request_id, error, .. }) => {
+                let (code, mapped) = map_outbound_failure(error);
+                self.shared.record_last_error(code);
+                if let Some((_, respond)) = self.pending_index_requests.remove(&request_id) {
+                    let _ = respond.send(Err(mapped));
+                }
+            }
+            BehaviourEvent::Index(request_response::Event::InboundFailure { error, .. }) => {
+                self.shared.record_last_error(map_inbound_failure(&error));
+            }
             BehaviourEvent::Autonat(event) => self.on_autonat_event(event),
             BehaviourEvent::Dcutr(event) => match event.result {
                 Ok(_) => self.shared.record_direct_upgrade(&event.remote_peer_id.to_string()),
@@ -2179,6 +2248,43 @@ impl Driver {
         }
     }
 
+    fn on_inbound_index_request(&mut self, peer: PeerId, request: Vec<u8>, channel: ResponseChannel<Vec<u8>>) {
+        if !self.allow_index_request(peer) {
+            let response = IndexResponse {
+                error: Some("rate_limited".to_owned()),
+                ..IndexResponse::default()
+            };
+            if let Ok(body) = encode_index_response(&response) {
+                let _ = self.swarm.behaviour_mut().index.send_response(channel, body);
+            }
+            return;
+        }
+        let response = match decode_index_request(&request) {
+            Ok(request) => self.index_provider.respond(&request),
+            Err(_) => IndexResponse {
+                error: Some("malformed".to_owned()),
+                ..IndexResponse::default()
+            },
+        };
+        if let Ok(body) = encode_index_response(&response) {
+            let _ = self.swarm.behaviour_mut().index.send_response(channel, body);
+        }
+    }
+
+    fn on_index_response(&mut self, request_id: OutboundRequestId, response: Vec<u8>) {
+        let Some((_, respond)) = self.pending_index_requests.remove(&request_id) else {
+            return;
+        };
+        let result = match decode_index_response(&response) {
+            Ok(response) => match response.error.as_deref() {
+                Some(error) => Err(map_index_error(error)),
+                None => Ok(response),
+            },
+            Err(_) => Err(NetError::ConnectionFailed),
+        };
+        let _ = respond.send(result);
+    }
+
     fn on_inbound_response(&mut self, request_id: OutboundRequestId, response: Vec<u8>) {
         let Some(pending) = self.pending_requests.remove(&request_id) else {
             return;
@@ -2207,6 +2313,13 @@ impl Driver {
             self.file_rate.clear();
         }
         Self::allow_window(&mut self.file_rate, peer, MAX_FILE_REQUESTS_PER_PEER_PER_MINUTE)
+    }
+
+    fn allow_index_request(&mut self, peer: PeerId) -> bool {
+        if self.index_rate.len() >= MAX_RATE_WINDOWS && !self.index_rate.contains_key(&peer) {
+            self.index_rate.clear();
+        }
+        Self::allow_window(&mut self.index_rate, peer, MAX_INDEX_REQUESTS_PER_PEER_PER_MINUTE)
     }
 
     fn allow_window(windows: &mut HashMap<PeerId, RateWindow>, peer: PeerId, limit: u32) -> bool {
@@ -2291,6 +2404,14 @@ fn map_file_error(code: &str) -> NetError {
     match code {
         "content_unavailable" => NetError::FileUnavailable,
         "rate_limited" | "malformed" => NetError::Rejected,
+        _ => NetError::Rejected,
+    }
+}
+
+fn map_index_error(code: &str) -> NetError {
+    match code {
+        "unsupported" => NetError::UnsupportedProtocol,
+        "unavailable" | "not_provider" => NetError::Unavailable,
         _ => NetError::Rejected,
     }
 }

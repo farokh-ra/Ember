@@ -72,6 +72,10 @@ The script:
 6. Installs the Android platform `android-37.0` and build-tools `36.0.0` if they
    are missing.
 
+Builds always run through the committed wrapper, which pins Gradle 9.9.2. The
+local Gradle command-line install from the setup script is a convenience for
+ad-hoc commands; `gradlew.bat` is authoritative.
+
 Everything is installed under `%LOCALAPPDATA%\NEXUS\toolchain`:
 
 ```text

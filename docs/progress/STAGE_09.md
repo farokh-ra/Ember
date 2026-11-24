@@ -196,9 +196,9 @@ Stage 09 adds eight methods to the ABI 1 catalog:
 | 0x0603 | `network.bootstrap_list` | S | none | `{bootstrap: [...]}`. |
 | 0x0604 | `network.bootstrap_add` | S | `multiaddr` | Updated list. |
 | 0x0605 | `network.bootstrap_remove` | S | `multiaddr` | Updated list. |
-| 0x0606 | `network.reconnect` | A | `peer_id?` | `network.reconnect_completed|failed|cancelled`. |
-| 0x0607 | `network.connect` | A | `multiaddr` | `network.connect_completed|failed|cancelled`. |
-| 0x0608 | `network.send_test` | A | `peer_id`, `payload` | `network.test_message|failed|cancelled`. |
+| 0x0606 | `network.reconnect` | A | `peer_id?` | `network.reconnect_completed\|failed\|cancelled`. |
+| 0x0607 | `network.connect` | A | `multiaddr` | `network.connect_completed\|failed\|cancelled`. |
+| 0x0608 | `network.send_test` | A | `peer_id`, `payload` | `network.test_message\|failed\|cancelled`. |
 
 Behaviour:
 

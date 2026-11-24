@@ -25,6 +25,8 @@ pub const DHT_PUBLICATION: &[u8] = b"NEXUS-DHT-PUB-v1";
 pub const DHT_TOMBSTONE: &[u8] = b"NEXUS-DHT-TOMB-v1";
 /// Domain tag for the profile DHT key.
 pub const DHT_PROFILE: &[u8] = b"NEXUS-DHT-PROFILE-v1";
+/// Domain tag for the optional search-index provider key.
+pub const DHT_INDEX: &[u8] = b"NEXUS-DHT-INDEX-v1";
 
 /// A signature or hash context owned by one protocol record type.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -51,6 +53,8 @@ pub enum DomainTag {
     DhtTombstone,
     /// Profile DHT key derivation.
     DhtProfile,
+    /// Optional search-index provider key derivation.
+    DhtIndex,
 }
 
 impl DomainTag {
@@ -69,6 +73,7 @@ impl DomainTag {
             Self::DhtPublication => DHT_PUBLICATION,
             Self::DhtTombstone => DHT_TOMBSTONE,
             Self::DhtProfile => DHT_PROFILE,
+            Self::DhtIndex => DHT_INDEX,
         }
     }
 
@@ -87,6 +92,7 @@ impl DomainTag {
             Self::DhtPublication => "NEXUS-DHT-PUB-v1",
             Self::DhtTombstone => "NEXUS-DHT-TOMB-v1",
             Self::DhtProfile => "NEXUS-DHT-PROFILE-v1",
+            Self::DhtIndex => "NEXUS-DHT-INDEX-v1",
         }
     }
 }
@@ -121,6 +127,7 @@ mod tests {
             DomainTag::DhtPublication,
             DomainTag::DhtTombstone,
             DomainTag::DhtProfile,
+            DomainTag::DhtIndex,
         ];
         for (index, left) in tags.iter().enumerate() {
             for right in &tags[index + 1..] {

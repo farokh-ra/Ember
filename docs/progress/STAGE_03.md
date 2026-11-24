@@ -95,11 +95,11 @@ Key structural decisions:
 | Tool | Verified version |
 |---|---|
 | JDK | Eclipse Temurin 21.0.13+9 |
-| Gradle | 9.9.1 (wrapper) |
+| Gradle | 9.9.2 (wrapper) |
 | Kotlin | 2.4.21 |
 | Compose Multiplatform | 1.12.2 |
 | Compose Material3 | 1.9.0 |
-| Android Gradle Plugin | 9.5.1 |
+| Android Gradle Plugin | 9.5.2 |
 | compile SDK / target SDK | 37 / 37 |
 | minimum SDK | 28 |
 | Android build tools | 36.0.0 |

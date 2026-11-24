@@ -49,6 +49,8 @@ import io.nexus.ui.resources.LocalNexusStrings
 import io.nexus.ui.theme.NexusSizes
 import io.nexus.ui.theme.NexusSpacing
 
+private const val DEMO_SEARCH_PAGE_SIZE: Int = 4
+
 /** Local and discovered metadata search prototype. */
 @Composable
 public fun SearchScreen(
@@ -64,9 +66,16 @@ public fun SearchScreen(
     var queryText by remember { mutableStateOf("") }
     var activeQuery by remember { mutableStateOf("") }
     var category by remember { mutableStateOf<DemoCategory?>(null) }
+    var visibleCount by remember(activeQuery, category) { mutableStateOf(DEMO_SEARCH_PAGE_SIZE) }
 
     val results = remember(activeQuery, category) { DemoCatalog.search(activeQuery, category) }
     val content = previewContentState(scenario) { results }
+    val coverage =
+        when (network) {
+            PreviewNetworkState.OFFLINE -> strings.searchCoverageOffline
+            PreviewNetworkState.DEGRADED -> strings.searchCoveragePartial
+            else -> strings.searchCoverage
+        }
 
     fun submitSearch() {
         activeQuery = queryText
@@ -95,7 +104,7 @@ public fun SearchScreen(
     ) {
         NexusInfoBanner(
             title = strings.demoContent,
-            body = strings.searchCoverage,
+            body = coverage,
             tone = StatusTone.CAUTION,
             icon = NexusIcons.Info,
         )
@@ -187,15 +196,30 @@ public fun SearchScreen(
                 }
 
                 else -> {
+                    val paged = visible.take(visibleCount)
                     Column(verticalArrangement = Arrangement.spacedBy(NexusSpacing.sm)) {
                         NexusSectionHeader(
                             title = strings.searchResultCount(visible.size),
                             subtitle = strings.searchPartial,
                         )
-                        visible.forEach { publication ->
+                        Text(
+                            text = strings.searchShowing(paged.size, visible.size),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        paged.forEach { publication ->
                             PublicationCard(
                                 publication = publication,
                                 onClick = { onOpenFile(publication.recordId) },
+                            )
+                        }
+                        if (paged.size < visible.size) {
+                            NexusPrimaryButton(
+                                text = strings.searchLoadMore,
+                                onClick = {
+                                    visibleCount = minOf(visibleCount + DEMO_SEARCH_PAGE_SIZE, visible.size)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }

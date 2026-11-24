@@ -33,6 +33,9 @@ pub struct CoreConfig {
     pub relay_fallback: bool,
     /// Whether this node also serves as a community relay.
     pub relay_server: bool,
+    /// Whether this node answers bounded `/nexus/index/1` queries with its
+    /// verified local index and announces an index-provider record.
+    pub search_provider: bool,
     /// Managed storage quota.
     pub quota_bytes: u64,
     /// Whether `test.*` debug methods are enabled.
@@ -200,6 +203,7 @@ impl CoreConfig {
         }
         let relay_fallback = optional_bool(&value, "relay_fallback")?.unwrap_or(true);
         let relay_server = optional_bool(&value, "relay_server")?.unwrap_or(false);
+        let search_provider = optional_bool(&value, "search_provider")?.unwrap_or(false);
         let enable_test_methods = optional_bool(&value, "enable_test_methods")?.unwrap_or(false);
 
         Ok(Self {
@@ -211,6 +215,7 @@ impl CoreConfig {
             dht_mode,
             relay_fallback,
             relay_server,
+            search_provider,
             quota_bytes,
             enable_test_methods,
         })

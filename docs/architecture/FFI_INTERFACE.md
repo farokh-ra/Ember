@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-FFI-001 |
-| Version | 1.8.0 (ABI 1) |
-| Status | Implemented through Stage 15; Android runtime verification deferred |
-| Date | 2026-11-23 |
+| Version | 1.9.0 (ABI 1) |
+| Status | Implemented through Stage 16; Android runtime verification deferred |
+| Date | 2026-11-24 |
 | Header | [nexus_core.h](nexus_core.h) |
 | Related | [ADR-0003](../decisions/ADR-0003-ffi-c-abi-jni-jna.md), [Architecture](../ARCHITECTURE.md) |
 
@@ -107,6 +107,7 @@ The create-time config is a canonical CBOR text-keyed map with a maximum of 64 K
 | `dht_mode` | text | No | `client` or `server`; defaults to `client`. A bootstrap node uses `server`. |
 | `relay_fallback` | bool | No | Allows a failed direct dial to fall back to a connected community relay. Defaults to `true`. |
 | `relay_server` | bool | No | Serves bounded Circuit Relay v2 circuits for other peers. Defaults to `false`. |
+| `search_provider` | bool | No | Opts this node into the optional `/nexus/index/1` index-provider role. The role is announced best-effort after the DHT has a peer. Defaults to `false`. |
 | `quota_bytes` | uint | No | 1-500 GiB; defaults to 10 GiB. |
 | `enable_test_methods` | bool | No | Exposes `test.*`; defaults to `false`. Release callers must leave this false. |
 
@@ -194,6 +195,7 @@ Envelope fields and string keys are fixed. `details` is optional and bounded. Me
 | Event CBOR | 1 MiB |
 | Import chunk | 1 MiB |
 | Export read | 1 MiB |
+| Index wire message | 1 MiB |
 | Event queue | 1,024 events, with progress coalescing |
 | CBOR nesting | 16 levels |
 | CBOR map entries | 256 |
@@ -240,9 +242,9 @@ All production methods are available on both Android and Windows. Method IDs are
 | 0x060B | `network.relay_add` | S | `multiaddr` | Validated and persisted relay address; updated list. |
 | 0x060C | `network.relay_remove` | S | `multiaddr` | Updated relay list. |
 | 0x060D | `network.connectivity` | S | none | Connectivity classification, NAT status, relay counts and limits, fallback counters, and a troubleshooting hint. |
-| 0x0701 | `discovery.explore` | A | `category?`, `sort`, `cursor`, `limit` | `discovery.page` and `discovery.completed` with coverage. |
-| 0x0702 | `search.query` | A | `query`, `filters`, `cursor`, `limit` | `search.page` and `search.completed` with coverage. |
-| 0x0703 | `search.cancel` | S | `op_id` | Cancellation accepted. |
+| 0x0701 | `discovery.explore` | S | `mode?`, `category?`, `seed?`, `cursor?`, `limit?` | `mode`, `categories`, `results`, `seed`, `next_cursor?`, `page_complete`, `coverage`. |
+| 0x0702 | `search.query` | S/A | `query`, `kind?`, `category?`, `tags?`, `sort?`, `cursor?`, `limit?`, optional `filters` map | Synchronous local page with `op_id`, `results`, `next_cursor?`, `coverage`; on the first page, `search.result_page` events and one terminal `search.completed`. |
+| 0x0703 | `search.cancel` | S | `op_id` | `op_id`, `outcome` (`requested`, `already_terminal`, or `unknown`), `cancelled`. |
 | 0x0801 | `download.start` | A | `publication_id` or `content_id` | `download.started` with download ID; terminal on completion. |
 | 0x0802 | `download.list` | S | `state?`, `cursor`, `limit` | Downloads with verified progress and source. |
 | 0x0803 | `download.pause` | A | `download_id` | `download.paused`. |
@@ -265,7 +267,7 @@ All production methods are available on both Android and Windows. Method IDs are
 
 Method IDs are grouped by domain. A future minor ABI may add methods in unused IDs; a released ID is never renumbered. Unknown IDs return `NEXUS_STATUS_UNSUPPORTED` with a domain error.
 
-Stage 15 implements forty-two callable methods: `system.info`, `system.health`, `system.snapshot`, the three `profile.*` methods above, the five `publication.*` methods above, `store.usage`, `store.set_quota`, the thirteen `network.*` methods above, the six `download.*` methods, the six `replica.*` methods, the two `hosting.*` methods, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
+Stage 16 implements forty-five callable methods: `system.info`, `system.health`, `system.snapshot`, the three `profile.*` methods above, the five `publication.*` methods above, `store.usage`, `store.set_quota`, the thirteen `network.*` methods above, the three search and Explore methods above, the six `download.*` methods, the six `replica.*` methods, the two `hosting.*` methods, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
 
 ### 6.1 Network method semantics
 
@@ -360,6 +362,21 @@ Stage 15 implements forty-two callable methods: `system.info`, `system.health`, 
 - `blocked_reason` is `metered_network` when the network is metered and not allowed, or `battery_low` when a known battery level is below a nonzero threshold. An unknown battery level never blocks. While blocked, inbound file metadata and chunk requests, including publication serving, are refused; stored replicas and their records remain intact.
 - `store.set_quota` sets the managed-blob quota from 1 to 500 GiB, persists it, and returns quota, managed usage, free space, reserve, and storage health. A replica add or resume checks the quota first and returns `quota_exceeded` rather than evicting an existing publication or replica.
 - Upload throttling spaces inbound file-chunk responses to the configured average rate. Metadata and error responses are not delayed. The current response is kept inside the peer request deadline, and bursts cannot reset the average.
+
+### 6.8 Search and Explore method semantics
+
+- `search.query` always returns a synchronous local page from the derived FTS5 index. The local index contains only verified profiles in `published` or `remote` state and non-tombstoned verified publications. Draft, pending, quarantined, invalid, and unsigned records never enter it.
+- `query` is required and bounded to 128 UTF-8 bytes, 12 searchable tokens, and no C0/C1 controls or bidi overrides. `kind` is `profile` or `publication`. `category` is a closed publication category. `tags` contains at most 5 exact tags and every tag must match. `sort` is `relevance` (default), `recency`, or `availability`. `limit` is 1-20 and defaults to 20. The same fields may be supplied inside an optional `filters` map; top-level fields win.
+- The synchronous response contains `op_id`, `query_hash`, `generation`, `sort`, `indexed_at_ms`, `deadline_ms`, `results`, `total_matches`, `next_cursor` (nullable), `page_complete`, `providers_pending`, `candidate_limit_reached`, and `coverage`. Every result carries `kind`, `record_id`, `content_id` (publications), `identity_id`, sanitized `title` and `summary`, `category`, `tags`, `revision`, `published_at_ms`, `updated_at_ms`, `availability`, `source` (`local` or `provider`), `cached`, `rank`, `conflicts`, `same_content_count`, and `verified`.
+- `next_cursor` is opaque and bound to both the index generation and the normalized query hash, including text tokens, kind, category, tags, and sort. Reusing it with a different query returns `conflict`. Any local index write advances the generation, so a cursor from an older snapshot returns `conflict` with "The search index changed; restart the search." Callers must restart rather than retry the same cursor.
+- On a cursorless first page while the network is `online`, the core discovers up to 8 optional `/nexus/index/1` providers through the DHT and fans out under one 10-second total deadline. Local results are never delayed. Each provider response streams as a `search.result_page` event; one terminal `search.completed` event is always emitted, including for local-only searches.
+- Provider records are parsed and signature-verified in the core before display. Invalid, wrong-kind, oversized, or unsigned records are rejected and counted, and cannot affect local or other-provider results. Provider records are not written to local storage during search. Duplicates against the whole local index and against other providers are collapsed; differing revisions or metadata stay visible in `conflicts`.
+- `coverage.label` is `local_only` (no provider participated), `cached_local` (only cached local rows), `partial` (at least one attempted provider did not complete), or `complete` (every attempted provider returned a complete valid page). `coverage.may_be_incomplete` is true only for distributed coverage that is not complete. `coverage.notes` is bounded and includes stable hints such as `local_index_only`, `no_index_providers`, `distributed_results_pending`, `provider_protocol_unsupported`, `provider_page_truncated`, and `search_cancelled`. Per-provider `state` is `ok`, `failed`, `timeout`, `unavailable`, `unsupported`, or `truncated`.
+- Provider fan-out runs only for the cursorless first page. Later pages are local-index pages bound to the same generation; callers that need a fresh provider view start a new first-page search.
+- `search.cancel` accepts the `op_id` returned by `search.query`. `outcome` is `requested` while the fan-out is running, `already_terminal` after it finished, or `unknown` for an unknown operation. Cancellation stops discovery and pending provider waits, retains already streamed local and verified provider rows, and emits the terminal event with `cancelled` true and the `search_cancelled` note.
+- `discovery.explore` is local-only and synchronous. `mode` is `categories` (default), `recent`, or `random`. Categories mode returns counts for all eight closed categories and no result rows. Recent mode orders non-tombstoned publications by publish time. Random mode uses a bounded seeded shuffle; pass the returned `seed` with `next_cursor` for a stable next page. `limit` is 1-50 and defaults to 20.
+- Sensitivity: query text, result rows, and provider IDs are safe plain text. Titles and summaries are sanitized and truncated before they leave the core. Provider IDs are peer identifiers, not identities or authorities, and `verified` means signature-valid, not endorsed.
+- The optional provider role is enabled by `search_provider` at create time. A provider answers bounded `/nexus/index/1` requests from the same verified local index, re-reads exact signed bytes, and never returns draft or tombstoned records. The role announcement is best-effort and retried for up to 60 seconds after a DHT peer appears.
 
 ## 7. Domain error codes
 
@@ -456,7 +473,7 @@ NexusStatus nexus_core_export_close(
 
 Events use the envelope in section 5.4.
 
-Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. Stage 13 adds the `profile.*` signed-profile family. Stage 14 adds the `publication.*` publishing family. Stage 15 adds the `replica.*` hosting family and `hosting.limits_changed`. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
+Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. Stage 13 adds the `profile.*` signed-profile family. Stage 14 adds the `publication.*` publishing family. Stage 15 adds the `replica.*` hosting family and `hosting.limits_changed`. Stage 16 adds `search.result_page` and `search.completed`; Explore is synchronous and emits no events. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
 
 | Event | Meaning | Data |
 |---|---|---|
@@ -512,8 +529,8 @@ Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stop
 | `replica.cancelled` | Replica verification or announcement cancelled. | `replica_id`, `action` |
 | `replica.maintenance_completed` | Startup or periodic verification pass finished. | `checked`, `failed`, `skipped`, `cancelled` |
 | `hosting.limits_changed` | Hosting limits or host signals changed. | `limits`, `hosting` |
-| `search.page` | Search or Explore results page. | `op_id`, `items`, `next_cursor?`, `coverage` |
-| `search.completed` | Search terminal result. | `op_id`, `coverage`, `conflicts` |
+| `search.result_page` | Verified provider additions for one running search. | `op_id`, `query_hash`, `provider_id`, `items`, `conflicts`, `coverage` |
+| `search.completed` | One search fan-out reached a terminal state; local-only searches also emit it. | `op_id`, `query_hash`, `coverage`, `new_results`, `rejected_records`, `ignored_records`, `conflict_count`, `cancelled`, `elapsed_ms` |
 | `diagnostics.ready` | Redacted diagnostics archive ready. | `archive_bytes`, `sections` |
 | `core.stopped` | Core stopped. | `reason` |
 | `test.progress` | Debug operation progress; coalescible. | `op_id`, `step`, `total` |
@@ -632,10 +649,14 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 | 15 | A host explicitly replicates a file, verifies it before advertising, serves it to another peer after the original publisher withdraws, and keeps the original signed attribution. | Passed in `nexus-core/tests/stage15.rs`. |
 | 15 | Pause, resume, remove, quota, metered, and battery policies stop serving without deleting the original record; a paused replica stays paused through verification. | Passed in `nexus-core/tests/stage15.rs` and `nexus-store/tests/stage15.rs`. |
 | 15 | Corrupt local bytes are detected by explicit and startup verification, stop advertising and serving, and recover only after a valid re-verification. | Passed in `nexus-core/tests/stage15.rs`. |
+| 16 | A verified local FTS5 index serves filtered, ordered, paginated search and Explore with the network disabled, and generation-bound cursors reject stale pages. | Passed in `nexus-core/tests/stage16.rs` and `nexus-store/tests/search.rs`. |
+| 16 | A loopback index provider serves signed records that the searching core verifies and deduplicates, and provider loss keeps local results with honest reduced coverage. | Passed in `nexus-core/tests/stage16.rs`. |
+| 16 | Unsigned, tampered, wrong-kind, oversized, and malformed provider records are rejected before display and are never written by search. | Passed in the `nexus-core` and `nexus-search` Stage 16 unit tests and the `nexus-protocol` index tests. |
 | 19 | Fuzzing covers malformed CBOR, oversized buffers, invalid handles, and cancellation races. | Not yet implemented. |
 
 The detailed evidence, commands, and test counts are in
 [STAGE_08.md](../progress/STAGE_08.md), [STAGE_09.md](../progress/STAGE_09.md),
 [STAGE_10.md](../progress/STAGE_10.md), [STAGE_11.md](../progress/STAGE_11.md),
 [STAGE_12.md](../progress/STAGE_12.md), [STAGE_13.md](../progress/STAGE_13.md),
-[STAGE_14.md](../progress/STAGE_14.md), and [STAGE_15.md](../progress/STAGE_15.md).
+[STAGE_14.md](../progress/STAGE_14.md), [STAGE_15.md](../progress/STAGE_15.md), and
+[STAGE_16.md](../progress/STAGE_16.md).

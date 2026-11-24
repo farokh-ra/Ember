@@ -425,16 +425,18 @@ Pending -> Downloading -> Completed (promoted; row removed)
 
 ## 11. Search and Explore
 
-- Local SQLite FTS5 index over verified profile and publication records.
-- Search supports display name, filename, category, and tags; input is bounded to 128 characters.
-- Local results appear first. Optional peer index providers are queried with a bounded fan-out and a 10-second total deadline.
-- Every remote record is signature-verified before display.
-- Results are deduplicated by publication ID and grouped by content ID; conflicting revisions remain visible.
-- Coverage, freshness, cached, partial, and offline states are explicit.
-- Explore provides categories, recent records, and random records without popularity or social signals.
+- Local SQLite FTS5 index over verified profile and publication records. Published and remote profiles and non-tombstoned publications are indexed incrementally; the whole index is derived state and can be rebuilt from stored signed records.
+- Search supports display name, filename, description, category, tags, identity, publication, and content identifiers. Query text is bounded to 128 UTF-8 bytes and 12 tokens; page size is 1-20.
+- `search.query` returns a synchronous local page first. On the cursorless first page while online, optional peer index providers are queried over `/nexus/index/1` with a fan-out of at most eight peers and a 10-second total deadline. Provider additions stream as `search.result_page`; one terminal `search.completed` always reports coverage.
+- Every remote record is signature-verified in memory before display. Search never writes provider records to local storage.
+- Results are deduplicated by record ID and grouped by content ID; conflicting revisions remain visible.
+- Pagination cursors are bound to the normalized query and the index generation. A write after the cursor is issued returns a conflict and the caller restarts the search.
+- Coverage distinguishes `local_only`, `cached_local`, `partial`, and `complete`, with bounded notes for missing providers, unsupported protocol versions, truncation, and cancellation.
+- Explore is local-only and synchronous: category counts, recent publications, or a seeded bounded random sample. There is no popularity or social signal.
+- The optional index-provider role is opt-in through `search_provider`, announced best-effort through the DHT, and answers bounded requests from the same verified local index.
 - No central search service, no full-text DHT, no engagement ranking.
 
-See ADR-0010 for the index boundary.
+See ADR-0010 for the index boundary and `docs/architecture/FFI_INTERFACE.md` section 6.8 for the method contract.
 
 ## 12. Security architecture
 
@@ -549,7 +551,7 @@ Platform-specific presentation is allowed for pickers, notifications, background
 - Android: Gradle, Kotlin, Compose Multiplatform, Rust `cdylib` for arm64-v8a and x86_64, signed APK/AAB.
 - Windows: Gradle, Compose Desktop, `jpackage` app image, Inno Setup per-user installer, signed executable and installer.
 - Rust: Cargo workspace, edition 2024, pinned toolchain, `cargo-deny`, `cargo-audit`, `cargo-nextest`.
-- JDK 21 LTS, Gradle 9.9.1, Kotlin 2.4.21, Compose 1.12.2, AGP 9.5.1, Rust 1.99.1, NDK 29.0.14206865.
+- JDK 21 LTS, Gradle 9.9.2, Kotlin 2.4.21, Compose 1.12.2, AGP 9.5.2, Rust 1.99.1, NDK 29.0.14206865.
 - No dynamic versions in release builds. Lockfiles and SBOM are release evidence.
 - License policy and the direct dependency inventory are in [DEPENDENCY_LICENSE_INVENTORY.md](architecture/DEPENDENCY_LICENSE_INVENTORY.md).
 
