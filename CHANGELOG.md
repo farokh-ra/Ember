@@ -316,6 +316,30 @@ All notable changes to Ember are recorded here. The format follows
   and cached labels, and pagination.
 - 44 new Stage 16 Rust tests, for 330 Rust tests total.
 - Stage 16 evidence record.
+- Multi-source downloads: up to four connected peers serve one file
+  concurrently, each holding at most one chunk lease, so chunks can arrive out
+  of order from different sources.
+- A pure multi-source scheduler in `nexus-transfer` that ranks peers only by
+  observed transfer outcomes: authenticated chunks, transport failures, corrupt
+  responses, and measured chunk latency. A peer is trusted only after it serves
+  a chunk whose hash matches the signed manifest.
+- Per-chunk persistence in schema version 10: a `chunk_map` bitmap and
+  `verified_bytes` count sparse verified chunks, while `verified_prefix` remains
+  the contiguous prefix for existing callers.
+- Reconciliation aligns a short partial's failed state down to the last complete
+  chunk, so a truncated file stays resumable instead of keeping a mid-chunk
+  prefix.
+- Resume now re-hashes every recorded chunk from the partial file, clears
+  corrupted or truncated chunks, truncates only the unverified tail, and
+  continues from missing chunks across a different peer.
+- Corrupt responses are retried from another source; two corrupt responses or
+  three consecutive transport failures quarantine a peer for that download. A
+  malicious source cannot silently corrupt the file.
+- `download.started`, `download.progress`, and `download.resumed` now report
+  chunk counters and per-source attempts, successes, failures, corruptions,
+  bytes, latency, provenance, and quarantine state.
+- 23 new Stage 17 Rust tests, for 353 Rust tests total.
+- Stage 17 evidence record.
 
 ### Changed
 
@@ -403,6 +427,15 @@ All notable changes to Ember are recorded here. The format follows
   methods.
 - The identify protocol remains `/nexus/0.1.0-stage-12`; Stage 16 adds the
   separate `/nexus/index/1` request and response protocol.
+- The SQLite schema is now version 10; `downloads` records a per-chunk bitmap
+  and sparse verified byte count, backfilled from the old verified prefix.
+- The protocol version is now `0.1.0-stage-17`; the ABI remains 1.
+- The FFI interface document is at version 1.10.0 with forty-five callable
+  methods.
+- The identify protocol remains `/nexus/0.1.0-stage-12`; Stage 17 reuses
+  `/nexus/file/1` and adds no new network protocol or frame type.
+- Download progress is measured from `verified_bytes`, so out-of-order chunks
+  count immediately instead of waiting for a contiguous prefix.
 - `search.query` now returns a synchronous local page and exactly one
   `search.completed` event per cursorless first page. Provider results stream as
   `search.result_page`; there is no separate `search.page` event.
