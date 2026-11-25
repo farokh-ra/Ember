@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use nexus_crypto::{DomainTag, SignatureBytes, Value};
 use nexus_identity::{Identity, IdentityVault, LocalEncryptionKey};
 use nexus_net::{Network, NetworkConfig, NetworkState, NetworkStatus, PeerDiscovery, PeerSnapshot};
+use nexus_protocol::index_provider_key;
 use nexus_store::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage, Store, StoreConfig, StoreError, safe_display_name};
 
 use crate::config::CoreConfig;
@@ -23,6 +24,7 @@ use crate::network::{
 };
 use crate::ops::{CancelOutcome, CancelToken, OPERATION_WORKERS, OperationRegistry, WorkerPool};
 use crate::replicas::MaintenanceHandle;
+use crate::search::CoreIndexProvider;
 use crate::streaming::{ExportCursor, FinishedImport, ImportError, ImportSession, MAX_STREAM_CHUNK};
 
 /// Lifecycle state of one core instance.
@@ -124,7 +126,7 @@ pub struct Engine {
     next_export: AtomicU64,
     pub(crate) next_download: AtomicU64,
     dropped_events: Arc<AtomicU64>,
-    shutting_down: AtomicBool,
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl Engine {
@@ -168,7 +170,7 @@ impl Engine {
             next_export: AtomicU64::new(1),
             next_download: AtomicU64::new(1),
             dropped_events: Arc::new(AtomicU64::new(0)),
-            shutting_down: AtomicBool::new(false),
+            shutting_down: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -556,6 +558,9 @@ impl Engine {
             0x060B => self.network_relay_add(&params),
             0x060C => self.network_relay_remove(&params),
             0x060D => self.network_connectivity().map(MethodOutcome::Result),
+            0x0701 => self.discovery_explore(&params),
+            0x0702 => self.search_query(&params),
+            0x0703 => self.search_cancel(&params),
             0x0801 => self.download_start(&params),
             0x0802 => self.download_list(&params).map(MethodOutcome::Result),
             0x0803 => self.download_pause(&params),
@@ -603,6 +608,9 @@ impl Engine {
             "network.relay_add",
             "network.relay_remove",
             "network.connectivity",
+            "discovery.explore",
+            "search.query",
+            "search.cancel",
             "download.start",
             "download.list",
             "download.pause",
@@ -992,18 +1000,52 @@ impl Engine {
             Arc::clone(&self.store),
             Arc::clone(&self.hosting),
         ));
-        match Network::start_with_provider(config, &key, observer, provider) {
+        let index_provider = Arc::new(CoreIndexProvider::new(Arc::clone(&self.store)));
+        match Network::start_with_providers(config, &key, observer, provider, index_provider) {
             Ok(network) => {
-                let status = network.status();
-                *self.network.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(network));
-                *self
-                    .network_error
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
-                self.emit_network_state(status.state.as_str(), status.peer_count, status.transports, None);
+                let network = Arc::new(network);
+                if self.config.search_provider {
+                    self.announce_index_provider(Arc::clone(&network));
+                }
+                self.finish_network_start(&network);
             }
             Err(error) => self.record_network_start_error(error.code()),
         }
+    }
+
+    fn finish_network_start(&self, network: &Arc<Network>) {
+        let status = network.status();
+        *self.network.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(network));
+        *self
+            .network_error
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        self.emit_network_state(status.state.as_str(), status.peer_count, status.transports, None);
+    }
+
+    /// Announces the optional index-provider role once the DHT has a peer.
+    ///
+    /// A provider that starts before bootstrap cannot publish its provider
+    /// record yet. The retry is bounded and stops with the core.
+    fn announce_index_provider(&self, network: Arc<Network>) {
+        let shutdown = Arc::clone(&self.shutting_down);
+        let _ = std::thread::Builder::new()
+            .name("nexus-search-announce".to_owned())
+            .spawn(move || {
+                for _ in 0..60 {
+                    if shutdown.load(Ordering::Acquire) {
+                        return;
+                    }
+                    let status = network.status();
+                    if status.dht_bootstrapped
+                        && status.dht_routing_peers > 0
+                        && network.start_providing(&index_provider_key()).is_ok()
+                    {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+            });
     }
 
     fn record_network_start_error(&self, code: &'static str) {

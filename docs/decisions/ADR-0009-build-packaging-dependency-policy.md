@@ -20,11 +20,11 @@ The Windows installer must install per-user without administrator rights, preser
 | Tool | Pin | Notes |
 |---|---|---|
 | JDK | Eclipse Temurin 21.0.13+9 | Portable extraction under `%LOCALAPPDATA%\NEXUS\toolchain`; exact patch verified in Stage 03. |
-| Gradle | 9.9.1 | Wrapper committed; no system Gradle required. |
+| Gradle | 9.9.2 | Wrapper committed; no system Gradle required. |
 | Kotlin | 2.4.21 | Shared Kotlin/Compose code; AGP built-in Kotlin. |
 | Compose Multiplatform | 1.12.2 | Shared UI and desktop runtime. |
 | Compose Material3 | 1.9.0 | Current compatible Material3 line with Compose 1.12.2. |
-| Android Gradle Plugin | 9.5.1 | Paired with Gradle 9.9.1. |
+| Android Gradle Plugin | 9.5.2 | Paired with Gradle 9.9.2. |
 | Android compile SDK | 37 | Platform `android-37.0`; build-tools 36.0.0. |
 | Android target SDK | 37 | Re-check Google Play's current requirement at each release. |
 | Android minimum SDK | 28 | Android 9, as specified by the product. |
@@ -139,8 +139,8 @@ Build-only tools may carry other licenses because they are not distributed: Git 
 - The local non-admin fallback adds a second Rust host target to developer
   documentation, but not to release artifacts.
 - Spotless 8.11.0 cannot serialize its line-ending policy into Gradle's
-  configuration cache under Gradle 9.9.1, so the configuration cache is disabled
-  for now.
+  configuration cache under the pinned Gradle 9.9 line, so the configuration
+  cache is disabled for now.
 
 **Constraints**
 

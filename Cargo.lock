@@ -2305,6 +2305,7 @@ dependencies = [
  "nexus-net",
  "nexus-observability",
  "nexus-protocol",
+ "nexus-search",
  "nexus-store",
  "nexus-transfer",
  "sha2 0.11.1",
@@ -2385,7 +2386,8 @@ dependencies = [
 name = "nexus-search"
 version = "0.1.0"
 dependencies = [
- "nexus-types",
+ "nexus-protocol",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -2396,6 +2398,7 @@ dependencies = [
  "fs2",
  "nexus-crypto",
  "nexus-protocol",
+ "nexus-search",
  "nexus-transfer",
  "nexus-types",
  "rusqlite",

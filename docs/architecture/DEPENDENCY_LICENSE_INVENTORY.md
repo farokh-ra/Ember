@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-DEPS-001 |
-| Version | 1.8.0 |
-| Status | Stage 11 relay/NAT dependencies realized; later-stage direct dependencies remain planned |
-| Date | 2026-11-19 |
+| Version | 1.9.0 |
+| Status | Stage 16 search reuses existing crates; later-stage direct dependencies remain planned |
+| Date | 2026-11-24 |
 | Policy source | [ADR-0009](../decisions/ADR-0009-build-packaging-dependency-policy.md) |
 | Architecture | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 
@@ -36,11 +36,11 @@ Build-only tools may use other licenses because they are not distributed with th
 | Tool | Pin | License | Use | Notes |
 |---|---|---|---|---|
 | JDK | Eclipse Temurin 21.0.13+9 | GPL-2.0-with-Classpath-Exception | Compile and bundle Windows runtime | Portable extraction; exact patch verified in Stage 03. |
-| Gradle | 9.9.1 | Apache-2.0 | Build orchestration | Wrapper committed; no system Gradle required. |
+| Gradle | 9.9.2 | Apache-2.0 | Build orchestration | Wrapper committed; no system Gradle required. |
 | Kotlin | 2.4.21 | Apache-2.0 | Shared Kotlin and Compose code | Compose compiler aligned; AGP built-in Kotlin. |
 | Compose Multiplatform | 1.12.2 | Apache-2.0 | Shared UI and desktop runtime | Runtime and foundation 1.12.2. |
 | Compose Material3 | 1.9.0 | Apache-2.0 | Material components and theming | Current compatible Material3 line. |
-| Android Gradle Plugin | 9.5.1 | Apache-2.0 | Android build | Paired with Gradle 9.9.1 and compile SDK 37. |
+| Android Gradle Plugin | 9.5.2 | Apache-2.0 | Android build | Paired with Gradle 9.9.2 and compile SDK 37. |
 | Android compile SDK | 37 | Android SDK License | Compile Android app | Platform `android-37.0`; build-tools 36.0.0. |
 | Android target SDK | 37 | Android SDK License | Runtime behavior target | Re-check Google Play requirement at each release. |
 | Android minimum SDK | 28 | Android SDK License | Android 9 baseline | arm64-v8a required; x86_64 for emulator. |

@@ -56,10 +56,15 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "replica verification and availability",
         sql: include_str!("../migrations/0008_replication.sql"),
     },
+    Migration {
+        version: 9,
+        name: "live search index state",
+        sql: include_str!("../migrations/0009_search_state.sql"),
+    },
 ];
 
 /// Newest schema version understood by this build.
-pub(crate) const LATEST_VERSION: i64 = 8;
+pub(crate) const LATEST_VERSION: i64 = 9;
 
 /// Runs all outstanding migrations on the writer connection.
 pub(crate) fn run(conn: &mut Connection) -> StoreResult<()> {
@@ -244,6 +249,8 @@ mod tests {
             "settings",
             "schema_migrations",
             "search_index",
+            "search_meta",
+            "search_docs",
         ] {
             assert!(table_exists(&conn, table), "missing table {table}");
         }

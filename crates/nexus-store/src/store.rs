@@ -29,8 +29,8 @@ use crate::util::{hex_lower, is_content_id, is_safe_id, now_ms, now_secs};
 
 const CONTENT_COLUMNS: &str = "content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at";
 const DOWNLOAD_COLUMNS: &str = "download_id, content_id, display_name, expected_size, verified_prefix, state, partial_file, created_at, updated_at, last_error, manifest_root, source_peer";
-const PROFILE_COLUMNS: &str = "identity_id, revision, record_bytes, display_name, username, bio, avatar_content_id, updated_at, updated_at_ms, state, published_at, last_checked_at, freshness";
-const PUBLICATION_COLUMNS: &str = "publication_id, identity_id, content_id, revision, record_bytes, title, description, filename, published_at, updated_at, tombstoned, category, size_bytes, local, serving, announced, availability, last_checked_at";
+pub(crate) const PROFILE_COLUMNS: &str = "identity_id, revision, record_bytes, display_name, username, bio, avatar_content_id, updated_at, updated_at_ms, state, published_at, last_checked_at, freshness";
+pub(crate) const PUBLICATION_COLUMNS: &str = "publication_id, identity_id, content_id, revision, record_bytes, title, description, filename, published_at, updated_at, tombstoned, category, size_bytes, local, serving, announced, availability, last_checked_at";
 const REPLICA_COLUMNS: &str = "replica_id, content_id, publication_id, state, source_peer, verified_size_bytes, last_verified_at, last_checked_at, last_seen_at, failure_count, last_error, announced, created_at, updated_at";
 const QUOTA_SETTING: &str = "storage.quota_bytes";
 const UPLOAD_LIMIT_SETTING: &str = "hosting.upload_bytes_per_second";
@@ -102,7 +102,7 @@ pub struct ReconciliationReport {
 /// SQLite metadata plus the managed content store.
 pub struct Store {
     root: PathBuf,
-    db: Database,
+    pub(crate) db: Database,
     managed: ManagedStore,
     config: StoreConfig,
     quota: Mutex<QuotaPolicy>,
@@ -1407,6 +1407,7 @@ impl Store {
                     params![record.publication_id, tag, i64::try_from(position).unwrap_or(i64::MAX)],
                 )?;
             }
+            crate::search_store::refresh_publication_index(&transaction, &record.publication_id)?;
             transaction.commit()?;
             Ok(())
         })
@@ -1558,6 +1559,7 @@ impl Store {
                 "UPDATE publications SET tombstoned = 1, updated_at = ?2 WHERE publication_id = ?1",
                 params![record.publication_id, record.created_at],
             )?;
+            crate::search_store::refresh_publication_index(&transaction, &record.publication_id)?;
             transaction.commit()?;
             Ok(())
         })
@@ -1684,6 +1686,7 @@ impl Store {
                     checked_at.map(|value| i64::try_from(value).unwrap_or(i64::MAX))
                 ],
             )?;
+            crate::search_store::note_search_change(connection)?;
             Ok(())
         })
     }
@@ -1698,8 +1701,9 @@ impl Store {
                  SET tombstoned = 1, serving = 0, announced = 0, availability = 'record_only',
                      updated_at = ?2
                  WHERE publication_id = ?1",
-                params![publication_id, at],
+                params![&publication_id, at],
             )?;
+            crate::search_store::remove_publication(connection, &publication_id)?;
             Ok(())
         })
     }
@@ -2727,7 +2731,7 @@ fn content_from_row(row: &Row<'_>) -> rusqlite::Result<ContentRecord> {
     })
 }
 
-fn publication_from_row(row: &Row<'_>) -> rusqlite::Result<PublicationRecord> {
+pub(crate) fn publication_from_row(row: &Row<'_>) -> rusqlite::Result<PublicationRecord> {
     let category: String = row.get(11)?;
     let availability: String = row.get(16)?;
     Ok(PublicationRecord {
@@ -2756,7 +2760,10 @@ fn publication_from_row(row: &Row<'_>) -> rusqlite::Result<PublicationRecord> {
     })
 }
 
-fn publication_tags(connection: &rusqlite::Connection, publication_id: &str) -> rusqlite::Result<Vec<String>> {
+pub(crate) fn publication_tags(
+    connection: &rusqlite::Connection,
+    publication_id: &str,
+) -> rusqlite::Result<Vec<String>> {
     let mut statement =
         connection.prepare("SELECT tag FROM publication_tags WHERE publication_id = ?1 ORDER BY position ASC")?;
     let rows = statement.query_map([publication_id], |row| row.get::<_, String>(0))?;
@@ -2870,6 +2877,7 @@ fn write_profile(connection: &rusqlite::Connection, record: &ProfileRecord) -> S
             record.freshness.as_str(),
         ],
     )?;
+    crate::search_store::index_profile(connection, record)?;
     Ok(())
 }
 
@@ -2899,10 +2907,11 @@ fn insert_profile_conflict(
             i64::try_from(observed_at).unwrap_or(i64::MAX),
         ],
     )?;
+    crate::search_store::note_search_change(connection)?;
     Ok(())
 }
 
-fn profile_from_row(row: &Row<'_>) -> rusqlite::Result<ProfileRecord> {
+pub(crate) fn profile_from_row(row: &Row<'_>) -> rusqlite::Result<ProfileRecord> {
     let state: String = row.get(9)?;
     let freshness: String = row.get(12)?;
     Ok(ProfileRecord {

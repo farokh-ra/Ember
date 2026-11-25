@@ -277,6 +277,10 @@ impl DomainError {
                 "The manifest failed integrity verification.",
             ),
             StoreError::InvalidRecord(_) => Self::new(DomainCode::VerificationFailed, "The signed record is invalid."),
+            StoreError::InvalidSearch(error) if error.is_conflict() => {
+                Self::new(DomainCode::Conflict, "The search index changed; restart the search.")
+            }
+            StoreError::InvalidSearch(_) => Self::invalid("The search request is invalid."),
             StoreError::ConfirmationRequired(_) => {
                 Self::new(DomainCode::Conflict, "This action requires explicit confirmation.")
             }

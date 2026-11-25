@@ -14,6 +14,7 @@ mod migrations;
 mod model;
 mod paths;
 mod quota;
+mod search_store;
 mod store;
 mod util;
 
@@ -33,6 +34,7 @@ pub use quota::{
     DEFAULT_QUOTA_BYTES, FREE_SPACE_RESERVE, GIB, MAX_FILE_SIZE, MAX_QUOTA_BYTES, MIN_QUOTA_BYTES, QuotaPolicy,
     QuotaUsage,
 };
+pub use search_store::{LocalSearchPage, ProviderPage, SearchIndexStats};
 pub use store::{ExportedContent, ReconciliationReport, Store, StoreConfig};
 
 /// Returns the architecture component name for diagnostics.

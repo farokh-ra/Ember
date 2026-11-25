@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/farokh-ra/Ember/actions/workflows/ci.yml"><img src="https://github.com/farokh-ra/Ember/actions/workflows/ci.yml/badge.svg?branch=main&amp;style=flat-square" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/status-Stage%2015%20complete-2EA043?style=flat-square" alt="Stage 15 complete" />
+  <img src="https://img.shields.io/badge/status-Stage%2016%20complete-2EA043?style=flat-square" alt="Stage 16 complete" />
   <img src="https://img.shields.io/badge/license-proprietary-B91C1C?style=flat-square" alt="Proprietary license" />
   <img src="https://img.shields.io/badge/Android-28%2B-3DDC84?style=flat-square&amp;logo=android&amp;logoColor=white" alt="Android 28+" />
   <img src="https://img.shields.io/badge/Windows-10%2F11-0078D4?style=flat-square&amp;logo=windows11&amp;logoColor=white" alt="Windows 10 and 11" />
@@ -33,9 +33,8 @@
 > viewable, but public visibility grants no right to copy, modify, distribute,
 > or reuse the source. See [LICENSE.md](LICENSE.md).
 >
-> **Stage 15 is complete and merged** into `main` as `264dcbb` through PR #18.
-> **Stage 16 — local and distributed search — has not started** and requires
-> explicit project-owner approval.
+> **Stage 16 is complete on `feat/16-search`** and is awaiting review and merge.
+> **Stage 15 is merged** into `main` as `264dcbb` through PR #18.
 
 ## Overview
 
@@ -57,11 +56,11 @@ rewrites the original signed record.
 
 | Property | Detail |
 |---|---|
-| **Current stage** | 15 complete and merged · 16 next, not started |
+| **Current stage** | 16 complete on `feat/16-search` · review and merge pending |
 | **Platforms** | Android 8.0+ (API 28) · Windows 10/11 x64 |
 | **UI** | Kotlin 2.4.21 · Compose Multiplatform 1.12.2 |
-| **Core** | Rust 1.99.1 · ABI 1 · FFI interface 1.8.0 · 42 callable methods |
-| **Protocol** | `0.1.0-stage-15` · schema v8 · `/nexus/file/1` |
+| **Core** | Rust 1.99.1 · ABI 1 · FFI interface 1.9.0 · 45 callable methods |
+| **Protocol** | `0.1.0-stage-16` · schema v9 · `/nexus/file/1` · `/nexus/index/1` |
 | **Network** | QUIC v1 · TCP + Noise + Yamux · Kademlia DHT · Relay v2 · DCUtR · AutoNAT |
 | **Transfer** | 1 MiB verified chunks · durable resume · source failover |
 | **Storage** | Content-addressed managed store · quota, reserve, and reference-counted cleanup |
@@ -81,42 +80,46 @@ rewrites the original signed record.
 
 ## Capabilities
 
-| Area | Delivered through Stage 15 |
+| Area | Delivered through Stage 16 |
 |---|---|
 | **Identity** | Local Ed25519 identities, stable Bech32m `nx1...` IDs, encrypted key storage, and passphrase-encrypted backups. |
 | **Signed records** | Canonical CBOR, exact-byte envelopes, profile and publication v1, revisions, and signed tombstones. |
-| **Storage** | SQLite schema v8, atomic managed imports, 10 GiB default quota, 1 GiB reserve, 4 GiB file cap, crash reconciliation, and corrupt-file quarantine. |
+| **Storage** | SQLite schema v9, atomic managed imports, 10 GiB default quota, 1 GiB reserve, 4 GiB file cap, crash reconciliation, and corrupt-file quarantine. |
 | **Discovery** | Kademlia DHT, signed provider records, 24 h record TTL, persisted bootstrap peers, and bounded reconnection. |
 | **Connectivity** | QUIC v1, TCP + Noise + Yamux, authenticated direct connections, Circuit Relay v2 fallback, DCUtR hole punching, and AutoNAT reachability. |
 | **Transfer** | `/nexus/file/1`, every chunk verified before writing, pause/resume, process-death recovery, and failover to another connected source. |
 | **Profiles** | Signed public profiles, DHT publish and lookup, stale-cache labels, conflict retention, and non-unique usernames treated as labels. |
 | **Publishing** | Signed metadata, file pages, DHT announcement, provider serving, unpublish tombstones, and separate signature, serving, and availability states. |
 | **Hosting** | Explicit `replica.add`, full verification before advertisement, pause/resume/remove, storage and upload limits, metered and battery gates, and seven-day re-verification. |
+| **Search** | Verified local FTS5 index, bounded query language, Explore modes, generation-bound pagination, signed index providers over `/nexus/index/1`, coverage labels, and conflict/duplicate handling. |
 | **Native boundary** | C ABI 1, JNI and JNA adapters, versioned CBOR envelopes, event queue, cancellation, and streaming import/export. |
-| **Quality** | 286 Rust tests, shared Kotlin JVM tests, a C harness, Windows JNA and JNI proxy checks, and seven CI jobs. |
+| **Quality** | 330 Rust tests, shared Kotlin JVM tests, a C harness, Windows JNA and JNI proxy checks, and seven CI jobs. |
 
 ## Status
 
 | Area | State |
 |---|---|
-| Core foundations through Stage 15 | Complete and merged |
+| Core foundations through Stage 16 | Complete on Windows loopback; Stage 16 awaiting merge |
 | Android and Windows applications | Shared clickable UI prototype with visibly labelled demo data |
-| Windows networking, transfer, profiles, publishing, hosting | Verified on Windows loopback |
-| Android runtime networking and hosting | Libraries cross-build; on-device evidence deferred |
-| Local and distributed search | Stage 16; not started |
+| Windows networking, transfer, profiles, publishing, hosting, search | Verified on Windows loopback |
+| Android runtime networking, hosting, and search | Libraries cross-build; on-device evidence deferred |
+| Local and distributed search | Complete on `feat/16-search`; provider role is opt-in |
 | Windows installer and signed releases | Stage 19; the current Windows build is an app image |
 
 ### Honest limits
 
 - The Kotlin screens still use demo data and are not wired to the Rust core for
-  networking, publishing, hosting, or search flows.
+  networking, publishing, hosting, or search flows. Explore and Search show
+  honest coverage, partial, pagination, and offline labels over sample records.
 - Android JNI execution, on-device networking, transfer, profile, publishing,
-  and replication are not exercised locally. The Android libraries compile and
-  export-check; the JNI shim is tested through a Windows-hosted JVM proxy.
+  replication, and search are not exercised locally. The Android libraries
+  compile and export-check; the JNI shim is tested through a Windows-hosted JVM
+  proxy.
 - Global-network behavior is not claimed yet. Current integration evidence is
   Windows loopback with configurable bootstrap and relay infrastructure.
-- Search is schema-only in the current database; Stage 16 populates and queries
-  it.
+- Distributed search coverage is inherently partial. Index providers are
+  optional peers, not authorities, and search never claims complete network
+  coverage.
 - The Windows build is an application image, not an installer. Inno Setup
   packaging is Stage 19.
 
@@ -136,7 +139,8 @@ flowchart LR
     FFI --> CORE["Rust core: lifecycle, dispatch, events"]
     CORE --> NET["libp2p: QUIC, TCP, DHT, relay, NAT traversal"]
     CORE --> XFER["Transfer: verify, resume, failover"]
-    CORE --> STORE["SQLite v8 + managed blob store"]
+    CORE --> STORE["SQLite v9 + managed blob store"]
+    CORE --> SEARCH["Verified FTS5 index + optional index providers"]
     CORE --> CRYPTO["Ed25519 + signed records"]
     NET <--> PEERS[("Ember peers")]
 ```
@@ -193,7 +197,7 @@ flowchart LR
 
 ## Roadmap
 
-Stage 15 is merged. Stage 16 is the next body of work and has not started.
+Stage 16 is complete on `feat/16-search` and awaits review and merge.
 
 | # | Stage | Status |
 |---|---|---|
@@ -212,18 +216,18 @@ Stage 15 is merged. Stage 16 is the next body of work and has not started.
 | 13 | Profiles and signed public metadata | Complete on Windows loopback |
 | 14 | Publishing and file pages | Complete on Windows loopback |
 | 15 | Voluntary replication and availability | Complete and merged |
-| 16 | Local and distributed search | **Next; requires approval** |
+| 16 | Local and distributed search | Complete on Windows loopback; merge pending |
 | 17 | Full UI, accessibility, settings, foreground service, Windows tray | Planned |
 | 18 | Threat model, abuse tests, dependency and protocol hardening | Planned |
 | 19 | Signed releases, installers, performance, parity, and release evidence | Planned |
 
 **Stage 16 scope:** a verified local FTS5 index, the Explore search experience,
 signed index-provider records, coverage labels, pagination, provider-loss
-handling, and bounded query deadlines. Invalid or unsigned records must never
-enter the index or appear in results.
+handling, and bounded query deadlines. Invalid or unsigned records never enter
+the index or appear in results.
 
-Android runtime evidence for Stages 08–15 remains deferred. Those gaps do not
-change the completed Windows-loopback evidence for Stage 15.
+Android runtime evidence for Stages 08–16 remains deferred. Those gaps do not
+change the completed Windows-loopback evidence for Stage 16.
 
 ## Quick start
 
@@ -290,11 +294,11 @@ scheduled for Stage 19, as defined by ADR-0009.
 | Tool | Pin |
 |---|---|
 | JDK | Eclipse Temurin 21.0.13+9 |
-| Gradle | 9.9.1 (wrapper committed) |
+| Gradle | 9.9.2 (wrapper committed) |
 | Kotlin | 2.4.21 |
 | Compose Multiplatform | 1.12.2 |
 | Compose Material3 | 1.9.0 |
-| Android Gradle Plugin | 9.5.1 |
+| Android Gradle Plugin | 9.5.2 |
 | Android compile and target SDK | 37 |
 | Android minimum SDK | 28 |
 | Android build tools | 36.0.0 |
@@ -335,7 +339,7 @@ commits, reviews, and releases.
 | [docs/architecture/DHT_DESIGN.md](docs/architecture/DHT_DESIGN.md) | Kademlia roles, DHT keys, record validation, bounds, and failure behavior. |
 | [docs/architecture/NAT_TRAVERSAL.md](docs/architecture/NAT_TRAVERSAL.md) | Relay fallback, hole punching, NAT status, path reporting, and bounds. |
 | [docs/architecture/FILE_TRANSFER.md](docs/architecture/FILE_TRANSFER.md) | `/nexus/file/1`, chunk verification, resume, failover, and limits. |
-| [docs/progress/STAGE_15.md](docs/progress/STAGE_15.md) | Stage 15 scope, architecture, tests, and verification evidence. |
+| [docs/progress/STAGE_16.md](docs/progress/STAGE_16.md) | Stage 16 scope, architecture, tests, and verification evidence. |
 | [docs/HANDOFF.md](docs/HANDOFF.md) | Current project state, decisions, and exact next action. |
 | [docs/decisions](docs/decisions/README.md) | Accepted architecture decision records. |
 | [docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md) | Repeatable Windows setup and troubleshooting. |

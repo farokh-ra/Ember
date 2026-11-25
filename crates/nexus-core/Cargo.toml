@@ -15,6 +15,7 @@ nexus-identity.workspace = true
 nexus-net.workspace = true
 nexus-observability.workspace = true
 nexus-protocol.workspace = true
+nexus-search.workspace = true
 nexus-store.workspace = true
 nexus-transfer.workspace = true
 sha2.workspace = true

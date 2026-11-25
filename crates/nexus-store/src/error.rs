@@ -112,6 +112,10 @@ pub enum StoreError {
     #[error("invalid signed record: {0}")]
     InvalidRecord(String),
 
+    /// A search query, cursor, or explore request was invalid.
+    #[error("invalid search request: {0}")]
+    InvalidSearch(#[from] nexus_search::SearchError),
+
     /// A destructive operation requires explicit user confirmation.
     #[error("explicit confirmation is required to remove {0}")]
     ConfirmationRequired(&'static str),

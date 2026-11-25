@@ -85,7 +85,9 @@ def check_tables(paths: list[Path]) -> list[str]:
                 return
             widths = []
             for line_number, line in block:
-                cells = line.strip().strip("|").replace("\\|", "|").split("|")
+                # Split on unescaped pipes only, so a literal `\|` in a cell
+                # stays inside that cell instead of inflating the width.
+                cells = re.split(r"(?<!\\)\|", line.strip().strip("|"))
                 widths.append((line_number, len(cells), line))
             expected = widths[0][1]
             for line_number, width, _ in widths[1:]:
@@ -288,9 +290,9 @@ def main() -> int:
     for tool, pin in (
         ("Kotlin", "2.4.21"),
         ("Compose Multiplatform", "1.12.2"),
-        ("Android Gradle Plugin", "9.5.1"),
+        ("Android Gradle Plugin", "9.5.2"),
         ("Rust", "1.99.1"),
-        ("Gradle", "9.9.1"),
+        ("Gradle", "9.9.2"),
         ("Android NDK", "29.0.14206865"),
     ):
         if pin not in architecture:

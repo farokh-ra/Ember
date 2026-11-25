@@ -16,6 +16,7 @@ mod config;
 mod driver;
 mod error;
 mod file;
+mod index;
 mod peer_key;
 mod relay;
 mod shared;
@@ -46,6 +47,7 @@ pub use config::{
 };
 pub use error::NetError;
 pub use file::{FileMetadata, FileProvider};
+pub use index::IndexProvider;
 pub use peer_key::{
     NETWORK_DIRECTORY, PEER_KEY_FILE_NAME, PEER_KEY_FORMAT_VERSION, PEER_KEY_HEADER_LENGTH, PEER_KEY_KDF_HKDF_SHA256,
     PEER_KEY_MAGIC, PEER_KEY_MAX_FILE_LENGTH, PEER_KEY_SALT_LENGTH, PEER_KEY_SEED_LENGTH, PeerKey,
@@ -58,8 +60,9 @@ pub use state::{
 
 use crate::driver::{COMMAND_CAPACITY, Command};
 use crate::file::EmptyFileProvider;
+use crate::index::EmptyIndexProvider;
 use crate::shared::Shared;
-use nexus_protocol::{DHT_KEY_BYTES, DhtRecord, FileSelector};
+use nexus_protocol::{DHT_KEY_BYTES, DhtRecord, FileSelector, IndexRequest, IndexResponse};
 
 /// How long [`Network::start`] waits for the driver to build the swarm.
 pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -95,6 +98,17 @@ impl Network {
         local_key: &LocalEncryptionKey,
         observer: Arc<dyn NetworkObserver>,
         file_provider: Arc<dyn FileProvider>,
+    ) -> Result<Self, NetError> {
+        Self::start_with_providers(config, local_key, observer, file_provider, Arc::new(EmptyIndexProvider))
+    }
+
+    /// Starts the driver with providers for inbound file and index requests.
+    pub fn start_with_providers(
+        config: NetworkConfig,
+        local_key: &LocalEncryptionKey,
+        observer: Arc<dyn NetworkObserver>,
+        file_provider: Arc<dyn FileProvider>,
+        index_provider: Arc<dyn IndexProvider>,
     ) -> Result<Self, NetError> {
         let mut config = config;
         let mut merged = bootstrap::compiled()?;
@@ -158,6 +172,7 @@ impl Network {
                         thread_shared,
                         receiver,
                         Arc::clone(&file_provider),
+                        index_provider,
                     ) {
                         Ok(driver) => {
                             let _ = startup_sender.send(Ok(()));
@@ -271,6 +286,23 @@ impl Network {
             index,
             offset,
             length,
+            respond,
+        })?;
+        receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))
+    }
+
+    /// Fetches one bounded page from an optional index provider.
+    ///
+    /// The request is validated and encoded locally. The returned records are
+    /// untrusted signed envelopes and must be verified by the caller before
+    /// they are cached, indexed, or displayed.
+    pub fn fetch_index_page(&self, peer_id: &str, request: &IndexRequest) -> Result<IndexResponse, NetError> {
+        let peer_id: PeerId = peer_id.trim().parse().map_err(|_| NetError::InvalidPeerId)?;
+        let request = nexus_protocol::encode_index_request(request).map_err(|_| NetError::InvalidRecord)?;
+        let (respond, receiver) = oneshot::channel();
+        self.send(Command::FetchIndex {
+            peer_id,
+            request,
             respond,
         })?;
         receiver.blocking_recv().unwrap_or(Err(NetError::NotRunning))

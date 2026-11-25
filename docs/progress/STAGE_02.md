@@ -81,8 +81,8 @@ Versions were checked against the registries on 2026-11-12 and pinned for Stage 
 |---|---|
 | Kotlin | 2.4.21 |
 | Compose Multiplatform | 1.12.2 |
-| Android Gradle Plugin | 9.5.1 |
-| Gradle | 9.9.1 |
+| Android Gradle Plugin | 9.5.2 |
+| Gradle | 9.9.2 |
 | Rust | 1.99.1 |
 | Android NDK | 29.0.14206865 |
 | JDK | Temurin 21 LTS |

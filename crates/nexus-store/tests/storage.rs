@@ -98,7 +98,7 @@ fn data_001_schema_and_restart_persistence() {
 
     let imported = {
         let store = open(&root, 8 * 1024 * 1024, 8 * 1024 * 1024);
-        assert_eq!(store.schema_version().expect("schema version"), 8);
+        assert_eq!(store.schema_version().expect("schema version"), 9);
         assert!(store.database_path().is_file());
 
         let imported = store
@@ -179,7 +179,7 @@ fn data_001_schema_and_restart_persistence() {
     };
 
     let store = open(&root, 8 * 1024 * 1024, 8 * 1024 * 1024);
-    assert_eq!(store.schema_version().expect("schema version"), 8);
+    assert_eq!(store.schema_version().expect("schema version"), 9);
     assert_eq!(store.identity_refs().expect("identities").len(), 1);
     assert_eq!(store.profiles().expect("profiles").len(), 1);
     assert_eq!(store.publications().expect("publications").len(), 1);
@@ -465,7 +465,7 @@ fn data_007_metadata_export_and_restore_round_trip() {
             .expect("publication");
         store.set_setting("theme", "light").expect("setting");
         let report = store.export_metadata(&archive).expect("export metadata");
-        assert_eq!(report.schema_version, 8);
+        assert_eq!(report.schema_version, 9);
         assert!(archive.is_file());
 
         let archive_bytes = fs::read(&archive).expect("archive bytes");
@@ -484,8 +484,8 @@ fn data_007_metadata_export_and_restore_round_trip() {
     let target_root = TempRoot::new("backup-target");
     let mut target = open(&target_root, 1024 * 1024, 1024 * 1024);
     let restore = target.restore_metadata(&archive).expect("restore metadata");
-    assert_eq!(restore.archive_schema_version, 8);
-    assert_eq!(restore.restored_schema_version, 8);
+    assert_eq!(restore.archive_schema_version, 9);
+    assert_eq!(restore.restored_schema_version, 9);
     assert_eq!(target.identity_refs().expect("identities").len(), 1);
     assert_eq!(target.get_setting("theme").expect("setting"), Some("light".to_owned()));
     assert_eq!(target.publications().expect("publications").len(), 1);

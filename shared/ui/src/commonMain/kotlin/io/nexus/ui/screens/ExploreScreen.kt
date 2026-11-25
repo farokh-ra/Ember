@@ -30,6 +30,7 @@ import io.nexus.ui.components.NexusChoiceChip
 import io.nexus.ui.components.NexusGroupLabel
 import io.nexus.ui.components.NexusInfoBanner
 import io.nexus.ui.components.NexusInlineEmpty
+import io.nexus.ui.components.NexusPrimaryButton
 import io.nexus.ui.components.NexusScreen
 import io.nexus.ui.components.NexusSectionHeader
 import io.nexus.ui.components.PreviewStateBar
@@ -40,6 +41,8 @@ import io.nexus.ui.components.demoCategoryLabel
 import io.nexus.ui.icons.NexusIcons
 import io.nexus.ui.resources.LocalNexusStrings
 import io.nexus.ui.theme.NexusSpacing
+
+private const val DEMO_EXPLORE_PAGE_SIZE: Int = 5
 
 /** Discoverable records grouped by the canonical availability vocabulary. */
 @Composable
@@ -54,11 +57,18 @@ public fun ExploreScreen(
 ) {
     val strings = LocalNexusStrings.current
     var category by remember { mutableStateOf<DemoCategory?>(null) }
+    var visibleCount by remember(category) { mutableStateOf(DEMO_EXPLORE_PAGE_SIZE) }
     val publications =
         remember(category) {
             DemoCatalog.publications.filter { category == null || it.category == category }
         }
     val content = previewContentState(scenario) { publications }
+    val coverage =
+        when (network) {
+            PreviewNetworkState.OFFLINE -> strings.exploreCoverageOffline
+            PreviewNetworkState.DEGRADED -> strings.exploreCoveragePartial
+            else -> strings.exploreCoverage
+        }
 
     NexusScreen(
         modifier = modifier,
@@ -80,7 +90,7 @@ public fun ExploreScreen(
             icon = NexusIcons.Info,
         )
         Text(
-            text = strings.exploreCoverage,
+            text = coverage,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -126,7 +136,22 @@ public fun ExploreScreen(
                     onAction = { category = null },
                 )
             } else {
-                ExploreGroups(publications = visible, onOpenFile = onOpenFile)
+                val paged = visible.take(visibleCount)
+                ExploreGroups(publications = paged, onOpenFile = onOpenFile)
+                Text(
+                    text = strings.exploreShowing(paged.size, visible.size),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (paged.size < visible.size) {
+                    NexusPrimaryButton(
+                        text = strings.exploreLoadMore,
+                        onClick = {
+                            visibleCount = minOf(visibleCount + DEMO_EXPLORE_PAGE_SIZE, visible.size)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
         AvailabilityGuide()

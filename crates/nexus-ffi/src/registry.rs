@@ -71,6 +71,7 @@ mod tests {
             dht_mode: nexus_core::DhtMode::Client,
             relay_fallback: true,
             relay_server: false,
+            search_provider: false,
             quota_bytes: nexus_store::MIN_QUOTA_BYTES,
             enable_test_methods: true,
         };

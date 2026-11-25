@@ -129,7 +129,9 @@ def check_tables(paths: list[Path]) -> list[str]:
                 return
             widths = []
             for line_number, line in block:
-                cells = line.strip().strip("|").replace("\\|", "|").split("|")
+                # Split on unescaped pipes only, so a literal `\|` in a cell
+                # stays inside that cell instead of inflating the width.
+                cells = re.split(r"(?<!\\)\|", line.strip().strip("|"))
                 widths.append((line_number, len(cells), line))
             expected = widths[0][1]
             for line_number, width, _ in widths[1:]:
