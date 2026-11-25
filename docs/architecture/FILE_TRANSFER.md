@@ -3,18 +3,19 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-TRANSFER-001 |
-| Version | 1.1.0 |
-| Status | Implemented in Stage 12; publication serving gate added in Stage 14; Android runtime verification deferred |
-| Date | 2026-11-22 |
+| Version | 1.2.0 |
+| Status | Implemented in Stage 12; publication serving gate added in Stage 14; multi-source scheduling added in Stage 17; Android runtime verification deferred |
+| Date | 2026-11-25 |
 | Related | [ADR-0005](../decisions/ADR-0005-libp2p-transports-discovery.md), [ADR-0007](../decisions/ADR-0007-protocol-boundaries-versioning.md), [FFI_INTERFACE.md](FFI_INTERFACE.md), [DHT_DESIGN.md](DHT_DESIGN.md) |
 
 ## 1. Purpose
 
 Stage 12 adds direct, peer-to-peer file transfer on top of the authenticated
 libp2p transport from Stage 09. A download fetches a canonical manifest and
-bounded chunk slices from one connected peer at a time, verifies every chunk
-before writing it, and promotes the file only after the complete content
-matches its SHA-256 content ID.
+bounded chunk slices from connected peers, verifies every chunk before writing
+it, and promotes the file only after the complete content matches its SHA-256
+content ID. Stage 17 lets one download take different chunks from several peers
+at once.
 
 The design has four properties:
 
@@ -160,9 +161,10 @@ present, every chunk, and the final content ID.
 
 ## 5. Download manager
 
-The core runs downloads on a dedicated two-thread pool (`DOWNLOAD_WORKERS = 2`).
-Each job has a cooperative `DownloadControl` with pause, cancel, and keep-partial
-flags. One job runs these phases:
+The core runs downloads on a dedicated two-thread job pool
+(`DOWNLOAD_WORKERS = 2`). Each job has a cooperative `DownloadControl` with
+pause, cancel, and keep-partial flags, and spawns one transfer worker per usable
+source, capped at four. One job runs these phases:
 
 1. **Metadata.** Try each ordered source, up to two rounds, with a bounded
    backoff. The first valid metadata wins; its peer becomes the source.
@@ -173,47 +175,73 @@ flags. One job runs these phases:
 3. **Registration.** Store the manifest by root, then create the download row
    and an empty partial file. Registration checks the file-size cap, managed
    quota, and free-space reserve.
-4. **Chunks.** For each missing chunk, fetch 64 KiB slices from the current
-   source, concatenate one chunk in memory, compare its SHA-256 with the
-   manifest entry, write it at the chunk offset, flush, and checkpoint the new
-   verified prefix.
-5. **Promotion.** After the last chunk, verify the complete file against the
-   content ID, promote the partial into the managed store, add a
-   `retained_download` reference, and delete the download row.
+4. **Chunks.** Up to four peers are scheduled concurrently, one chunk lease per
+   peer at a time. Each leased chunk is fetched as 64 KiB slices, concatenated
+   in memory, and compared with the manifest's SHA-256 for that chunk. A
+   verified chunk is written at its offset, flushed, and recorded in the
+   per-chunk map. Chunks may arrive out of order.
+5. **Promotion.** After every chunk is verified, the complete file is checked
+   against the content ID, promoted into the managed store, given a
+   `retained_download` reference, and the download row is deleted.
 
-### 5.1 Source failover
+### 5.1 Multi-source scheduling
 
-A chunk has four attempts. A failed slice or a hash mismatch advances to the
-next source in the ordered list. After the last source, the next attempt wraps
-to the first source after a 150 ms backoff. The download fails only after all
-four attempts are exhausted.
+Stage 17 adds a pure scheduler in `nexus-transfer`. It owns the pending chunk
+set, at most one in-flight lease per chunk, and one lease per peer, so a chunk
+is never fetched twice concurrently. A peer's rank comes only from observed
+transfer outcomes: authenticated chunks served, transport failures, corrupt
+responses, and measured chunk latency. Identity, publication popularity, and
+provider claims never affect the score. A peer is marked `proven` only after it
+serves a chunk whose hash matches the signed manifest, and proven peers are
+preferred.
+
+One worker thread is started per usable source, capped at four. With one source
+the scheduler reproduces the Stage 12 sequential behavior; with several sources
+it fills the free peers with the lowest pending chunks.
+
+### 5.2 Source failover
+
+A chunk has four total attempts across every source. A failed slice or a hash
+mismatch returns the chunk to the pending set and the next lease prefers a
+different peer; after a failure the worker waits 150 ms before retrying. A peer
+that returns two corrupt responses is quarantined for the rest of the download.
+A peer that fails transport three times consecutively is quarantined as well.
+The download fails only when no usable source remains or one chunk exhausts its
+attempts.
 
 Metadata uses two rounds over the source list. Invalid peer IDs fail
 immediately as `invalid_argument`; transport failures are retried and then
-mapped to a typed network or `not_found` error.
+mapped to a typed network or `not_found` error. Once metadata is verified, its
+peer is the first proven source but does not have to serve every chunk.
 
-### 5.2 Corruption handling
+### 5.3 Corruption handling
 
-A corrupt chunk is never written. The downloader discards the assembled bytes,
-advances to another source, and refetches the same chunk. If every attempt
-returns corrupt bytes, the download ends as `verification_failed` with reason
-`chunk_hash_mismatch`, and the verified prefix remains resumable.
+A corrupt chunk is never written and never recorded in the chunk map. The
+downloader discards the assembled bytes, returns the chunk to the scheduler,
+and refetches it, normally from another peer. A single malicious source
+therefore cannot corrupt the file: only chunks matching the signed manifest
+reach the partial. If every attempt returns corrupt bytes, the download ends as
+`verification_failed` with reason `chunk_hash_mismatch`, and every previously
+verified chunk stays resumable.
 
-### 5.3 Disconnect handling
+### 5.4 Disconnect handling
 
 A peer that disconnects mid-transfer produces a transport error on the next
-slice. The same retry and failover path applies. If no source remains, the
-download ends as `download.failed` with a typed error and its verified prefix
-intact. A later `download.resume` continues from that prefix.
+slice. That lease is returned to the scheduler and the remaining chunks go to
+the other peers. A quarantined or disconnected peer is skipped for the rest of
+the download. If no usable source remains, the download ends as
+`download.failed` with a typed error and its verified chunks intact. A later
+`download.resume` continues from those chunks, possibly through a different
+peer.
 
 ## 6. Pause, resume, cancellation, and restart
 
 ### 6.1 Pause
 
-`download.pause` sets a cooperative flag. The worker checks it between slices,
-between chunks, and during retry waits. When observed, the current chunk is not
-written; the last checkpointed prefix stays durable. The store records
-`paused`, and a `download.paused` event reports `verified_bytes` and `reason`.
+`download.pause` sets a cooperative flag. Every worker checks it between slices,
+between chunks, and during retry waits. When observed, an in-flight chunk is not
+written; already checkpointed chunks stay durable. The store records `paused`,
+and a `download.paused` event reports `verified_bytes` and `reason`.
 
 A pause requested before metadata registration is deferred until the download
 row exists. The worker still fetches and verifies the manifest, registers the
@@ -233,28 +261,36 @@ stored `manifest_root`; if absent, it fetches metadata again and re-verifies it
 against the stored content ID. It then checks:
 
 - The stored content ID and expected size match the manifest.
-- The verified prefix is not larger than the total size.
-- The prefix is chunk-aligned (except when it equals the total size), because
-  only complete chunks are ever checkpointed.
+- The stored chunk map has one bit per manifest chunk.
+- Every recorded chunk fits inside the partial file.
 
-The store truncates any unverified tail, resets the state to `downloading`, and
-the worker starts at `verified_prefix / 1 MiB`. Bytes before the prefix are
-never requested again.
+Every chunk the database records as verified is re-hashed from the partial file
+before any peer is trusted again. A chunk that fails is cleared from the map and
+refetched; a truncated or missing chunk is treated the same way. The store then
+truncates the unverified tail to the end of the highest verified chunk and
+resets the state to `downloading`. The scheduler resumes with only the missing
+chunks, so chunks verified before a pause or restart are never requested again.
 
 A resume without an explicit source uses the stored `source_peer`. A resume
-with explicit `peer_id` or `sources` overrides it.
+with explicit `peer_id` or `sources` overrides it, and later chunks may come from
+any listed source, not only the one that supplied earlier chunks.
 
 ### 6.3 Process death
 
 On engine start, `pause_interrupted_downloads` changes every row left in
 `downloading` to `paused` with `last_error = "interrupted by restart"`. The
-partial file and verified prefix are unchanged. The next resume re-verifies the
-manifest and continues from the durable prefix.
+partial file and chunk map are unchanged. The next resume re-verifies the
+manifest and every recorded chunk, then continues from the missing chunks.
 
 A graceful `stop` asks every active download worker to pause before networking
 shuts down, waits a bounded time for workers to checkpoint and exit, then marks
 any remaining `downloading` row paused. A normal application exit therefore
 stays resumable instead of becoming a failure.
+
+Reconciliation truncates a partial that is longer than its highest verified
+chunk. If a partial is shorter than a recorded chunk, the download is marked
+failed with the prefix aligned down to the last complete chunk, so a later
+resume never starts from a mid-chunk position.
 
 ### 6.4 Cancellation and removal
 
@@ -266,10 +302,11 @@ completed library entry. Removal deletes the partial file and the row.
 
 ## 7. Disk space, quota, and paths
 
-- `begin_download` charges the full expected size against the managed quota and
-  free-space reserve before any bytes are written.
-- Each checkpoint charges the newly verified delta, so quota and free space are
-  re-checked as the transfer grows.
+- `begin_download` checks the file-size cap, managed quota, and free-space
+  reserve before any bytes are written.
+- Each verified chunk charges its newly verified bytes, so quota and free space
+  are re-checked as the transfer grows. Out-of-order chunks are charged once
+  each and count toward usage immediately.
 - A full quota or an exhausted reserve fails the download with
   `quota_exceeded`; existing verified bytes stay resumable.
 - Partial files live under the managed store's generated partial path. The
@@ -297,21 +334,28 @@ The ABI remains 1. Stage 12 adds six methods:
 
 `download.list` returns at most 100 records per page (50 by default) and
 includes `download_id`, `content_id`, `display_name`, `expected_size`,
-`verified_prefix`, `state`, `source_peer`, `manifest_root`, `last_error`,
-`created_at`, and `updated_at`.
+`verified_prefix`, `verified_bytes`, `state`, `source_peer`, `manifest_root`,
+`last_error`, `created_at`, and `updated_at`. `verified_prefix` is the longest
+contiguous verified prefix; `verified_bytes` counts every verified chunk,
+including chunks beyond a gap.
 
 Events:
 
 | Event | Data |
 |---|---|
-| `download.started` | `download_id`, `content_id`, `total_bytes`, `source_peer`, `publication_id?`, `display_name` |
-| `download.progress` | `download_id`, `verified_bytes`, `total_bytes`, `rate_bps`, `source_peer` |
-| `download.resumed` | `download_id`, `content_id`, `verified_bytes`, `total_bytes` |
+| `download.started` | `download_id`, `content_id`, `total_bytes`, `total_chunks`, `source_peer`, `sources`, `publication_id?`, `display_name` |
+| `download.progress` | `download_id`, `verified_bytes`, `total_bytes`, `rate_bps`, `verified_chunks`, `total_chunks`, `source_peer`, `sources` |
+| `download.resumed` | `download_id`, `content_id`, `verified_bytes`, `total_bytes`, `verified_chunks`, `total_chunks`, `sources` |
 | `download.paused` | `download_id`, `verified_bytes`, `reason` |
 | `download.completed` | `download_id`, `content_id`, `size` |
 | `download.failed` | `download_id`, `error`, `verified_bytes` |
 | `download.cancelled` | `download_id`, `partial_kept` |
 | `download.removed` | `download_id`, `removed` |
+
+In `download.started` and `download.resumed`, `sources` is the ordered list of
+peer IDs this download may use. In `download.progress`, `sources` is an array of
+`{peer_id, attempts, successes, failures, corruptions, bytes, latency_ms,
+proven, quarantined}` observed for this download only.
 
 Progress events are coalesced to at most one per 250 ms per download; the final
 progress before promotion is forced. A terminal event is durable and is never
@@ -322,9 +366,9 @@ dropped.
 | State | Meaning |
 |---|---|
 | `pending` | Accepted; the worker has not registered the row yet. A pause or cancel requested in this window is applied after registration. |
-| `downloading` | Worker is fetching and checkpointing chunks. |
-| `paused` | Stopped with a durable verified prefix. |
-| `failed` | Terminal error; the prefix may still be resumed. |
+| `downloading` | Workers are fetching and checkpointing chunks. |
+| `paused` | Stopped with durable verified chunks. |
+| `failed` | Terminal error; verified chunks may still be resumed. |
 | `cancelled` | Stopped by the user; the partial may have been kept. |
 | `completed` | Transient only; promotion deletes the download row. |
 
@@ -333,8 +377,9 @@ A completed file becomes a normal verified content record with a
 
 ## 10. Limitations
 
-- One source is used at a time. Ember does not run parallel chunk swarms or
-  erasure coding.
+- One source at a time was the Stage 12 model. Stage 17 schedules up to four
+  peers concurrently, one chunk lease per peer, and never more than four
+  workers. Ember still does not use erasure coding.
 - A source must be connected before a download starts. The manager does not
   dial peers itself.
 - Resume requires the manifest to remain stored or re-fetchable. If the
@@ -365,15 +410,25 @@ A completed file becomes a normal verified content record with a
   oversized slices: `crates/nexus-net/tests/stage12.rs`.
 - Download manager completion, corruption retry, persistent corruption,
   publication mismatch, pause/resume, cancel, restart recovery, source
-  failover, total disconnect, and display-name safety:
-  `crates/nexus-core/src/downloads.rs` unit tests.
+  failover, total disconnect, display-name safety, multi-peer combination,
+  malicious-peer isolation, source loss, cross-peer resume, and local-chunk
+  repair: `crates/nexus-core/src/downloads.rs` unit tests.
+- Scheduler ordering, one lease per chunk and peer, scoring from observed
+  outcomes, corruption and failure quarantine, and a simulated two-source
+  speedup: `crates/nexus-transfer/src/scheduler.rs` unit tests.
+- Per-chunk persistence, sparse verified bytes, quota charging, clearing a
+  chunk, and completion requiring every chunk:
+  `crates/nexus-store/tests/storage.rs` and `crates/nexus-store/src/chunk_map.rs`.
 - Two real engines exchanging a 2.4 MiB file end to end, then re-exporting the
   exact bytes: `crates/nexus-core/tests/stage12.rs`.
+- One download taking verified chunks from two live engines, and completing
+  when one listed peer cannot serve the file:
+  `crates/nexus-core/tests/stage17.rs`.
 - A publisher importing, signing, announcing, serving, and withdrawing a file,
   and a second engine discovering the record, downloading the bytes, and
   observing the tombstone: `crates/nexus-core/tests/stage14.rs`.
 - Serving-gate, remote-cache, tombstone-retention, and manifest persistence
   tests: `crates/nexus-store/tests/stage14.rs`.
 
-See [STAGE_12.md](../progress/STAGE_12.md) and
-[STAGE_14.md](../progress/STAGE_14.md) for commands and totals.
+See [STAGE_12.md](../progress/STAGE_12.md), [STAGE_14.md](../progress/STAGE_14.md),
+and [STAGE_17.md](../progress/STAGE_17.md) for commands and totals.

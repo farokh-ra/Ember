@@ -61,10 +61,15 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "live search index state",
         sql: include_str!("../migrations/0009_search_state.sql"),
     },
+    Migration {
+        version: 10,
+        name: "multi-source download chunk map",
+        sql: include_str!("../migrations/0010_multi_source_downloads.sql"),
+    },
 ];
 
 /// Newest schema version understood by this build.
-pub(crate) const LATEST_VERSION: i64 = 9;
+pub(crate) const LATEST_VERSION: i64 = 10;
 
 /// Runs all outstanding migrations on the writer connection.
 pub(crate) fn run(conn: &mut Connection) -> StoreResult<()> {

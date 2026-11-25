@@ -12,16 +12,20 @@
 //! it enters the library.
 
 use std::collections::HashMap;
-use std::fs::OpenOptions;
-use std::io::{Seek, SeekFrom, Write};
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use nexus_crypto::Value;
 use nexus_net::{FileMetadata, FileProvider, NetError, Network};
 use nexus_protocol::{CHUNK_SIZE_V1, FileSelector, ManifestV1, SignedPublication, manifest_root};
-use nexus_store::{ContentState, DownloadRecord, DownloadState, Store, StoreError, safe_display_name};
+use nexus_store::{ChunkMap, ContentState, DownloadRecord, DownloadState, Store, StoreError, safe_display_name};
+use nexus_transfer::scheduler::{
+    LeaseDecision, MAX_PARALLEL_SOURCES, MultiSourceScheduler, ScheduleFailure, SourceFailure, SourceStats,
+};
 use sha2::{Digest, Sha256};
 
 use crate::engine::{Engine, MethodOutcome};
@@ -33,13 +37,11 @@ use crate::network::domain_error as network_domain_error;
 
 /// Number of worker threads dedicated to downloads.
 pub const DOWNLOAD_WORKERS: usize = 2;
-/// Maximum number of ordered fallback sources accepted in one request.
+/// Maximum number of sources accepted in one request.
 pub const MAX_SOURCES: usize = 8;
-/// Retries for one chunk before the download fails.
-const CHUNK_ATTEMPTS: usize = 4;
 /// Rounds over the source list when fetching metadata.
 const METADATA_ROUNDS: usize = 2;
-/// Bounded backoff between source or chunk retries.
+/// Bounded backoff between metadata attempts.
 const RETRY_DELAY: Duration = Duration::from_millis(150);
 /// Minimum interval between progress events.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
@@ -319,6 +321,7 @@ struct VerifiedMetadata {
     publication_id: Option<String>,
     display_name: String,
     source_peer: String,
+    chunk_map: ChunkMap,
 }
 
 struct Progress {
@@ -353,29 +356,77 @@ impl Progress {
     }
 }
 
-struct Sources {
-    peers: Vec<String>,
-    index: usize,
+/// Shared state for the workers of one download.
+struct TransferShared {
+    scheduler: Mutex<MultiSourceScheduler>,
+    work: Condvar,
+    stop: Mutex<Option<TransferError>>,
+    progress: Mutex<Progress>,
+    last_failure: Mutex<Option<DomainError>>,
+    abort: AtomicBool,
 }
 
-impl Sources {
-    fn new(peers: Vec<String>) -> Self {
-        Self { peers, index: 0 }
-    }
-
-    fn current(&self) -> &str {
-        &self.peers[self.index]
-    }
-
-    fn advance(&mut self) -> bool {
-        if self.index + 1 < self.peers.len() {
-            self.index += 1;
-            true
-        } else {
-            self.index = 0;
-            false
+impl TransferShared {
+    fn new(scheduler: MultiSourceScheduler, progress: Progress) -> Self {
+        Self {
+            scheduler: Mutex::new(scheduler),
+            work: Condvar::new(),
+            stop: Mutex::new(None),
+            progress: Mutex::new(progress),
+            last_failure: Mutex::new(None),
+            abort: AtomicBool::new(false),
         }
     }
+
+    fn request_stop(&self, error: TransferError) {
+        let mut slot = lock(&self.stop);
+        if slot.is_none() {
+            *slot = Some(error);
+            self.abort.store(true, Ordering::SeqCst);
+            self.work.notify_all();
+        }
+    }
+
+    fn is_aborted(&self) -> bool {
+        self.abort.load(Ordering::SeqCst)
+    }
+
+    fn take_stop(&self) -> Option<TransferError> {
+        lock(&self.stop).take()
+    }
+
+    fn record_net_failure(&self, error: &NetError) {
+        *lock(&self.last_failure) = Some(network_domain_error(error));
+    }
+
+    fn schedule_failure(&self, failure: ScheduleFailure) -> TransferError {
+        let saw_corruption = lock(&self.scheduler).saw_corruption();
+        if saw_corruption {
+            return verification_error("chunk_hash_mismatch");
+        }
+        if let Some(error) = lock(&self.last_failure).clone() {
+            return TransferError::Failed(error);
+        }
+        match failure {
+            ScheduleFailure::ChunkExhausted(_) | ScheduleFailure::NoUsableSource => {
+                TransferError::Failed(map_source_failure(None))
+            }
+        }
+    }
+
+    fn wait_for_work(&self) {
+        let scheduler = lock(&self.scheduler);
+        let _ = self
+            .work
+            .wait_timeout_while(scheduler, Duration::from_millis(100), |_| {
+                !self.abort.load(Ordering::SeqCst)
+            })
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Runs one download job to a terminal event.
@@ -514,6 +565,15 @@ fn transfer(
                     Value::Text("total_bytes".to_owned()),
                     Value::Unsigned(metadata.manifest.total_size),
                 ),
+                (
+                    Value::Text("verified_chunks".to_owned()),
+                    Value::Unsigned(u64::from(metadata.chunk_map.completed_count())),
+                ),
+                (
+                    Value::Text("total_chunks".to_owned()),
+                    Value::Unsigned(u64::from(metadata.chunk_map.total())),
+                ),
+                (Value::Text("sources".to_owned()), peer_list_value(&job.sources)),
             ]),
         )
         .with_download(job.download_id.clone());
@@ -533,9 +593,14 @@ fn transfer(
                 Value::Unsigned(metadata.manifest.total_size),
             ),
             (
+                Value::Text("total_chunks".to_owned()),
+                Value::Unsigned(u64::from(metadata.chunk_map.total())),
+            ),
+            (
                 Value::Text("source_peer".to_owned()),
                 Value::Text(metadata.source_peer.clone()),
             ),
+            (Value::Text("sources".to_owned()), peer_list_value(&job.sources)),
         ];
         let publication_id = metadata.publication_id.clone().map_or(Value::Null, Value::Text);
         data.push((Value::Text("publication_id".to_owned()), publication_id));
@@ -586,7 +651,7 @@ fn prepare(
             Some(&verified.source_peer),
         )
         .map_err(store_failure)?;
-    Ok((verified, record.verified_prefix))
+    Ok((verified, record.verified_bytes))
 }
 
 fn prepare_resume(
@@ -603,10 +668,11 @@ fn prepare_resume(
     }
     let (manifest_bytes, manifest_root, source_peer) = if let Some(root) = &record.manifest_root {
         let bytes = context.store.manifest(root).map_err(store_failure)?;
-        let source = record
-            .source_peer
-            .clone()
-            .or_else(|| job.sources.first().cloned())
+        let source = job
+            .sources
+            .first()
+            .cloned()
+            .or_else(|| record.source_peer.clone())
             .ok_or_else(|| TransferError::Failed(invalid_argument("a source peer is required to resume")))?;
         (bytes, root.clone(), source)
     } else {
@@ -628,15 +694,46 @@ fn prepare_resume(
     if hex_lower(&manifest.content_id) != record.content_id || manifest.total_size != record.expected_size {
         return Err(verification_error("manifest_mismatch"));
     }
-    let stored_prefix = record.verified_prefix;
-    if stored_prefix > manifest.total_size {
+    if usize::try_from(record.expected_size.div_ceil(CHUNK_SIZE_V1)).ok() != Some(manifest.chunks.len()) {
+        return Err(verification_error("manifest_mismatch"));
+    }
+    if record.verified_prefix > manifest.total_size {
         return Err(verification_error("resume_prefix_invalid"));
     }
-    if stored_prefix != manifest.total_size && stored_prefix % manifest.chunk_size != 0 {
-        // Only complete chunks are ever checkpointed, so a mid-chunk prefix is
-        // not resumable without re-verifying and rewriting the whole chunk.
+    if record.verified_prefix != manifest.total_size && record.verified_prefix % CHUNK_SIZE_V1 != 0 {
+        // A pre-Stage-17 record could only checkpoint whole chunks. A mid-chunk
+        // prefix is not resumable without re-verifying and rewriting the chunk.
         return Err(verification_error("resume_alignment"));
     }
+    let mut map = record
+        .chunk_map
+        .as_deref()
+        .and_then(|bytes| ChunkMap::from_stored(record.expected_size, bytes))
+        .unwrap_or_else(|| ChunkMap::from_prefix(record.expected_size, record.verified_prefix));
+    if usize::try_from(map.total()).ok() != Some(manifest.chunks.len()) {
+        return Err(verification_error("manifest_mismatch"));
+    }
+
+    // Re-verify every chunk the database believes is complete. This catches a
+    // corrupted or truncated partial file before any peer is trusted again.
+    let partial_path = context.store.partial_path(&job.download_id).map_err(store_failure)?;
+    for index in 0..map.total() {
+        if !map.is_set(index) {
+            continue;
+        }
+        let entry = manifest
+            .chunks
+            .get(usize::try_from(index).unwrap_or(usize::MAX))
+            .ok_or_else(|| verification_error("chunk_index_invalid"))?;
+        if !chunk_matches(&partial_path, index, entry) {
+            context
+                .store
+                .clear_chunk(&job.download_id, index)
+                .map_err(store_failure)?;
+            map.clear(index);
+        }
+    }
+
     context.store.resume_download(&job.download_id).map_err(store_failure)?;
     context
         .store
@@ -644,9 +741,9 @@ fn prepare_resume(
         .map_err(store_failure)?;
     let record = context
         .store
-        .checkpoint_partial(&job.download_id, stored_prefix)
+        .trim_unverified_tail(&job.download_id)
         .map_err(store_failure)?;
-    let prefix = record.verified_prefix.min(manifest.total_size);
+    let prefix = record.verified_bytes.min(manifest.total_size);
     Ok((
         VerifiedMetadata {
             manifest,
@@ -656,9 +753,29 @@ fn prepare_resume(
             publication_id: None,
             display_name: record.display_name,
             source_peer,
+            chunk_map: map,
         },
         prefix,
     ))
+}
+
+fn chunk_matches(path: &std::path::Path, index: u32, entry: &nexus_protocol::ChunkEntry) -> bool {
+    let Ok(mut file) = File::open(path) else {
+        return false;
+    };
+    let start = u64::from(index).saturating_mul(CHUNK_SIZE_V1);
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return false;
+    }
+    let Ok(length) = usize::try_from(entry.length) else {
+        return false;
+    };
+    let mut bytes = vec![0_u8; length];
+    if file.read_exact(&mut bytes).is_err() {
+        return false;
+    }
+    let digest: [u8; 32] = Sha256::digest(&bytes).into();
+    digest == entry.sha256
 }
 
 fn verify_metadata(
@@ -717,6 +834,7 @@ fn verify_metadata(
         return Err(verification_error("content_id_mismatch"));
     }
     let root = hex_lower(&manifest_root(&manifest_bytes));
+    let chunk_map = ChunkMap::new(manifest.total_size);
     Ok(VerifiedMetadata {
         manifest,
         manifest_bytes,
@@ -725,6 +843,7 @@ fn verify_metadata(
         publication_id,
         display_name: safe_display_name(&display_name),
         source_peer: source_peer.to_owned(),
+        chunk_map,
     })
 }
 
@@ -765,102 +884,252 @@ fn download_chunks(
     content_id: &[u8; 32],
     progress: &mut Progress,
 ) -> Result<u64, TransferError> {
-    let total = metadata.manifest.total_size;
-    let partial_path = context.store.partial_path(&job.download_id).map_err(store_failure)?;
-    let mut sources = Sources::new(job.sources.clone());
-    let mut offset = start_prefix;
-    while offset < total {
-        check_control(control)?;
-        let index = offset / CHUNK_SIZE_V1;
-        let index_u32 = u32::try_from(index).map_err(|_| verification_error("chunk_index_invalid"))?;
-        let entry = metadata
-            .manifest
-            .chunks
-            .get(usize::try_from(index).map_err(|_| verification_error("chunk_index_invalid"))?)
-            .ok_or_else(|| verification_error("chunk_index_invalid"))?;
-        let chunk_start = index * CHUNK_SIZE_V1;
-        let (chunk, peer) = fetch_verified_chunk(
+    let completed = metadata.chunk_map.completed();
+    let pending = completed.iter().filter(|done| !**done).count();
+    if pending == 0 {
+        emit_progress(
             context,
-            control,
-            &mut sources,
-            content_id,
-            index_u32,
-            entry.length,
-            entry.sha256,
-        )?;
-        if usize::try_from(entry.length).ok() != Some(chunk.len()) {
-            return Err(verification_error("chunk_length_mismatch"));
-        }
-        let mut file = OpenOptions::new().write(true).open(&partial_path).map_err(io_failure)?;
-        file.seek(SeekFrom::Start(chunk_start)).map_err(io_failure)?;
-        file.write_all(&chunk).map_err(io_failure)?;
-        file.flush().map_err(io_failure)?;
-        drop(file);
-
-        let end = chunk_start
-            .checked_add(entry.length)
-            .ok_or_else(|| verification_error("chunk_index_invalid"))?;
-        context
+            &job.download_id,
+            progress,
+            true,
+            completed.len(),
+            completed.len(),
+            &[],
+        );
+        let imported = context
             .store
-            .checkpoint_partial(&job.download_id, end)
+            .complete_download(&job.download_id)
             .map_err(store_failure)?;
-        offset = end;
-        progress.verified = offset;
-        progress.source_peer = Some(peer);
-        emit_progress(context, &job.download_id, progress, false);
-        check_control(control)?;
+        return Ok(imported.size_bytes);
     }
-    emit_progress(context, &job.download_id, progress, true);
-    let imported = context
-        .store
-        .complete_download(&job.download_id)
-        .map_err(store_failure)?;
-    Ok(imported.size_bytes)
+
+    let partial_path = context.store.partial_path(&job.download_id).map_err(store_failure)?;
+    let scheduler = MultiSourceScheduler::new(job.sources.clone(), &completed);
+    let total_chunks = scheduler.total_chunks();
+    let shared = TransferShared::new(
+        scheduler,
+        Progress {
+            verified: start_prefix,
+            total: metadata.manifest.total_size,
+            source_peer: progress.source_peer.clone(),
+            started: progress.started,
+            start_verified: progress.start_verified,
+            last_emit: progress.last_emit,
+        },
+    );
+    let workers = job.sources.len().min(MAX_PARALLEL_SOURCES).min(pending).max(1);
+    let result = (|| -> Result<u64, TransferError> {
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| {
+                    transfer_worker(context, control, job, metadata, content_id, &partial_path, &shared);
+                });
+            }
+        });
+
+        if let Some(stop) = shared.take_stop() {
+            return Err(stop);
+        }
+        let (is_complete, completed_chunks, stats) = {
+            let scheduler = lock(&shared.scheduler);
+            (
+                scheduler.is_complete(),
+                scheduler.completed_count(),
+                scheduler.stats().to_vec(),
+            )
+        };
+        if !is_complete {
+            return Err(verification_error("transfer_incomplete"));
+        }
+        {
+            let mut state = lock(&shared.progress);
+            emit_progress(
+                context,
+                &job.download_id,
+                &mut state,
+                true,
+                completed_chunks,
+                usize::try_from(total_chunks).unwrap_or(usize::MAX),
+                &stats,
+            );
+        }
+        let imported = context
+            .store
+            .complete_download(&job.download_id)
+            .map_err(store_failure)?;
+        Ok(imported.size_bytes)
+    })();
+    {
+        let state = lock(&shared.progress);
+        progress.verified = state.verified;
+        progress.source_peer = state.source_peer.clone();
+        progress.last_emit = state.last_emit;
+    }
+    result
 }
 
-fn fetch_verified_chunk(
+enum ChunkFetchError {
+    Stop(TransferError),
+    Net(NetError),
+    Corrupt,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transfer_worker(
     context: &DownloadContext,
     control: &DownloadControl,
-    sources: &mut Sources,
+    job: &DownloadJob,
+    metadata: &VerifiedMetadata,
     content_id: &[u8; 32],
-    index: u32,
-    length: u64,
-    expected: [u8; 32],
-) -> Result<(Vec<u8>, String), TransferError> {
-    let mut last_error: Option<NetError> = None;
-    let mut hash_mismatch = false;
-    for attempt in 0..CHUNK_ATTEMPTS {
-        check_control(control)?;
-        let peer = sources.current().to_owned();
-        match fetch_slices(context, control, &peer, content_id, index, length) {
-            Ok(bytes) => {
-                let digest: [u8; 32] = Sha256::digest(&bytes).into();
-                if digest == expected {
-                    return Ok((bytes, peer));
-                }
-                hash_mismatch = true;
+    partial_path: &std::path::Path,
+    shared: &TransferShared,
+) {
+    loop {
+        if shared.is_aborted() {
+            return;
+        }
+        if let Err(stop) = check_control(control) {
+            shared.request_stop(stop);
+            return;
+        }
+        let decision = lock(&shared.scheduler).next_lease();
+        let lease = match decision {
+            LeaseDecision::Done => return,
+            LeaseDecision::Failed(failure) => {
+                shared.request_stop(shared.schedule_failure(failure));
+                return;
             }
-            Err(FetchError::Stopped(stop)) => return Err(stop),
-            Err(FetchError::Net(error)) => {
+            LeaseDecision::Wait => {
+                shared.wait_for_work();
+                continue;
+            }
+            LeaseDecision::Lease(lease) => lease,
+        };
+        let Some(entry) = metadata
+            .manifest
+            .chunks
+            .get(usize::try_from(lease.index).unwrap_or(usize::MAX))
+        else {
+            shared.request_stop(verification_error("chunk_index_invalid"));
+            return;
+        };
+        let started = Instant::now();
+        match fetch_chunk(
+            context,
+            control,
+            &lease.peer,
+            content_id,
+            lease.index,
+            entry.length,
+            entry.sha256,
+        ) {
+            Ok(bytes) => {
+                if let Err(stop) = write_chunk(partial_path, lease.index, &bytes) {
+                    shared.request_stop(stop);
+                    return;
+                }
+                if let Err(error) = context.store.checkpoint_chunk(&job.download_id, lease.index) {
+                    shared.request_stop(store_failure(error));
+                    return;
+                }
+                let (completed_chunks, stats) = {
+                    let mut scheduler = lock(&shared.scheduler);
+                    scheduler.record_success(&lease, entry.length, started.elapsed());
+                    (scheduler.completed_count(), scheduler.stats().to_vec())
+                };
+                {
+                    let mut state = lock(&shared.progress);
+                    state.verified = state.verified.saturating_add(entry.length);
+                    state.source_peer = Some(lease.peer.clone());
+                    emit_progress(
+                        context,
+                        &job.download_id,
+                        &mut state,
+                        false,
+                        completed_chunks,
+                        usize::try_from(metadata.chunk_map.total()).unwrap_or(usize::MAX),
+                        &stats,
+                    );
+                }
+                shared.work.notify_all();
+            }
+            Err(ChunkFetchError::Stop(stop)) => {
+                shared.request_stop(stop);
+                return;
+            }
+            Err(ChunkFetchError::Corrupt) => {
+                lock(&shared.scheduler).record_failure(&lease, SourceFailure::Corrupt);
+                shared.work.notify_all();
+                if !retry_backoff(control, shared) {
+                    return;
+                }
+            }
+            Err(ChunkFetchError::Net(error)) => {
                 if matches!(
                     error,
                     NetError::InvalidPeerId | NetError::InvalidAddress | NetError::MissingPeerId
                 ) {
-                    return Err(TransferError::Failed(invalid_argument("the source peer ID is invalid")));
+                    shared.request_stop(TransferError::Failed(invalid_argument("the source peer ID is invalid")));
+                    return;
                 }
-                last_error = Some(error);
+                shared.record_net_failure(&error);
+                lock(&shared.scheduler).record_failure(&lease, SourceFailure::Unavailable);
+                shared.work.notify_all();
+                if !retry_backoff(control, shared) {
+                    return;
+                }
             }
         }
-        let has_next = sources.advance();
-        if !has_next && attempt + 1 < CHUNK_ATTEMPTS {
-            backoff(control)?;
+    }
+}
+
+/// Waits before retrying a failed chunk. Returns false when the worker should stop.
+fn retry_backoff(control: &DownloadControl, shared: &TransferShared) -> bool {
+    match control.wait(RETRY_DELAY) {
+        ControlAction::Continue => true,
+        ControlAction::Pause => {
+            shared.request_stop(TransferError::Paused("paused by user"));
+            false
+        }
+        ControlAction::Cancel(keep) => {
+            shared.request_stop(TransferError::Cancelled(keep));
+            false
         }
     }
-    if hash_mismatch {
-        Err(verification_error("chunk_hash_mismatch"))
-    } else {
-        Err(TransferError::Failed(map_source_failure(last_error.as_ref())))
+}
+
+fn fetch_chunk(
+    context: &DownloadContext,
+    control: &DownloadControl,
+    peer: &str,
+    content_id: &[u8; 32],
+    index: u32,
+    length: u64,
+    expected: [u8; 32],
+) -> Result<Vec<u8>, ChunkFetchError> {
+    let bytes = fetch_slices(context, control, peer, content_id, index, length).map_err(|error| match error {
+        FetchError::Stopped(stop) => ChunkFetchError::Stop(stop),
+        FetchError::Net(error) => ChunkFetchError::Net(error),
+    })?;
+    if usize::try_from(length).ok() != Some(bytes.len()) {
+        return Err(ChunkFetchError::Corrupt);
     }
+    let digest: [u8; 32] = Sha256::digest(&bytes).into();
+    if digest != expected {
+        return Err(ChunkFetchError::Corrupt);
+    }
+    Ok(bytes)
+}
+
+fn write_chunk(path: &std::path::Path, index: u32, bytes: &[u8]) -> Result<(), TransferError> {
+    let start = u64::from(index)
+        .checked_mul(CHUNK_SIZE_V1)
+        .ok_or_else(|| verification_error("chunk_index_invalid"))?;
+    let mut file = OpenOptions::new().write(true).open(path).map_err(io_failure)?;
+    file.seek(SeekFrom::Start(start)).map_err(io_failure)?;
+    file.write_all(bytes).map_err(io_failure)?;
+    file.flush().map_err(io_failure)?;
+    Ok(())
 }
 
 fn fetch_slices(
@@ -910,15 +1179,6 @@ fn check_control_metadata(control: &DownloadControl) -> Result<(), TransferError
     }
 }
 
-fn backoff(control: &DownloadControl) -> Result<(), TransferError> {
-    match control.wait(RETRY_DELAY) {
-        ControlAction::Continue => Ok(()),
-        ControlAction::Pause => Err(TransferError::Paused("paused by user")),
-        ControlAction::Cancel(keep) => Err(TransferError::Cancelled(keep)),
-    }
-}
-
-/// Bounded metadata retry delay that only yields to cancellation.
 fn backoff_metadata(control: &DownloadControl) -> Result<(), TransferError> {
     if let ControlAction::Cancel(keep) = control.action() {
         return Err(TransferError::Cancelled(keep));
@@ -930,7 +1190,37 @@ fn backoff_metadata(control: &DownloadControl) -> Result<(), TransferError> {
     Ok(())
 }
 
-fn emit_progress(context: &DownloadContext, download_id: &str, progress: &mut Progress, force: bool) {
+fn peer_list_value(peers: &[String]) -> Value {
+    Value::Array(peers.iter().map(|peer| Value::Text(peer.clone())).collect())
+}
+
+fn source_stats_value(stats: &SourceStats) -> Value {
+    Value::Map(vec![
+        (Value::Text("peer_id".to_owned()), Value::Text(stats.peer.clone())),
+        (Value::Text("attempts".to_owned()), Value::Unsigned(stats.attempts)),
+        (Value::Text("successes".to_owned()), Value::Unsigned(stats.successes)),
+        (Value::Text("failures".to_owned()), Value::Unsigned(stats.failures)),
+        (
+            Value::Text("corruptions".to_owned()),
+            Value::Unsigned(stats.corruptions),
+        ),
+        (Value::Text("bytes".to_owned()), Value::Unsigned(stats.bytes)),
+        (Value::Text("latency_ms".to_owned()), Value::Unsigned(stats.latency_ms)),
+        (Value::Text("proven".to_owned()), Value::Bool(stats.proven)),
+        (Value::Text("quarantined".to_owned()), Value::Bool(stats.quarantined)),
+    ])
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_progress(
+    context: &DownloadContext,
+    download_id: &str,
+    progress: &mut Progress,
+    force: bool,
+    completed_chunks: usize,
+    total_chunks: usize,
+    stats: &[SourceStats],
+) {
     if !force && progress.last_emit.elapsed() < PROGRESS_INTERVAL {
         return;
     }
@@ -946,9 +1236,23 @@ fn emit_progress(context: &DownloadContext, download_id: &str, progress: &mut Pr
         ),
         (Value::Text("total_bytes".to_owned()), Value::Unsigned(progress.total)),
         (Value::Text("rate_bps".to_owned()), Value::Unsigned(progress.rate_bps())),
+        (
+            Value::Text("verified_chunks".to_owned()),
+            Value::Unsigned(u64::try_from(completed_chunks).unwrap_or(0)),
+        ),
+        (
+            Value::Text("total_chunks".to_owned()),
+            Value::Unsigned(u64::try_from(total_chunks).unwrap_or(0)),
+        ),
     ];
     if let Some(peer) = &progress.source_peer {
         data.push((Value::Text("source_peer".to_owned()), Value::Text(peer.clone())));
+    }
+    if !stats.is_empty() {
+        data.push((
+            Value::Text("sources".to_owned()),
+            Value::Array(stats.iter().map(source_stats_value).collect()),
+        ));
     }
     let event = PendingEvent::progress("download.progress", Value::Map(data)).with_download(download_id.to_owned());
     let _ = context.events.try_push(event);
@@ -1819,6 +2123,47 @@ mod tests {
         }
     }
 
+    /// Routes each peer to its own mock so one download can observe several
+    /// independent sources.
+    struct PeerRouter {
+        peers: Vec<(String, Arc<MockSource>)>,
+    }
+
+    impl PeerRouter {
+        fn new(peers: Vec<(&str, Arc<MockSource>)>) -> Self {
+            Self {
+                peers: peers
+                    .into_iter()
+                    .map(|(peer, source)| (peer.to_owned(), source))
+                    .collect(),
+            }
+        }
+
+        fn source(&self, peer: &str) -> Result<&Arc<MockSource>, NetError> {
+            self.peers
+                .iter()
+                .find_map(|(candidate, source)| (candidate == peer).then_some(source))
+                .ok_or(NetError::NotConnected)
+        }
+    }
+
+    impl DownloadTransport for PeerRouter {
+        fn metadata(&self, peer_id: &str, selector: FileSelector) -> Result<FileMetadata, NetError> {
+            self.source(peer_id)?.metadata(peer_id, selector)
+        }
+
+        fn chunk(
+            &self,
+            peer_id: &str,
+            content_id: &[u8; 32],
+            index: u32,
+            offset: u32,
+            length: u32,
+        ) -> Result<Vec<u8>, NetError> {
+            self.source(peer_id)?.chunk(peer_id, content_id, index, offset, length)
+        }
+    }
+
     fn run(
         fixture: &Fixture,
         events: &Arc<EventQueue>,
@@ -2467,5 +2812,321 @@ mod tests {
         assert!(!record.display_name.contains('\\'));
         assert!(!record.display_name.contains('?'));
         assert!(Path::new(&record.display_name).components().count() == 1);
+    }
+
+    fn source_successes(event: &Event) -> Vec<(String, u64)> {
+        match map_get(&event.data, "sources") {
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|item| {
+                    (
+                        field(item, "peer_id").as_text().unwrap_or_default().to_owned(),
+                        unsigned(item, "successes"),
+                    )
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn selector(fixture: &Fixture) -> FileSelector {
+        FileSelector::ContentId(decode_content_id(&fixture.content_id).expect("content id"))
+    }
+
+    #[test]
+    fn chunks_from_two_peers_combine_into_one_verified_file() {
+        let size = usize::try_from(CHUNK_SIZE_V1).expect("chunk") * 3 + 4_096;
+        let fixture = Fixture::new("multi-peer", size);
+        let events = Arc::new(EventQueue::new());
+        let control = Arc::new(DownloadControl::new());
+        let peer_a = Arc::new(MockSource::new(&fixture));
+        let peer_b = Arc::new(MockSource::new(&fixture));
+        let transport = Arc::new(PeerRouter::new(vec![
+            ("peer-a", Arc::clone(&peer_a)),
+            ("peer-b", Arc::clone(&peer_b)),
+        ]));
+        let download_id = "dl-stage17-multi-peer";
+        run(
+            &fixture,
+            &events,
+            transport,
+            &control,
+            job(
+                download_id,
+                selector(&fixture),
+                None,
+                None,
+                &["peer-a", "peer-b"],
+                false,
+            ),
+        );
+
+        assert_eq!(fixture.content_bytes(), fixture.content);
+        assert!(!peer_a.requested_peers().is_empty(), "peer-a served no slices");
+        assert!(!peer_b.requested_peers().is_empty(), "peer-b served no slices");
+
+        let collected = drain(&events);
+        assert!(event_types(&collected).contains(&"download.completed"));
+        assert!(!event_types(&collected).contains(&"download.failed"));
+        let progress = collected
+            .iter()
+            .rev()
+            .find(|event| event.event_type == "download.progress")
+            .expect("a progress event");
+        assert_eq!(unsigned(&progress.data, "verified_chunks"), 4);
+        assert_eq!(unsigned(&progress.data, "total_chunks"), 4);
+        let successes = source_successes(progress);
+        assert_eq!(successes.len(), 2, "both sources should be reported: {successes:?}");
+        assert!(
+            successes.iter().all(|(_, count)| *count > 0),
+            "both sources should hold authenticated chunks: {successes:?}"
+        );
+    }
+
+    #[test]
+    fn a_malicious_peer_cannot_corrupt_the_combined_file() {
+        let size = usize::try_from(CHUNK_SIZE_V1).expect("chunk") * 2 + 5_000;
+        let fixture = Fixture::new("malicious-peer", size);
+        let events = Arc::new(EventQueue::new());
+        let control = Arc::new(DownloadControl::new());
+        let hostile = Arc::new(MockSource::new(&fixture));
+        hostile.corrupt.all.store(true, Ordering::Relaxed);
+        let honest = Arc::new(MockSource::new(&fixture));
+        let transport = Arc::new(PeerRouter::new(vec![
+            ("peer-a", Arc::clone(&hostile)),
+            ("peer-b", Arc::clone(&honest)),
+        ]));
+        run(
+            &fixture,
+            &events,
+            transport,
+            &control,
+            job(
+                "dl-stage17-malicious",
+                selector(&fixture),
+                None,
+                None,
+                &["peer-a", "peer-b"],
+                false,
+            ),
+        );
+
+        assert_eq!(
+            fixture.content_bytes(),
+            fixture.content,
+            "a hostile source must not reach the managed file"
+        );
+        assert!(
+            !hostile.requested_peers().is_empty(),
+            "the hostile source should have been tried"
+        );
+        let collected = drain(&events);
+        assert!(event_types(&collected).contains(&"download.completed"));
+        assert!(!event_types(&collected).contains(&"download.failed"));
+    }
+
+    #[test]
+    fn a_source_that_stops_answering_does_not_stop_the_download() {
+        let size = usize::try_from(CHUNK_SIZE_V1).expect("chunk") * 2 + 5_000;
+        let fixture = Fixture::new("source-loss", size);
+        let events = Arc::new(EventQueue::new());
+        let control = Arc::new(DownloadControl::new());
+        let vanished = Arc::new(MockSource::new(&fixture));
+        vanished
+            .fail_chunks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert("peer-a".to_owned());
+        let survivor = Arc::new(MockSource::new(&fixture));
+        let transport = Arc::new(PeerRouter::new(vec![
+            ("peer-a", Arc::clone(&vanished)),
+            ("peer-b", Arc::clone(&survivor)),
+        ]));
+        run(
+            &fixture,
+            &events,
+            transport,
+            &control,
+            job(
+                "dl-stage17-source-loss",
+                selector(&fixture),
+                None,
+                None,
+                &["peer-a", "peer-b"],
+                false,
+            ),
+        );
+
+        assert_eq!(fixture.content_bytes(), fixture.content);
+        assert!(
+            vanished.chunk_calls.load(Ordering::Relaxed) > 0,
+            "the scheduler should have tried the vanished source"
+        );
+        let mut delivered = survivor.requested_indexes();
+        delivered.sort_unstable();
+        delivered.dedup();
+        assert_eq!(
+            delivered,
+            vec![0, 1, 2],
+            "the surviving source should deliver every chunk"
+        );
+        let collected = drain(&events);
+        assert!(event_types(&collected).contains(&"download.completed"));
+        assert!(!event_types(&collected).contains(&"download.failed"));
+    }
+
+    #[test]
+    fn a_paused_download_resumes_from_a_different_peer() {
+        let size = usize::try_from(CHUNK_SIZE_V1).expect("chunk") * 2 + 1_234;
+        let fixture = Fixture::new("cross-peer-resume", size);
+        let events = Arc::new(EventQueue::new());
+        let control = Arc::new(DownloadControl::new());
+        let peer_a = Arc::new(MockSource::new(&fixture));
+        let peer_b = Arc::new(MockSource::new(&fixture));
+        *peer_a
+            .pause_after
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((1, Arc::clone(&control)));
+        let transport = Arc::new(PeerRouter::new(vec![
+            ("peer-a", Arc::clone(&peer_a)),
+            ("peer-b", Arc::clone(&peer_b)),
+        ]));
+        let download_id = "dl-stage17-cross-peer";
+        run(
+            &fixture,
+            &events,
+            transport,
+            &control,
+            job(
+                download_id,
+                selector(&fixture),
+                None,
+                None,
+                &["peer-a", "peer-b"],
+                false,
+            ),
+        );
+
+        let paused = fixture.store.download(download_id).expect("paused record");
+        assert_eq!(paused.state, DownloadState::Paused);
+        let map = paused
+            .chunk_map
+            .as_deref()
+            .and_then(|bytes| ChunkMap::from_stored(paused.expected_size, bytes))
+            .expect("chunk map");
+        assert!(map.is_set(0), "the first chunk was verified before the pause");
+        let expected: Vec<u32> = (0..map.total()).filter(|index| !map.is_set(*index)).collect();
+        assert!(
+            !expected.is_empty() && expected.len() < usize::try_from(map.total()).unwrap_or(usize::MAX),
+            "the pause should leave some chunks pending"
+        );
+        assert_eq!(paused.verified_bytes, map.verified_bytes());
+
+        let resume_peer = Arc::new(MockSource::new(&fixture));
+        let resume_transport = Arc::new(PeerRouter::new(vec![("peer-b", Arc::clone(&resume_peer))]));
+        let resume_control = Arc::new(DownloadControl::new());
+        run(
+            &fixture,
+            &events,
+            resume_transport,
+            &resume_control,
+            job(
+                download_id,
+                selector(&fixture),
+                None,
+                Some(fixture.content_id.clone()),
+                &["peer-b"],
+                true,
+            ),
+        );
+
+        assert_eq!(fixture.content_bytes(), fixture.content);
+        assert_eq!(
+            resume_peer.requested_indexes(),
+            expected,
+            "the resume should only fetch chunks the first peers did not deliver"
+        );
+        let collected = drain(&events);
+        let resumed = find(&collected, "download.resumed");
+        assert_eq!(unsigned(&resumed.data, "verified_bytes"), map.verified_bytes());
+        assert!(event_types(&collected).contains(&"download.completed"));
+    }
+
+    #[test]
+    fn a_resume_reverifies_and_refetches_a_corrupted_local_chunk() {
+        let size = usize::try_from(CHUNK_SIZE_V1).expect("chunk") * 2 + 99;
+        let fixture = Fixture::new("resume-repair", size);
+        let events = Arc::new(EventQueue::new());
+        let control = Arc::new(DownloadControl::new());
+        let source = Arc::new(MockSource::new(&fixture));
+        *source
+            .pause_after
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((2, Arc::clone(&control)));
+        let download_id = "dl-stage17-resume-repair";
+        run(
+            &fixture,
+            &events,
+            source,
+            &control,
+            job(download_id, selector(&fixture), None, None, &["peer-a"], false),
+        );
+
+        let paused = fixture.store.download(download_id).expect("paused record");
+        assert_eq!(paused.state, DownloadState::Paused);
+        assert_eq!(paused.verified_prefix, CHUNK_SIZE_V1 * 2);
+
+        let partial = fixture.store.partial_path(download_id).expect("partial path");
+        {
+            use std::io::{Read as _, Seek as _, Write as _};
+            let mut file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&partial)
+                .expect("open partial");
+            let mut byte = [0_u8; 1];
+            file.seek(std::io::SeekFrom::Start(10)).expect("seek");
+            file.read_exact(&mut byte).expect("read byte");
+            byte[0] ^= 0xff;
+            file.seek(std::io::SeekFrom::Start(10)).expect("seek back");
+            file.write_all(&byte).expect("corrupt byte");
+            file.flush().expect("flush");
+        }
+
+        let resume_source = Arc::new(MockSource::new(&fixture));
+        let resume_control = Arc::new(DownloadControl::new());
+        run(
+            &fixture,
+            &events,
+            resume_source.clone(),
+            &resume_control,
+            job(
+                download_id,
+                selector(&fixture),
+                None,
+                Some(fixture.content_id.clone()),
+                &["peer-a"],
+                true,
+            ),
+        );
+
+        assert_eq!(
+            fixture.content_bytes(),
+            fixture.content,
+            "the corrupted chunk must be repaired from the source"
+        );
+        assert_eq!(
+            resume_source.requested_indexes(),
+            vec![0, 2],
+            "only the corrupted and missing chunks are fetched"
+        );
+        let collected = drain(&events);
+        let resumed = find(&collected, "download.resumed");
+        assert_eq!(
+            unsigned(&resumed.data, "verified_chunks"),
+            1,
+            "the intact chunk stays verified across a resume"
+        );
+        assert!(event_types(&collected).contains(&"download.completed"));
     }
 }

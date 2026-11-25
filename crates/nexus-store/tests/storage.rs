@@ -6,8 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use nexus_store::{
-    ContentState, IdentityReference, PeerObservation, ProfileFreshness, ProfileRecord, ProfileState, PublicationRecord,
-    QuotaPolicy, ReferenceType, ReplicaRecord, ReplicaState, Store, StoreConfig, StoreError, safe_display_name,
+    ChunkMap, ContentState, DownloadState, IdentityReference, PeerObservation, ProfileFreshness, ProfileRecord,
+    ProfileState, PublicationRecord, QuotaPolicy, ReferenceType, ReplicaRecord, ReplicaState, Store, StoreConfig,
+    StoreError, safe_display_name,
 };
 use sha2::{Digest, Sha256};
 
@@ -98,7 +99,7 @@ fn data_001_schema_and_restart_persistence() {
 
     let imported = {
         let store = open(&root, 8 * 1024 * 1024, 8 * 1024 * 1024);
-        assert_eq!(store.schema_version().expect("schema version"), 9);
+        assert_eq!(store.schema_version().expect("schema version"), 10);
         assert!(store.database_path().is_file());
 
         let imported = store
@@ -179,7 +180,7 @@ fn data_001_schema_and_restart_persistence() {
     };
 
     let store = open(&root, 8 * 1024 * 1024, 8 * 1024 * 1024);
-    assert_eq!(store.schema_version().expect("schema version"), 9);
+    assert_eq!(store.schema_version().expect("schema version"), 10);
     assert_eq!(store.identity_refs().expect("identities").len(), 1);
     assert_eq!(store.profiles().expect("profiles").len(), 1);
     assert_eq!(store.publications().expect("publications").len(), 1);
@@ -345,6 +346,46 @@ fn data_005_partial_downloads_count_from_the_first_allocated_byte() {
 }
 
 #[test]
+fn out_of_order_chunks_are_tracked_and_need_every_chunk_to_complete() {
+    let root = TempRoot::new("chunk-map");
+    let size = usize::try_from(nexus_protocol::CHUNK_SIZE_V1).expect("chunk") + 1;
+    let mut bytes = vec![b'A'; size];
+    bytes[size - 1] = b'B';
+    let content = content_id(&bytes);
+    let store = open(&root, 8 * 1024 * 1024, 8 * 1024 * 1024);
+    let download = store
+        .begin_download("download-map", &content, u64::try_from(size).expect("size"), "map.bin")
+        .expect("begin download");
+    assert_eq!(download.chunk_map.as_deref().map(<[u8]>::len), Some(1));
+    assert_eq!(download.verified_bytes, 0);
+
+    let partial = store.partial_path("download-map").expect("partial path");
+    fs::write(&partial, &bytes).expect("write partial");
+
+    let record = store.checkpoint_chunk("download-map", 1).expect("checkpoint chunk 1");
+    assert_eq!(record.verified_prefix, 0, "chunk 1 does not extend the prefix");
+    assert_eq!(record.verified_bytes, 1);
+    assert_eq!(store.usage().expect("usage").partial_bytes, 1);
+    assert!(
+        store.complete_download("download-map").is_err(),
+        "a sparse chunk map is not a complete file"
+    );
+
+    let record = store.clear_chunk("download-map", 1).expect("clear chunk 1");
+    assert_eq!(record.verified_bytes, 0);
+    assert_eq!(store.usage().expect("usage").partial_bytes, 0);
+
+    store.checkpoint_chunk("download-map", 0).expect("checkpoint chunk 0");
+    store.checkpoint_chunk("download-map", 1).expect("checkpoint chunk 1");
+    let completed = store.complete_download("download-map").expect("complete download");
+    assert_eq!(completed.size_bytes, u64::try_from(size).expect("size"));
+    assert_eq!(
+        store.usage().expect("usage").total_bytes(),
+        u64::try_from(size).expect("size")
+    );
+}
+
+#[test]
 fn duplicate_bytes_are_counted_and_charged_once() {
     let root = TempRoot::new("dedupe-quota");
     let source = root.path.join("external/duplicate.bin");
@@ -465,7 +506,7 @@ fn data_007_metadata_export_and_restore_round_trip() {
             .expect("publication");
         store.set_setting("theme", "light").expect("setting");
         let report = store.export_metadata(&archive).expect("export metadata");
-        assert_eq!(report.schema_version, 9);
+        assert_eq!(report.schema_version, 10);
         assert!(archive.is_file());
 
         let archive_bytes = fs::read(&archive).expect("archive bytes");
@@ -484,8 +525,8 @@ fn data_007_metadata_export_and_restore_round_trip() {
     let target_root = TempRoot::new("backup-target");
     let mut target = open(&target_root, 1024 * 1024, 1024 * 1024);
     let restore = target.restore_metadata(&archive).expect("restore metadata");
-    assert_eq!(restore.archive_schema_version, 9);
-    assert_eq!(restore.restored_schema_version, 9);
+    assert_eq!(restore.archive_schema_version, 10);
+    assert_eq!(restore.restored_schema_version, 10);
     assert_eq!(target.identity_refs().expect("identities").len(), 1);
     assert_eq!(target.get_setting("theme").expect("setting"), Some("light".to_owned()));
     assert_eq!(target.publications().expect("publications").len(), 1);
@@ -568,6 +609,37 @@ fn reconciliation_removes_orphans_quarantines_unexpected_files_and_truncates_par
             .any(|entry| fs::read(entry.path()).ok().as_deref() == Some(b"orphan"))
     );
     assert_eq!(store.download("download-001").expect("download").verified_prefix, 4);
+}
+
+#[test]
+fn a_partial_shorter_than_its_verified_chunk_fails_back_to_a_chunk_boundary() {
+    let root = TempRoot::new("short-partial");
+    let bytes = b"short partial bytes";
+    let content_id = content_id(bytes);
+    {
+        let store = open(&root, 1024 * 1024, 1024 * 1024);
+        store
+            .begin_download("download-short", &content_id, 19, "short.bin")
+            .expect("begin download");
+        let partial = store.partial_path("download-short").expect("partial path");
+        fs::write(&partial, bytes).expect("write chunk");
+        let record = store.checkpoint_chunk("download-short", 0).expect("checkpoint chunk");
+        assert_eq!(record.verified_bytes, 19);
+        fs::write(&partial, &bytes[..5]).expect("truncate the partial");
+        drop(store);
+    }
+
+    let store = open(&root, 1024 * 1024, 1024 * 1024);
+    let record = store.download("download-short").expect("download");
+    assert_eq!(record.state, DownloadState::Failed);
+    assert_eq!(record.verified_prefix, 0);
+    assert_eq!(record.verified_bytes, 0);
+    let map = record
+        .chunk_map
+        .as_deref()
+        .and_then(|stored| ChunkMap::from_stored(record.expected_size, stored))
+        .expect("chunk map");
+    assert!(!map.is_set(0), "the truncated chunk must not stay verified");
 }
 
 #[test]
