@@ -10,6 +10,11 @@
 //!
 //! No function in this crate holds more than one chunk and one hash buffer in
 //! memory, and no function writes or mutates signed record bytes.
+//!
+//! Stage 17 adds [`scheduler`], the pure multi-source chunk policy. It has no
+//! I/O and no identity input; callers perform transfers and report outcomes.
+
+pub mod scheduler;
 
 use std::fmt;
 use std::fs::File;

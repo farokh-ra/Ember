@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 use nexus_protocol::{CHUNK_SIZE_V1, Category, ChunkEntry, MAX_TAG_BYTES, MAX_TAGS, ManifestV1, SignedPublication};
 
 use crate::backup::{self, ExportReport, RestoreReport};
+use crate::chunk_map::ChunkMap;
 use crate::db::Database;
 use crate::error::{StoreError, StoreResult};
 use crate::managed_store::ManagedStore;
@@ -28,7 +29,7 @@ use crate::quota::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage};
 use crate::util::{hex_lower, is_content_id, is_safe_id, now_ms, now_secs};
 
 const CONTENT_COLUMNS: &str = "content_id, size_bytes, state, blob_path, verified_at, created_at, updated_at";
-const DOWNLOAD_COLUMNS: &str = "download_id, content_id, display_name, expected_size, verified_prefix, state, partial_file, created_at, updated_at, last_error, manifest_root, source_peer";
+const DOWNLOAD_COLUMNS: &str = "download_id, content_id, display_name, expected_size, verified_prefix, state, partial_file, created_at, updated_at, last_error, manifest_root, source_peer, verified_bytes, chunk_map";
 pub(crate) const PROFILE_COLUMNS: &str = "identity_id, revision, record_bytes, display_name, username, bio, avatar_content_id, updated_at, updated_at_ms, state, published_at, last_checked_at, freshness";
 pub(crate) const PUBLICATION_COLUMNS: &str = "publication_id, identity_id, content_id, revision, record_bytes, title, description, filename, published_at, updated_at, tombstoned, category, size_bytes, local, serving, announced, availability, last_checked_at";
 const REPLICA_COLUMNS: &str = "replica_id, content_id, publication_id, state, source_peer, verified_size_bytes, last_verified_at, last_checked_at, last_seen_at, failure_count, last_error, announced, created_at, updated_at";
@@ -246,7 +247,7 @@ impl Store {
                 |row| row.get(0),
             )?;
             let partial: i64 = connection.query_row(
-                "SELECT COALESCE(SUM(verified_prefix), 0) FROM downloads WHERE state IN ('pending', 'downloading', 'paused', 'failed', 'cancelled')",
+                "SELECT COALESCE(SUM(verified_bytes), 0) FROM downloads WHERE state IN ('pending', 'downloading', 'paused', 'failed', 'cancelled')",
                 [],
                 |row| row.get(0),
             )?;
@@ -713,13 +714,15 @@ impl Store {
         let display_name = safe_display_name(display_name);
         let manifest_root = manifest_root.map(str::to_owned);
         let partial_file = ManagedStore::partial_relative_path(download_id)?;
+        let chunk_map = ChunkMap::new(expected_size).bytes().to_vec();
         let now = now_secs();
         self.db.write(move |connection| {
             connection.execute(
                 "INSERT INTO downloads
                  (download_id, content_id, display_name, expected_size, verified_prefix, state,
-                  partial_file, created_at, updated_at, last_error, manifest_root, source_peer)
-                 VALUES (?1, ?2, ?3, ?4, 0, 'downloading', ?5, ?6, ?6, NULL, ?7, ?8)",
+                  partial_file, created_at, updated_at, last_error, manifest_root, source_peer,
+                  verified_bytes, chunk_map)
+                 VALUES (?1, ?2, ?3, ?4, 0, 'downloading', ?5, ?6, ?6, NULL, ?7, ?8, 0, ?9)",
                 params![
                     download_id_owned,
                     content_id_owned,
@@ -728,7 +731,8 @@ impl Store {
                     partial_file,
                     now,
                     manifest_root,
-                    source_peer
+                    source_peer,
+                    chunk_map
                 ],
             )?;
             Ok(())
@@ -896,8 +900,10 @@ impl Store {
 
     /// Records a verified contiguous prefix.
     ///
-    /// Bytes beyond the verified prefix are unverified and are truncated. The
+    /// Bytes beyond the verified region are unverified and are truncated. The
     /// prefix counts toward the managed quota from the first allocated byte.
+    /// Chunks fully covered by the prefix are also marked in the chunk map, so
+    /// a later Stage 17 resume can continue from any verified chunk.
     pub fn checkpoint_partial(&self, download_id: &str, verified_prefix: u64) -> StoreResult<DownloadRecord> {
         let record = self.download(download_id)?;
         if matches!(record.state, DownloadState::Completed | DownloadState::Cancelled) {
@@ -911,31 +917,162 @@ impl Store {
             ));
         }
 
-        let file_length = self.managed.partial_length(download_id)?;
-        if file_length < verified_prefix {
-            return Err(StoreError::IntegrityMismatch(record.content_id));
-        }
-        if file_length > verified_prefix {
-            self.managed.truncate_partial(download_id, verified_prefix)?;
+        let mut map = chunk_map_for(&record);
+        for index in 0..map.total() {
+            let Some(length) = map.chunk_length(index) else {
+                break;
+            };
+            let end = (u64::from(index) * CHUNK_SIZE_V1).saturating_add(length);
+            if end > verified_prefix {
+                break;
+            }
+            map.set(index);
         }
 
-        let delta = verified_prefix.saturating_sub(record.verified_prefix);
+        let verified_end = map.highest_verified_end().max(verified_prefix);
+        let file_length = self.managed.partial_length(download_id)?;
+        if file_length < verified_end {
+            return Err(StoreError::IntegrityMismatch(record.content_id));
+        }
+        if file_length > verified_end {
+            self.managed.truncate_partial(download_id, verified_end)?;
+        }
+
+        let verified_bytes = map.verified_bytes().max(verified_prefix).max(record.verified_bytes);
+        let contiguous = map.contiguous_prefix().max(verified_prefix);
+        let delta = verified_bytes.saturating_sub(record.verified_bytes);
         if delta > 0 {
             self.ensure_capacity(delta)?;
         }
 
         let download_id_owned = download_id.to_owned();
+        let map_bytes = map.bytes().to_vec();
         let now = now_secs();
         self.db.write(move |connection| {
             connection.execute(
                 "UPDATE downloads
-                 SET verified_prefix = ?2, state = 'downloading', updated_at = ?3, last_error = NULL
+                 SET verified_prefix = ?2, verified_bytes = ?3, chunk_map = ?4, state = 'downloading',
+                     updated_at = ?5, last_error = NULL
                  WHERE download_id = ?1",
-                params![download_id_owned, verified_prefix, now],
+                params![download_id_owned, contiguous, verified_bytes, map_bytes, now],
             )?;
             Ok(())
         })?;
         self.download(download_id)
+    }
+
+    /// Marks one authenticated chunk as verified.
+    ///
+    /// Chunks may arrive in any order. The update is read-modify-write inside
+    /// the database writer, so two workers checkpointing different chunks of
+    /// the same download cannot lose each other's bits.
+    pub fn checkpoint_chunk(&self, download_id: &str, index: u32) -> StoreResult<DownloadRecord> {
+        let record = self.download(download_id)?;
+        if matches!(record.state, DownloadState::Completed | DownloadState::Cancelled) {
+            return Err(StoreError::Unsupported(
+                "cannot checkpoint a terminal download".to_owned(),
+            ));
+        }
+        let map = chunk_map_for(&record);
+        let Some(length) = map.chunk_length(index) else {
+            return Err(StoreError::InvalidId(format!("chunk index {index} is out of range")));
+        };
+        if map.is_set(index) {
+            return Ok(record);
+        }
+        let end = (u64::from(index) * CHUNK_SIZE_V1).saturating_add(length);
+        if self.managed.partial_length(download_id)? < end {
+            return Err(StoreError::IntegrityMismatch(record.content_id));
+        }
+        self.ensure_capacity(length)?;
+
+        let download_id_owned = download_id.to_owned();
+        let expected_size = record.expected_size;
+        let now = now_secs();
+        self.db.write(move |connection| {
+            let (stored, prefix, verified_bytes): (Option<Vec<u8>>, i64, i64) = connection.query_row(
+                "SELECT chunk_map, verified_prefix, verified_bytes FROM downloads WHERE download_id = ?1",
+                [&download_id_owned],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            let prefix = u64::try_from(prefix).unwrap_or(0);
+            let verified_bytes = u64::try_from(verified_bytes).unwrap_or(0);
+            let mut map = stored
+                .as_deref()
+                .and_then(|bytes| ChunkMap::from_stored(expected_size, bytes))
+                .unwrap_or_else(|| ChunkMap::from_prefix(expected_size, prefix));
+            map.set(index);
+            let contiguous = map.contiguous_prefix();
+            let bytes = map.verified_bytes().max(verified_bytes);
+            connection.execute(
+                "UPDATE downloads
+                 SET verified_prefix = ?2, verified_bytes = ?3, chunk_map = ?4, state = 'downloading',
+                     updated_at = ?5, last_error = NULL
+                 WHERE download_id = ?1",
+                params![download_id_owned, contiguous, bytes, map.bytes().to_vec(), now],
+            )?;
+            Ok(())
+        })?;
+        self.download(download_id)
+    }
+
+    /// Clears one chunk after a resume re-verification failed.
+    pub fn clear_chunk(&self, download_id: &str, index: u32) -> StoreResult<DownloadRecord> {
+        let record = self.download(download_id)?;
+        if matches!(record.state, DownloadState::Completed | DownloadState::Cancelled) {
+            return Err(StoreError::Unsupported(
+                "cannot clear a chunk on a terminal download".to_owned(),
+            ));
+        }
+        let download_id_owned = download_id.to_owned();
+        let expected_size = record.expected_size;
+        let now = now_secs();
+        self.db.write(move |connection| {
+            let (stored, prefix): (Option<Vec<u8>>, i64) = connection.query_row(
+                "SELECT chunk_map, verified_prefix FROM downloads WHERE download_id = ?1",
+                [&download_id_owned],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            let prefix = u64::try_from(prefix).unwrap_or(0);
+            let mut map = stored
+                .as_deref()
+                .and_then(|bytes| ChunkMap::from_stored(expected_size, bytes))
+                .unwrap_or_else(|| ChunkMap::from_prefix(expected_size, prefix));
+            map.clear(index);
+            connection.execute(
+                "UPDATE downloads
+                 SET verified_prefix = ?2, verified_bytes = ?3, chunk_map = ?4, state = 'downloading',
+                     updated_at = ?5, last_error = NULL
+                 WHERE download_id = ?1",
+                params![
+                    download_id_owned,
+                    map.contiguous_prefix(),
+                    map.verified_bytes(),
+                    map.bytes().to_vec(),
+                    now
+                ],
+            )?;
+            Ok(())
+        })?;
+        self.download(download_id)
+    }
+
+    /// Truncates a partial file to the end of its highest verified chunk.
+    ///
+    /// This removes a tail written just before a crash without deleting
+    /// verified chunks that arrived out of order.
+    pub fn trim_unverified_tail(&self, download_id: &str) -> StoreResult<DownloadRecord> {
+        let record = self.download(download_id)?;
+        let map = chunk_map_for(&record);
+        let verified_end = map.highest_verified_end().max(record.verified_prefix);
+        let file_length = self.managed.partial_length(download_id)?;
+        if file_length < verified_end {
+            return Err(StoreError::IntegrityMismatch(record.content_id));
+        }
+        if file_length > verified_end {
+            self.managed.truncate_partial(download_id, verified_end)?;
+        }
+        Ok(record)
     }
 
     /// Verifies and promotes a complete partial into the managed store.
@@ -943,6 +1080,10 @@ impl Store {
         let record = self.download(download_id)?;
         if matches!(record.state, DownloadState::Completed | DownloadState::Cancelled) {
             return Err(StoreError::Unsupported("download is already terminal".to_owned()));
+        }
+        let map = chunk_map_for(&record);
+        if !map.is_complete() || record.verified_prefix != record.expected_size {
+            return Err(StoreError::IntegrityMismatch(record.content_id));
         }
         let already_present = self.content_exists(&record.content_id)?;
         let promoted = self
@@ -2449,11 +2590,31 @@ impl Store {
         let message = message.to_owned();
         let now = now_secs();
         self.db.write(move |connection| {
+            let expected_size = connection
+                .query_row(
+                    "SELECT expected_size FROM downloads WHERE download_id = ?1",
+                    [&download_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?;
+            let Some(expected_size) = expected_size else {
+                return Ok(());
+            };
+            let map = ChunkMap::from_prefix(u64::try_from(expected_size).unwrap_or(0), verified_prefix);
+            let prefix = map.contiguous_prefix();
             connection.execute(
                 "UPDATE downloads
-                 SET state = 'failed', verified_prefix = ?2, last_error = ?3, updated_at = ?4
+                 SET state = 'failed', verified_prefix = ?2, verified_bytes = ?3, chunk_map = ?4,
+                     last_error = ?5, updated_at = ?6
                  WHERE download_id = ?1",
-                params![download_id, verified_prefix, message, now],
+                params![
+                    download_id,
+                    prefix,
+                    map.verified_bytes(),
+                    map.bytes().to_vec(),
+                    message,
+                    now
+                ],
             )?;
             Ok(())
         })
@@ -2617,14 +2778,17 @@ impl Store {
             };
             partial_ids.insert(download_id.to_owned());
             let file_length = fs::metadata(&path)?.len();
-            if file_length > download.verified_prefix {
-                self.managed.truncate_partial(download_id, download.verified_prefix)?;
+            let verified_end = chunk_map_for(download)
+                .highest_verified_end()
+                .max(download.verified_prefix);
+            if file_length > verified_end {
+                self.managed.truncate_partial(download_id, verified_end)?;
                 report.truncated_partials += 1;
-            } else if file_length < download.verified_prefix {
+            } else if file_length < verified_end {
                 self.mark_download_failed(
                     download_id,
                     file_length,
-                    "partial file was shorter than its verified prefix",
+                    "partial file was shorter than its verified chunks",
                 )?;
                 report.failed_downloads += 1;
             }
@@ -2770,6 +2934,14 @@ pub(crate) fn publication_tags(
     rows.collect()
 }
 
+fn chunk_map_for(record: &DownloadRecord) -> ChunkMap {
+    record
+        .chunk_map
+        .as_deref()
+        .and_then(|bytes| ChunkMap::from_stored(record.expected_size, bytes))
+        .unwrap_or_else(|| ChunkMap::from_prefix(record.expected_size, record.verified_prefix))
+}
+
 fn download_from_row(row: &Row<'_>) -> rusqlite::Result<DownloadRecord> {
     let state: String = row.get(5)?;
     Ok(DownloadRecord {
@@ -2785,6 +2957,8 @@ fn download_from_row(row: &Row<'_>) -> rusqlite::Result<DownloadRecord> {
         last_error: row.get(9)?,
         manifest_root: row.get(10)?,
         source_peer: row.get(11)?,
+        verified_bytes: u64::try_from(row.get::<_, i64>(12)?).unwrap_or(0),
+        chunk_map: row.get(13)?,
     })
 }
 

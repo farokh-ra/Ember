@@ -3,8 +3,8 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-FFI-001 |
-| Version | 1.9.0 (ABI 1) |
-| Status | Implemented through Stage 16; Android runtime verification deferred |
+| Version | 1.10.0 (ABI 1) |
+| Status | Implemented through Stage 17; Android runtime verification deferred |
 | Date | 2026-11-24 |
 | Header | [nexus_core.h](nexus_core.h) |
 | Related | [ADR-0003](../decisions/ADR-0003-ffi-c-abi-jni-jna.md), [Architecture](../ARCHITECTURE.md) |
@@ -267,7 +267,7 @@ All production methods are available on both Android and Windows. Method IDs are
 
 Method IDs are grouped by domain. A future minor ABI may add methods in unused IDs; a released ID is never renumbered. Unknown IDs return `NEXUS_STATUS_UNSUPPORTED` with a domain error.
 
-Stage 16 implements forty-five callable methods: `system.info`, `system.health`, `system.snapshot`, the three `profile.*` methods above, the five `publication.*` methods above, `store.usage`, `store.set_quota`, the thirteen `network.*` methods above, the three search and Explore methods above, the six `download.*` methods, the six `replica.*` methods, the two `hosting.*` methods, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
+Stage 17 implements forty-five callable methods: `system.info`, `system.health`, `system.snapshot`, the three `profile.*` methods above, the five `publication.*` methods above, `store.usage`, `store.set_quota`, the thirteen `network.*` methods above, the three search and Explore methods above, the six `download.*` methods, the six `replica.*` methods, the two `hosting.*` methods, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
 
 ### 6.1 Network method semantics
 
@@ -301,14 +301,14 @@ Stage 16 implements forty-five callable methods: `system.info`, `system.health`,
 ### 6.3 Download method semantics
 
 - `download.start` accepts `publication_id`, `content_id`, or both, as 32-byte hex; at least one is required. When both are present, the publication selects the metadata and the content ID must also match. It also requires `peer_id` or a non-empty `sources` array of at most 8 peer IDs. An optional `download_id` must be 1-128 ASCII alphanumeric, `-`, or `_` bytes and must not already exist. The immediate response is `{download_id, accepted: true}`; the transfer continues on the download pool.
-- `download.start` requires a running core and a running network. It does not dial peers. Every source must already be connected, and the first source that returns valid metadata becomes the serving peer.
+- `download.start` requires a running core and a running network. It does not dial peers. Every source must already be connected. The first source that returns valid metadata supplies the manifest; from then on up to four peers are scheduled concurrently, one chunk lease per peer at a time.
 - `download.list` is a synchronous, paginated query. `state` filters by `pending`, `downloading`, `paused`, `failed`, or `cancelled`; `limit` is 1-100 and defaults to 50; `cursor` is the zero-based offset. Completed downloads are promoted into the library and are not listed.
-- `download.pause` is cooperative. A running job stops before writing the next chunk and persists `paused` with its verified prefix. A job that is not running persists the pause directly when its state permits it. A pause requested before metadata registration is deferred until the row exists, so the download stays resumable. A completed download returns `conflict`.
-- `download.resume` re-verifies the stored manifest root, or fetches metadata again when no root is stored, against the existing content ID and expected size. Only complete-chunk prefixes are resumable. The source defaults to the stored `source_peer`; `peer_id` or `sources` override it. A completed or already-running download returns `conflict`.
+- `download.pause` is cooperative. A running job stops before leasing another chunk and persists `paused` with its verified bytes. A job that is not running persists the pause directly when its state permits it. A pause requested before metadata registration is deferred until the row exists, so the download stays resumable. A completed download returns `conflict`.
+- `download.resume` re-verifies the stored manifest root, or fetches metadata again when no root is stored, against the existing content ID and expected size. Every chunk the database records as verified is re-hashed from the partial file before any peer is trusted again; a chunk that fails is cleared and refetched. The source defaults to the stored `source_peer`; `peer_id` or `sources` override it, and the resumed transfer may use a different peer than the one that supplied earlier chunks. A completed or already-running download returns `conflict`.
 - `download.cancel` stops a running job. `keep_partial` defaults to false; when true the verified partial and row remain resumable. A completed download returns `conflict`.
 - `download.remove` requires `confirmation: true`, refuses a running download, and refuses a completed library entry. It removes the download row and partial bytes.
 - Every download emits exactly one terminal event: `download.completed`, `download.failed`, or `download.cancelled`. `download.paused` is a durable non-terminal report. A failure that races a pause or cancel is reported as the user's action.
-- A manifest, publication, chunk, or whole-file mismatch returns `verification_failed` with a stable `details.reason`. A source that lacks the content returns `not_found`. Quota or free-space exhaustion returns `quota_exceeded`; verified bytes stay resumable.
+- A manifest, publication, chunk, or whole-file mismatch returns `verification_failed` with a stable `details.reason`. A source that lacks the content returns `not_found`. Quota or free-space exhaustion returns `quota_exceeded`; verified bytes stay resumable. A source that returns bytes failing the chunk hash is retried elsewhere and is quarantined for the rest of the download after two corrupt responses; transport failures quarantine after three consecutive failures.
 
 ### 6.4 Profile method semantics
 
@@ -473,7 +473,7 @@ NexusStatus nexus_core_export_close(
 
 Events use the envelope in section 5.4.
 
-Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. Stage 13 adds the `profile.*` signed-profile family. Stage 14 adds the `publication.*` publishing family. Stage 15 adds the `replica.*` hosting family and `hosting.limits_changed`. Stage 16 adds `search.result_page` and `search.completed`; Explore is synchronous and emits no events. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
+Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. Stage 13 adds the `profile.*` signed-profile family. Stage 14 adds the `publication.*` publishing family. Stage 15 adds the `replica.*` hosting family and `hosting.limits_changed`. Stage 16 adds `search.result_page` and `search.completed`; Explore is synchronous and emits no events. Stage 17 extends the `download.*` events with chunk counters and observed per-source statistics; no new event type is added. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
 
 | Event | Meaning | Data |
 |---|---|---|
@@ -510,9 +510,9 @@ Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stop
 | `publication.lookup_completed` | Lookup finished from the network or a cache. | `publication_id`, `found`, `source`, `availability`, `stale`, `conflict`, `record`, `providers`, `checked_at_ms`, `error?` |
 | `publication.lookup_failed` | Returned record or tombstone failed verification or storage. | `publication_id`, `error` |
 | `publication.lookup_cancelled` | Lookup cancelled before completion. | `publication_id` |
-| `download.started` | Download accepted and metadata verified. | `download_id`, `content_id`, `total_bytes`, `source_peer`, `publication_id?`, `display_name` |
-| `download.progress` | Verified progress. | `download_id`, `verified_bytes`, `total_bytes`, `rate_bps`, `source_peer` |
-| `download.resumed` | Transfer resumed from a verified prefix. | `download_id`, `content_id`, `verified_bytes`, `total_bytes` |
+| `download.started` | Download accepted and metadata verified. | `download_id`, `content_id`, `total_bytes`, `total_chunks`, `source_peer`, `sources`, `publication_id?`, `display_name` |
+| `download.progress` | Verified progress, including per-source outcomes. | `download_id`, `verified_bytes`, `total_bytes`, `rate_bps`, `verified_chunks`, `total_chunks`, `source_peer`, `sources` |
+| `download.resumed` | Transfer resumed from verified chunks. | `download_id`, `content_id`, `verified_bytes`, `total_bytes`, `verified_chunks`, `total_chunks`, `sources` |
 | `download.completed` | Final verification passed. | `download_id`, `content_id`, `size` |
 | `download.paused` | Transfer paused with resumable state. | `download_id`, `verified_bytes`, `reason` |
 | `download.failed` | Terminal failure. | `download_id`, `error`, `verified_bytes` |
@@ -652,11 +652,14 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 | 16 | A verified local FTS5 index serves filtered, ordered, paginated search and Explore with the network disabled, and generation-bound cursors reject stale pages. | Passed in `nexus-core/tests/stage16.rs` and `nexus-store/tests/search.rs`. |
 | 16 | A loopback index provider serves signed records that the searching core verifies and deduplicates, and provider loss keeps local results with honest reduced coverage. | Passed in `nexus-core/tests/stage16.rs`. |
 | 16 | Unsigned, tampered, wrong-kind, oversized, and malformed provider records are rejected before display and are never written by search. | Passed in the `nexus-core` and `nexus-search` Stage 16 unit tests and the `nexus-protocol` index tests. |
+| 17 | Chunks from two peers combine into one file, and each chunk is verified against the signed manifest before it is written. | Passed in `nexus-core/tests/stage17.rs` and the `nexus-core` multi-peer unit tests. |
+| 17 | A corrupt or disappearing source cannot silently corrupt the file or stop the download while another usable source remains. | Passed in the `nexus-transfer` scheduler tests and the `nexus-core` malicious-peer and source-loss tests. |
+| 17 | A paused download resumes from verified chunks across peers, and locally corrupted chunks are re-verified and refetched. | Passed in the `nexus-store` chunk-map tests and the `nexus-core` cross-peer resume tests. |
 | 19 | Fuzzing covers malformed CBOR, oversized buffers, invalid handles, and cancellation races. | Not yet implemented. |
 
 The detailed evidence, commands, and test counts are in
 [STAGE_08.md](../progress/STAGE_08.md), [STAGE_09.md](../progress/STAGE_09.md),
 [STAGE_10.md](../progress/STAGE_10.md), [STAGE_11.md](../progress/STAGE_11.md),
 [STAGE_12.md](../progress/STAGE_12.md), [STAGE_13.md](../progress/STAGE_13.md),
-[STAGE_14.md](../progress/STAGE_14.md), [STAGE_15.md](../progress/STAGE_15.md), and
-[STAGE_16.md](../progress/STAGE_16.md).
+[STAGE_14.md](../progress/STAGE_14.md), [STAGE_15.md](../progress/STAGE_15.md),
+[STAGE_16.md](../progress/STAGE_16.md), and [STAGE_17.md](../progress/STAGE_17.md).

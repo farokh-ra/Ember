@@ -207,7 +207,7 @@ Startup:
 Shutdown:
 
 1. Stop accepting new operations.
-2. Pause active transfers and persist the verified prefix.
+2. Pause active transfers and persist verified chunks.
 3. Stop libp2p and close connections.
 4. Flush SQLite and stop the runtime.
 5. Zeroize keys and sensitive buffers.
@@ -269,7 +269,7 @@ Android uses the app-private files directory. Windows uses `%LOCALAPPDATA%\Ember
 |---|---|
 | Import or completed download | Write temporary file, flush, verify hashes and manifest, atomically rename to `blobs`, flush directory, then commit the database reference. |
 | Delete or cleanup | Commit reference removal, then delete bytes only when the reference count reaches zero. |
-| Partial download | Write chunk to partial file, verify, update the verified contiguous prefix, periodically checkpoint. On restart, truncate any unverified tail. |
+| Partial download | Write a verified chunk at its offset, record it in the chunk map, and checkpoint. On restart, re-verify recorded chunks and truncate any unverified tail. |
 | Manifest import | Write temporary manifest, verify canonical bytes and root, rename to `manifests`, then commit the content record. |
 | Metadata restore | Validate archive version and integrity, create a staging database, migrate, verify, then atomically swap. |
 
@@ -333,7 +333,7 @@ No UI code parses a raw network record. No lower layer writes another layer's ta
 | Publication | `sha256("NEXUS-DHT-PUB-v1" + publication_id)` | 64 KiB signed envelope | 24 h, republished while local |
 | Tombstone | `sha256("NEXUS-DHT-TOMB-v1" + publication_id)` | 64 KiB signed envelope | 24 h, republished while local |
 | Profile | `sha256("NEXUS-DHT-PROFILE-v1" + identity_id)` | 64 KiB signed envelope | 24 h, republished while local |
-| Index provider | Reserved for Stage 16 | Bounded provider record | Stage 16 |
+| Index provider | Implemented in Stage 16 | Bounded provider record | Stage 16 |
 
 DHT values are hints. Publication and profile records must verify; a source must serve a valid chunk before it is used.
 
@@ -365,7 +365,7 @@ operator guidance.
 | `/nexus/record/1` | Fetch a signed record by domain key. | 64 KiB |
 | `/nexus/manifest/1` | Fetch the canonical manifest for a content ID. | 256 KiB |
 | `/nexus/chunk/1` | Fetch one chunk by content ID and index. | 1 MiB plus bounded header |
-| `/nexus/index/1` | Reserved for optional index providers (Stage 16). | Bounded page |
+| `/nexus/index/1` | Optional index provider protocol (Stage 16). | Bounded page |
 
 Protocol major versions are part of the ID. Unknown major versions receive `unsupported_version`; there is no silent downgrade.
 
@@ -405,12 +405,12 @@ Pending -> Downloading -> Completed (promoted; row removed)
                     \-> Cancelled
 ```
 
-- v1 downloads from one connected verified source at a time. Sequential failover is allowed.
+- v1 downloads use up to four connected verified sources at once, one chunk lease per source. Failover moves a chunk to another source.
 - A source must return a canonical manifest that verifies against the signed publication or the requested content ID.
-- Each 1 MiB chunk is checked against the manifest before it joins the verified prefix; a corrupt chunk is refetched or fails over.
+- Each 1 MiB chunk is checked against the manifest before it joins the verified chunk map; a corrupt chunk is refetched, normally from another source, and its sender is quarantined after two corrupt responses.
 - A disconnect fails over or fails without corrupting the partial. A graceful stop and process death pause in-flight downloads at the last complete chunk.
 - The final full-file SHA-256 must match the content ID before the blob is promoted.
-- Resume re-verifies the stored manifest root and only accepts a chunk-aligned verified prefix.
+- Resume re-verifies the stored manifest root, re-hashes every recorded chunk, clears any that no longer match, and continues from the missing chunks.
 - Cancel asks whether to keep or delete a resumable partial.
 
 ### 10.3 Replication and unpublish
@@ -504,7 +504,7 @@ A formal threat model with abuse cases and residual risks is a Stage 18 delivera
 | Corrupt chunk or manifest | Reject, retry or fail over, never promote the file. |
 | Corrupt database | Startup check fails closed; offer metadata backup restore and diagnostics; never silently recreate over user data. |
 | Missing LEK or platform secret | Locked identity; offer encrypted backup restore or explicit destructive reset. |
-| Process death | WAL recovery, partial truncation to verified prefix, paused downloads, no false completion. |
+| Process death | WAL recovery, re-verification of recorded chunks, partial truncation to the highest verified chunk, paused downloads, no false completion. |
 | Core panic | Catch at FFI, return internal error where possible, redacted crash marker; process abort is recovered on next start. |
 | Replica file changed | Stop advertising and serving; quarantine or re-download after user action. |
 | Version mismatch | Reject incompatible ABI or protocol major; show update or restore guidance. |
@@ -594,7 +594,7 @@ A fallback that changes product behaviour, privacy, or protocol compatibility re
 | 14 | Publishing, file pages, unpublish, availability honesty. |
 | 15 | Explicit replication, hosted files, re-verification, serving. |
 | 16 | Local and distributed search, Explore, coverage, pagination, provider loss. |
-| 17 | Full UI, accessibility, settings, Android foreground service, Windows tray. |
+| 17 | Multi-source transfers, per-chunk verification, source scoring, cross-peer resume. |
 | 18 | Threat model, abuse tests, dependency and protocol hardening. |
 | 19 | Signed release artifacts, install/upgrade/uninstall, performance, parity, release evidence. |
 
@@ -611,10 +611,10 @@ Runtime proof of criteria 2 and 3 is deferred to Stages 08–10, as the roadmap 
 | Decision | Owner stage | Why it is not blocking Stage 02 |
 |---|---|---|
 | Exact bootstrap operator addresses and governance | Stage 10 | The architecture requires at least three independent entries; operational addresses are release configuration. |
-| Index provider discovery, shard layout, and ranking | Stage 16 | The boundary is local-first, verified, bounded, and non-central; the protocol is designed there. |
+| Index provider discovery, shard layout, and ranking | Stage 16 | Realized as optional signed providers over `/nexus/index/1`; broader shard layout and ranking remain future work. |
 | Exact SQLite tables and indexes | Stage 05 | Storage ownership, commit order, and invariants are fixed here. |
 | Argon2id calibration on baseline devices | Stage 06 | The format is versioned; parameters can be calibrated without changing the wire format. |
-| Android OEM foreground-service behavior | Stage 17/19 | Resumability and honesty are fixed; device-specific evidence is gathered there. |
+| Android OEM foreground-service behavior | Stage 19 | Resumability and honesty are fixed; device-specific evidence is gathered there. |
 | Windows signing certificate and release accounts | Stage 19 | Build and packaging shape is fixed; credentials are release operations. |
 | Relay and advanced NAT traversal | Stage 11 | Realized with Circuit Relay v2, DCUtR, and AutoNAT behind optional configuration; direct connections remain the default. |
 

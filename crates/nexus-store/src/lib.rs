@@ -7,6 +7,7 @@
 //! open these files themselves.
 
 mod backup;
+mod chunk_map;
 mod db;
 mod error;
 mod managed_store;
@@ -19,6 +20,7 @@ mod store;
 mod util;
 
 pub use backup::{ExportReport, RestoreReport};
+pub use chunk_map::ChunkMap;
 pub use error::{StoreError, StoreResult};
 pub use managed_store::ManagedStore;
 pub use model::{

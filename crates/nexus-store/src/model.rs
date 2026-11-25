@@ -472,6 +472,10 @@ pub struct DownloadRecord {
     pub expected_size: u64,
     /// Verified contiguous prefix in bytes.
     pub verified_prefix: u64,
+    /// Total verified bytes, including chunks beyond the contiguous prefix.
+    pub verified_bytes: u64,
+    /// Per-chunk completion bitmap, or `None` for a pre-Stage-17 record.
+    pub chunk_map: Option<Vec<u8>>,
     /// Lifecycle state.
     pub state: DownloadState,
     /// Generated partial-file path relative to the managed store.
