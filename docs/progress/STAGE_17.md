@@ -397,5 +397,5 @@ This is not claimed as Android runtime evidence.
 ## 15. Next stage
 
 Stage 18 is security, abuse resistance, and privacy hardening. It requires
-explicit project-owner approval. Stage 17 remains on `feat/17-multi-peer`,
-stacked on `feat/16-search`, until Stage 16 is reviewed and merged.
+explicit project-owner approval. Stage 17 is ready for review as PR #24 from
+`feat/16-search` into `main`.

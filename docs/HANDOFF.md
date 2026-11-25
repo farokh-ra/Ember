@@ -3,8 +3,8 @@
 **Current stage:** 17 - multi-peer downloads and advanced resilience
 **Stage status:** Complete on Windows loopback; review and merge pending
 **Last updated:** 2026-11-25
-**Branch:** `feat/17-multi-peer`, stacked on `feat/16-search` at `4e42574`,
-committed and pushed to `origin`; merge pending
+**Branch:** `feat/16-search` at `72521c9`, committed and pushed to `origin`;
+PR #24 targets `main`; merge pending
 **Next stage:** 18 - security, abuse resistance, and privacy hardening
 (requires explicit project-owner approval)
 
@@ -222,9 +222,10 @@ cargo audit
 
 ## Exact next action
 
-1. Review the stacked pull request from `feat/17-multi-peer` into
-   `feat/16-search`. Stage 16's PR #22 must be reviewed and merged first.
-2. Merge both only after review, then delete the merged branches.
+1. Review PR #24 from `feat/16-search` into `main`; it carries the Stage 17
+   commit after Stage 16 merged through PR #22.
+2. Merge only after review, then delete the merged Stage 16 and Stage 17
+   branches.
 3. Do not start Stage 18 without explicit project-owner approval.
 4. Stage 18 covers the threat model, abuse resistance, and privacy hardening,
    including connection, request, storage, and bandwidth limits.

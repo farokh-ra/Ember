@@ -202,8 +202,8 @@ flowchart LR
 
 ## Roadmap
 
-Stage 17 is complete on `feat/17-multi-peer` and awaits review and merge. It is
-stacked on Stage 16, which remains open as PR #22.
+Stage 17 is complete and awaits review and merge as PR #24. Stage 16 is merged
+into `main` through PR #22.
 
 | # | Stage | Status |
 |---|---|---|
