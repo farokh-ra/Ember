@@ -33,9 +33,9 @@
 > viewable, but public visibility grants no right to copy, modify, distribute,
 > or reuse the source. See [LICENSE.md](LICENSE.md).
 >
-> **Stage 18 is complete on `feat/18-security`** and is awaiting review and merge.
-> **Stages 16 and 17 are complete on `feat/16-search`** (PR #24) and are the merge
-> base for Stage 18.
+> **Stage 18 is complete on `feat/18-security`** and is awaiting review and merge
+> as PR #25 against `main`. **Stages 16 and 17 are merged into `main`** through
+> PR #24.
 
 ## Overview
 
@@ -102,11 +102,11 @@ rewrites the original signed record.
 
 | Area | State |
 |---|---|
-| Core foundations through Stage 18 | Complete on Windows loopback; Stages 16-18 awaiting merge |
+| Core foundations through Stage 18 | Complete on Windows loopback; Stage 18 awaiting merge |
 | Android and Windows applications | Shared clickable UI prototype with visibly labelled demo data |
 | Windows networking, transfer, profiles, publishing, hosting, search | Verified on Windows loopback |
 | Android runtime networking, hosting, search, and security | Libraries cross-build; on-device evidence deferred |
-| Local and distributed search | Complete on `feat/16-search`; provider role is opt-in |
+| Local and distributed search | Complete; provider role is opt-in |
 | Multi-peer transfer | Complete on `feat/17-multi-peer`; up to four sources per download |
 | Local blocking, abuse reports, and safe-file notices | Complete at the core and network layers on `feat/18-security`; UI binding pending |
 | Windows installer and signed releases | Stage 19; the current Windows build is an app image |
@@ -214,9 +214,9 @@ flowchart LR
 
 ## Roadmap
 
-Stage 18 is complete and awaits review and merge as PR #25, stacked on
-`feat/16-search`. Stage 17 and Stage 16 await review and merge as PR #24.
-Stage 15 is merged into `main`.
+Stage 18 is complete and awaits review and merge as PR #25 against `main`.
+Stages 16 and 17 are merged into `main` through PR #24. Stage 15 is merged into
+`main`.
 
 | # | Stage | Status |
 |---|---|---|
@@ -235,8 +235,8 @@ Stage 15 is merged into `main`.
 | 13 | Profiles and signed public metadata | Complete on Windows loopback |
 | 14 | Publishing and file pages | Complete on Windows loopback |
 | 15 | Voluntary replication and availability | Complete and merged |
-| 16 | Local and distributed search | Complete on Windows loopback; merge pending |
-| 17 | Multi-peer downloads and advanced resilience | Complete on Windows loopback; merge pending |
+| 16 | Local and distributed search | Complete and merged |
+| 17 | Multi-peer downloads and advanced resilience | Complete and merged |
 | 18 | Threat model, abuse tests, dependency and protocol hardening | Complete on Windows loopback; merge pending |
 | 19 | Signed releases, installers, performance, parity, and release evidence | Planned |
 

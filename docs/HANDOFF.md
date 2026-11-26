@@ -4,7 +4,7 @@
 **Stage status:** Complete on Windows loopback; review and merge pending
 **Last updated:** 2026-11-26
 **Branch:** `feat/18-security`, based on `feat/16-search` at `8abaa50`;
-stacked pull request #25 targets `feat/16-search`
+pull request #25 targets `main` because Stages 16 and 17 are merged
 **Next stage:** 19 - performance, compatibility, and release engineering
 (requires explicit project-owner approval)
 
@@ -226,9 +226,9 @@ cargo audit
 
 ## Exact next action
 
-1. Review the stacked Stage 18 pull request #25 into `feat/16-search`.
-2. Review PR #24 from `feat/16-search` into `main`; it carries Stages 16 and 17.
-3. Merge only after review, in stack order, then delete merged branches.
+1. Review PR #25 from `feat/18-security` into `main`.
+2. Stages 16 and 17 are merged into `main` through PR #24.
+3. Merge only after review, then delete merged branches.
 4. Do not start Stage 19 without explicit project-owner approval.
 5. Stage 19 covers performance, compatibility, fuzzing, installers, signed
    releases, and final release evidence.
