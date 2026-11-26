@@ -322,8 +322,8 @@ fn decode_map(bytes: &[u8]) -> Result<Vec<(Value, Value)>, ProtocolError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChunkRequest, FileRequest, FileResponse, FileSelector, MAX_CHUNK_SLICE_BYTES, decode_file_request,
-        decode_file_response, encode_file_request, encode_file_response,
+        ChunkRequest, FileRequest, FileResponse, FileSelector, MAX_CHUNK_SLICE_BYTES, MAX_FILE_MESSAGE_BYTES,
+        decode_file_request, decode_file_response, encode_file_request, encode_file_response,
     };
 
     #[test]
@@ -428,5 +428,30 @@ mod tests {
         let mut trailing = request;
         trailing.push(0);
         assert!(decode_file_request(&trailing).is_err());
+    }
+
+    #[test]
+    fn malformed_inputs_never_panic_or_decode() {
+        let request = encode_file_request(&FileRequest::Chunk(ChunkRequest {
+            content_id: [5; 32],
+            index: 3,
+            offset: 64 * 1024,
+            length: 4096,
+        }))
+        .expect("encode");
+
+        for length in 0..request.len() {
+            assert!(
+                decode_file_request(&request[..length]).is_err(),
+                "truncated length {length} decoded"
+            );
+        }
+        for index in 0..request.len() {
+            let mut mutated = request.clone();
+            mutated[index] ^= 0xff;
+            let _ = decode_file_request(&mutated);
+        }
+        assert!(decode_file_request(&vec![0_u8; MAX_FILE_MESSAGE_BYTES + 1]).is_err());
+        assert!(decode_file_response(&[0xff_u8; 64]).is_err());
     }
 }

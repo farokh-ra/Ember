@@ -340,6 +340,32 @@ All notable changes to Ember are recorded here. The format follows
   bytes, latency, provenance, and quarantine state.
 - 23 new Stage 17 Rust tests, for 353 Rust tests total.
 - Stage 17 evidence record.
+- Local peer blocking with reasons, bounded notes, timestamps, and a 4096-row
+  default cap, enforced inside one writer transaction and persisted in schema
+  version 11.
+- Local abuse reports with categories, bounded notes, newest-first paging, and a
+  separate 4096-row default cap. Reports and blocks are never uploaded,
+  announced, or written into signed records.
+- Network enforcement for blocked peers: outbound dials, inbound test, file, and
+  index requests, inbound connections, discovery results, and providers are all
+  refused or filtered.
+- Blocked-source filtering in `download.start` and `download.resume`, with
+  `permission_denied` when every source is blocked.
+- `security.block_list`, `security.block_add`, `security.block_remove`,
+  `security.report_add`, `security.report_list`, and `security.notices` under FFI
+  namespace `0x0C`.
+- Advisory safe-file classification for documents, media, archives, executables,
+  scripts, and unknown extensions, with visible warnings and delegated previews.
+- `download.started`, `download.resumed`, `download.completed`, and
+  `download.list` now include a `safety` map with `auto_execute: false` and
+  `preview: "delegated"`.
+- Standing safety notices for no automatic execution, delegated previews,
+  key-loss risk, public visibility, and local-only blocking.
+- Truncation and single-byte mutation tests for file protocol messages, plus
+  malformed and oversized request tests in the core.
+- Threat model, privacy review, and security release checklist.
+- 19 new Stage 18 Rust tests, for 372 Rust tests total.
+- Stage 18 evidence record.
 
 ### Changed
 
@@ -443,6 +469,18 @@ All notable changes to Ember are recorded here. The format follows
   a compatibility fallback to a nested `filters` map.
 - The Kotlin Explore and Search screens show sample coverage, partial, cached,
   offline, and pagination states instead of advertising complete results.
+- The SQLite schema is now version 11; `blocked_peers` and `abuse_reports` hold
+  local moderation state without a foreign key to observed peers.
+- The protocol version is now `0.1.0-stage-18`; the ABI remains 1.
+- The FFI interface document is at version 1.11.0 with fifty-one callable
+  methods.
+- The identify protocol remains `/nexus/0.1.0-stage-12`; Stage 18 adds no new
+  network protocol or frame type and reuses `/nexus/file/1` and `/nexus/index/1`.
+- A malformed peer ID, reason, category, or oversized note is rejected with
+  `invalid_argument`; a blocked peer or fully blocked source list maps to
+  `permission_denied` with `peer_blocked`.
+- Peer observation addresses and error text are truncated at 512 and 256 bytes
+  so a hostile peer cannot grow the peer table with unbounded strings.
 
 ### Fixed
 
@@ -522,6 +560,25 @@ All notable changes to Ember are recorded here. The format follows
   removal requires explicit confirmation.
 - The transitive `url` crate was updated from 2.5.8 to 2.5.9 for
   RUSTSEC-2026-0592, a stack overflow in `Url::origin()` on nested `blob:` URLs.
+- File request and response decoders are exercised with every truncation length
+  and every single-byte mutation, and malformed or oversized CBOR is rejected
+  without panicking.
+- Local blocks and abuse reports are device-local policy. They are never
+  announced, uploaded, gossiped, or written into signed records, and their
+  listings are marked `local_only`.
+- Blocked peers are refused at dial, inbound connection, inbound test/file/index
+  request, discovery, provider, and download-source layers, including peers
+  blocked after a download started.
+- Notes, reasons, categories, IDs, and table sizes are bounded; malformed values
+  are rejected before reaching SQLite.
+- There is no code path that executes a downloaded file. Previews are delegated
+  and every download event reports `auto_execute: false`.
+- The threat model, privacy review, and security release checklist are checked
+  in, and a high-severity finding blocks release until fixed or explicitly
+  accepted.
+- A user-initiated metadata export is a full local database snapshot and
+  includes security rows; it is documented as private, and diagnostics export
+  must exclude them.
 
 ### Known limitations
 
@@ -629,6 +686,22 @@ All notable changes to Ember are recorded here. The format follows
   core yet.
 - Android runtime search and index-provider behavior are not exercised locally;
   the Android libraries cross-build with the same search code.
+- Local blocking and reporting are not rendered in the Kotlin UI yet; the core
+  methods, events, notices, and enforcement exist.
+- There is no per-report deletion control yet. Reports are capped and remain
+  local, but removing one report currently requires clearing the local store.
+- Blocking is local and does not remove content from the network. A blocked peer
+  can return under a new identity and must be blocked again.
+- Sybil resistance remains partial. Bounded tables and provider limits reduce the
+  effect of many colluding peers but do not eliminate it.
+- File safety classification is extension-based and advisory. It is not malware
+  detection and must not be presented as a guarantee.
+- No independent security review has been commissioned. The threat model,
+  privacy review, and release checklist record this as a pre-release gap.
+- Android runtime blocking, platform file handling, and platform backup behavior
+  are not exercised locally; the release checklist tracks the verification.
+- Fuzzing, cancellation-race stress, and long-running resource exhaustion tests
+  are Stage 19 work.
 - Metadata restore replaces the database but does not restore file bytes; the
   managed store is reconciled separately.
 - Shared UI copy is English-only; locale-aware formatting and translated

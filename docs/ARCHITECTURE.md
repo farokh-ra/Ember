@@ -294,8 +294,9 @@ Reference types are publication original, active replica, and retained download.
 
 - SQLite migrations are embedded, ordered, and transactional; a failed migration rolls back.
 - `PRAGMA user_version` and a migration history table are both maintained.
-- A metadata export is a consistent snapshot plus a versioned CBOR manifest. It excludes secrets and file bytes.
+- A metadata export is a consistent snapshot plus a versioned CBOR manifest. It excludes secrets and file bytes, and because it is a full local snapshot it includes local security rows such as blocks, reports, and peer observations. Treat an export as private.
 - Restore rejects corrupt, newer, or incompatible archives without overwriting current data.
+- Schema version 11 adds local `blocked_peers` and `abuse_reports` tables. Neither table is required in an archive, so a pre-Stage-18 archive still restores; both tables are created empty by migration.
 - Search tables are rebuildable derived state.
 
 ## 8. Protocol boundaries
@@ -448,6 +449,8 @@ See ADR-0010 for the index boundary and `docs/architecture/FFI_INTERFACE.md` sec
 | Network to core | Every peer, record, manifest, chunk, and address | Bounded parsing, signature verification, hash verification, rate and size limits. |
 | Host to core | Platform paths and the LEK byte buffer | Paths are restricted to app-private roots; the LEK is length-checked, used, and zeroized. |
 | Core to filesystem | User-supplied filenames | Generated content-addressed paths; no traversal, symlinks, or reserved names. |
+| Core to platform viewers | Downloaded files and their types | No execution path in the core; previews are delegated, safety-classified, and warned about. |
+| Moderation data | Local block list and abuse reports | Local-only tables; never announced, uploaded, or written into signed records. |
 | Core to logs | Operation context | Redaction of keys, passphrases, paths, and unnecessary peer identifiers. |
 | Search/index | Provider responses | Verify signed records; never trust provider ranking or completeness. |
 
@@ -473,9 +476,40 @@ See ADR-0010 for the index boundary and `docs/architecture/FFI_INTERFACE.md` sec
 | Backup brute force | Argon2id with calibrated memory and versioned parameters. | Stage 06 |
 | Replay or cross-protocol signature reuse | Domain separation and revision/record identity. | Stage 07 |
 | Metadata privacy leaks | No default telemetry; redacted diagnostics; separate peer identity. | Stage 18, 19 |
+| Spam, harassment, or unwanted peers | Local block list enforced at dial, connection, request, discovery, provider, and download-source layers; local abuse reports. | Stage 18 |
+| Unsafe downloaded file | No execution path; advisory type classification; delegated previews and visible warnings. | Stage 18 |
 | Dependency compromise | Pinned versions, lockfiles, license and advisory gates, SBOM. | Stage 03, 19 |
 
-A formal threat model with abuse cases and residual risks is a Stage 18 deliverable.
+The full threat model, privacy review, and release gate are in
+[`docs/security/THREAT_MODEL.md`](security/THREAT_MODEL.md),
+[`docs/security/PRIVACY_REVIEW.md`](security/PRIVACY_REVIEW.md), and
+[`docs/security/SECURITY_RELEASE_CHECKLIST.md`](security/SECURITY_RELEASE_CHECKLIST.md).
+
+### 12.4 Local blocking and abuse controls
+
+Blocking and reporting are local policy decisions. There is no central
+moderation authority and no automatic report upload.
+
+- `blocked_peers` stores a peer ID, a bounded reason, an optional 512-byte note,
+  and timestamps. Re-blocking updates the row in place. The table has no foreign
+  key to observed peers, so a block survives observation pruning.
+- `abuse_reports` stores a peer ID, a bounded category, an optional note, and a
+  timestamp. Reports are append-only and capped.
+- Both tables are capped inside the writer transaction (4096 rows by default per
+  table, configurable from 1 to 65,536).
+- The network driver refuses a blocked peer on dial, inbound connection, and
+  inbound test, file, and index requests; discovery and provider results are
+  filtered, and download sources are dropped before any request.
+- Blocking does not remove content from the network or prevent a blocked peer
+  from returning under a new identity.
+
+### 12.5 Safe file handling
+
+The core has no path that executes a downloaded file. Every download event and
+download listing carries an advisory `safety` map with a category, a warning
+flag, a message, `auto_execute: false`, and `preview: "delegated"`. Categories
+are `document`, `media`, `archive`, `executable`, `script`, and `unknown`. The UI
+must show the warning before handing the file to a platform viewer or sandbox.
 
 ## 13. Lifecycle and failure handling
 

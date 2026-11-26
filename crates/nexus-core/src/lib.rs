@@ -17,7 +17,9 @@ mod ops;
 mod profiles;
 mod publications;
 mod replicas;
+mod safety;
 mod search;
+mod security;
 mod streaming;
 
 pub use config::{ConfigError, CoreConfig, LogLevel, MAX_CONFIG_BYTES};
@@ -42,7 +44,7 @@ use nexus_observability::LogInitError;
 pub const ABI_VERSION: u32 = 1;
 
 /// Protocol version implemented by this build.
-pub const PROTOCOL_VERSION: &str = "0.1.0-stage-17";
+pub const PROTOCOL_VERSION: &str = "0.1.0-stage-18";
 
 /// Static build information exposed to shells and diagnostics.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -92,7 +94,7 @@ mod tests {
     #[test]
     fn reports_abi_version() {
         assert_eq!(ABI_VERSION, info().abi_version);
-        assert_eq!("0.1.0-stage-17", info().protocol_version);
+        assert_eq!("0.1.0-stage-18", info().protocol_version);
     }
 
     #[test]

@@ -19,10 +19,11 @@ use crate::db::Database;
 use crate::error::{StoreError, StoreResult};
 use crate::managed_store::ManagedStore;
 use crate::model::{
-    ContentRecord, ContentReference, ContentState, DownloadRecord, DownloadState, HostingLimits, IdentityReference,
-    ImportedContent, PeerObservation, ProfileCacheOutcome, ProfileConflict, ProfileFreshness, ProfileRecord,
-    ProfileState, PublicationAvailability, PublicationCacheOutcome, PublicationRecord, ReferenceType, ReleaseOutcome,
-    ReplicaRecord, ReplicaState, ReplicaUsage, TombstoneRecord,
+    AbuseCategory, AbuseReport, BlockReason, BlockedPeer, ContentRecord, ContentReference, ContentState,
+    DownloadRecord, DownloadState, HostingLimits, IdentityReference, ImportedContent, MAX_ABUSE_REPORTS,
+    MAX_BLOCKED_PEERS, MAX_SECURITY_NOTE_BYTES, PeerObservation, ProfileCacheOutcome, ProfileConflict,
+    ProfileFreshness, ProfileRecord, ProfileState, PublicationAvailability, PublicationCacheOutcome, PublicationRecord,
+    ReferenceType, ReleaseOutcome, ReplicaRecord, ReplicaState, ReplicaUsage, TombstoneRecord,
 };
 use crate::paths::{safe_display_name, unique_export_path, validate_store_component};
 use crate::quota::{MAX_FILE_SIZE, QuotaPolicy, QuotaUsage};
@@ -49,6 +50,10 @@ pub struct StoreConfig {
     pub busy_timeout: Duration,
     /// SQLite page cache in KiB.
     pub cache_size_kib: i64,
+    /// Maximum locally blocked peers.
+    pub max_blocked_peers: usize,
+    /// Maximum local abuse reports.
+    pub max_abuse_reports: usize,
 }
 
 impl Default for StoreConfig {
@@ -58,6 +63,8 @@ impl Default for StoreConfig {
             max_file_size: MAX_FILE_SIZE,
             busy_timeout: Duration::from_secs(5),
             cache_size_kib: 4 * 1024,
+            max_blocked_peers: MAX_BLOCKED_PEERS,
+            max_abuse_reports: MAX_ABUSE_REPORTS,
         }
     }
 }
@@ -130,6 +137,16 @@ impl Store {
         if config.cache_size_kib < 256 {
             return Err(StoreError::InvalidConfig(
                 "SQLite cache must be at least 256 KiB".to_owned(),
+            ));
+        }
+        if config.max_blocked_peers == 0 || config.max_blocked_peers > 65_536 {
+            return Err(StoreError::InvalidConfig(
+                "blocked-peer cap must be between 1 and 65536".to_owned(),
+            ));
+        }
+        if config.max_abuse_reports == 0 || config.max_abuse_reports > 65_536 {
+            return Err(StoreError::InvalidConfig(
+                "abuse-report cap must be between 1 and 65536".to_owned(),
             ));
         }
 
@@ -2415,7 +2432,9 @@ impl Store {
     /// Merges a peer observation.
     pub fn record_peer_observation(&self, observation: &PeerObservation) -> StoreResult<()> {
         validate_entity_id(&observation.peer_id, "peer ID")?;
-        let observation = observation.clone();
+        let mut observation = observation.clone();
+        observation.address = bounded_observation_text(observation.address, 512);
+        observation.last_error = bounded_observation_text(observation.last_error, 256);
         self.db.write(move |connection| {
             connection.execute(
                 "INSERT INTO peers (peer_id, address, last_seen_at, last_error, observation_count)
@@ -2454,6 +2473,158 @@ impl Store {
                 })
             })?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Blocks a peer locally, replacing the reason and note when already blocked.
+    ///
+    /// The cap is enforced inside the writer transaction so concurrent callers
+    /// cannot exceed the configured number of entries.
+    pub fn block_peer(&self, peer_id: &str, reason: BlockReason, note: Option<&str>) -> StoreResult<BlockedPeer> {
+        validate_entity_id(peer_id, "peer ID")?;
+        let peer = peer_id.to_owned();
+        let note = bounded_security_note(note);
+        let max = self.config.max_blocked_peers;
+        let now = now_secs();
+        self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            let exists: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM blocked_peers WHERE peer_id = ?1)",
+                [&peer],
+                |row| row.get(0),
+            )?;
+            if exists {
+                transaction.execute(
+                    "UPDATE blocked_peers SET reason = ?2, note = ?3, updated_at = ?4 WHERE peer_id = ?1",
+                    params![peer, reason.as_str(), note, now],
+                )?;
+            } else {
+                let count: i64 = transaction.query_row("SELECT COUNT(*) FROM blocked_peers", [], |row| row.get(0))?;
+                if usize::try_from(count).unwrap_or(usize::MAX) >= max {
+                    return Err(StoreError::InvalidConfig(format!(
+                        "local block list is full ({max} entries)"
+                    )));
+                }
+                transaction.execute(
+                    "INSERT INTO blocked_peers (peer_id, reason, note, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?4)",
+                    params![peer, reason.as_str(), note, now],
+                )?;
+            }
+            transaction.commit()?;
+            Ok(())
+        })?;
+        self.blocked_peer(peer_id)?
+            .ok_or_else(|| StoreError::RecordNotFound(peer_id.to_owned()))
+    }
+
+    /// Removes a local block, returning whether a row was removed.
+    pub fn unblock_peer(&self, peer_id: &str) -> StoreResult<bool> {
+        validate_entity_id(peer_id, "peer ID")?;
+        let peer = peer_id.to_owned();
+        self.db.write(move |connection| {
+            Ok(connection.execute("DELETE FROM blocked_peers WHERE peer_id = ?1", [peer])? > 0)
+        })
+    }
+
+    /// Returns one local block, if present.
+    pub fn blocked_peer(&self, peer_id: &str) -> StoreResult<Option<BlockedPeer>> {
+        validate_entity_id(peer_id, "peer ID")?;
+        let peer = peer_id.to_owned();
+        self.db.read(move |connection| {
+            Ok(connection
+                .query_row(
+                    "SELECT peer_id, reason, note, created_at, updated_at FROM blocked_peers WHERE peer_id = ?1",
+                    [peer],
+                    blocked_peer_from_row,
+                )
+                .optional()?)
+        })
+    }
+
+    /// Returns true when local policy blocks the peer.
+    pub fn is_peer_blocked(&self, peer_id: &str) -> StoreResult<bool> {
+        Ok(self.blocked_peer(peer_id)?.is_some())
+    }
+
+    /// Lists every local block, newest first.
+    pub fn blocked_peers(&self) -> StoreResult<Vec<BlockedPeer>> {
+        self.db.read(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT peer_id, reason, note, created_at, updated_at
+                 FROM blocked_peers ORDER BY created_at DESC, peer_id ASC",
+            )?;
+            let rows = statement.query_map([], blocked_peer_from_row)?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Number of locally blocked peers.
+    pub fn blocked_peer_count(&self) -> StoreResult<usize> {
+        self.db.read(|connection| {
+            let count: i64 = connection.query_row("SELECT COUNT(*) FROM blocked_peers", [], |row| row.get(0))?;
+            Ok(usize::try_from(count).unwrap_or(usize::MAX))
+        })
+    }
+
+    /// Records a local abuse report without uploading it.
+    ///
+    /// The cap is enforced inside the writer transaction so concurrent callers
+    /// cannot exceed the configured number of reports.
+    pub fn record_abuse_report(
+        &self,
+        peer_id: &str,
+        category: AbuseCategory,
+        note: Option<&str>,
+    ) -> StoreResult<AbuseReport> {
+        validate_entity_id(peer_id, "peer ID")?;
+        let peer = peer_id.to_owned();
+        let note = bounded_security_note(note);
+        let stored_note = note.clone();
+        let max = self.config.max_abuse_reports;
+        let now = now_secs();
+        let report_id = self.db.write(move |connection| {
+            let transaction = connection.transaction()?;
+            let count: i64 = transaction.query_row("SELECT COUNT(*) FROM abuse_reports", [], |row| row.get(0))?;
+            if usize::try_from(count).unwrap_or(usize::MAX) >= max {
+                return Err(StoreError::InvalidConfig(format!(
+                    "local abuse report list is full ({max} entries)"
+                )));
+            }
+            transaction.execute(
+                "INSERT INTO abuse_reports (peer_id, category, note, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![peer, category.as_str(), stored_note, now],
+            )?;
+            let report_id = u64::try_from(transaction.last_insert_rowid()).unwrap_or(0);
+            transaction.commit()?;
+            Ok(report_id)
+        })?;
+        Ok(AbuseReport {
+            report_id,
+            peer_id: peer_id.to_owned(),
+            category,
+            note: bounded_security_note(note.as_deref()),
+            created_at: now,
+        })
+    }
+
+    /// Lists local abuse reports, newest first.
+    pub fn abuse_reports(&self) -> StoreResult<Vec<AbuseReport>> {
+        self.db.read(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT report_id, peer_id, category, note, created_at
+                 FROM abuse_reports ORDER BY created_at DESC, report_id DESC",
+            )?;
+            let rows = statement.query_map([], abuse_report_from_row)?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Number of local abuse reports.
+    pub fn abuse_report_count(&self) -> StoreResult<usize> {
+        self.db.read(|connection| {
+            let count: i64 = connection.query_row("SELECT COUNT(*) FROM abuse_reports", [], |row| row.get(0))?;
+            Ok(usize::try_from(count).unwrap_or(usize::MAX))
         })
     }
 
@@ -2867,6 +3038,54 @@ fn validate_entity_id(value: &str, label: &str) -> StoreResult<()> {
     } else {
         Err(StoreError::InvalidId(format!("{label} is malformed")))
     }
+}
+
+/// Truncates optional observation text on a character boundary.
+fn bounded_observation_text(value: Option<String>, max_bytes: usize) -> Option<String> {
+    let value = value?;
+    if value.len() <= max_bytes {
+        return Some(value);
+    }
+    let mut end = max_bytes;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    Some(value[..end].to_owned())
+}
+
+/// Normalizes an optional note, dropping empty notes and capping the length.
+fn bounded_security_note(note: Option<&str>) -> Option<String> {
+    let note = note?.trim();
+    if note.is_empty() {
+        return None;
+    }
+    let mut end = note.len().min(MAX_SECURITY_NOTE_BYTES);
+    while end > 0 && !note.is_char_boundary(end) {
+        end -= 1;
+    }
+    Some(note[..end].to_owned())
+}
+
+fn blocked_peer_from_row(row: &Row<'_>) -> rusqlite::Result<BlockedPeer> {
+    let reason: String = row.get(1)?;
+    Ok(BlockedPeer {
+        peer_id: row.get(0)?,
+        reason: BlockReason::parse(&reason).ok_or_else(|| invalid_enum(1, "block reason", &reason))?,
+        note: row.get(2)?,
+        created_at: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+        updated_at: u64::try_from(row.get::<_, i64>(4)?).unwrap_or(0),
+    })
+}
+
+fn abuse_report_from_row(row: &Row<'_>) -> rusqlite::Result<AbuseReport> {
+    let category: String = row.get(2)?;
+    Ok(AbuseReport {
+        report_id: u64::try_from(row.get::<_, i64>(0)?).unwrap_or(0),
+        peer_id: row.get(1)?,
+        category: AbuseCategory::parse(&category).ok_or_else(|| invalid_enum(2, "abuse category", &category))?,
+        note: row.get(3)?,
+        created_at: u64::try_from(row.get::<_, i64>(4)?).unwrap_or(0),
+    })
 }
 
 fn invalid_enum(index: usize, label: &str, value: &str) -> rusqlite::Error {

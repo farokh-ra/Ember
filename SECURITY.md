@@ -71,6 +71,24 @@ Out of scope:
   `cargo-audit`.
 - Release artifacts are built from a clean checkout with pinned tools and are
   signed with release-environment keys.
+- Incoming protocol messages and metadata are schema-validated and size-bounded;
+  malformed input is rejected without panicking.
+- Signed records are verified against the claimed identity before storage or
+  display.
+- Downloaded files are never executed automatically, and previews are delegated
+  to platform handlers or a sandbox.
+- Users can block peers and record local abuse reports. These controls are local
+  policy: nothing is uploaded, announced, or published.
+- No telemetry or automatic crash reporting is enabled.
+
+The current threat model, privacy review, and release gate are documented in:
+
+- [docs/security/THREAT_MODEL.md](docs/security/THREAT_MODEL.md)
+- [docs/security/PRIVACY_REVIEW.md](docs/security/PRIVACY_REVIEW.md)
+- [docs/security/SECURITY_RELEASE_CHECKLIST.md](docs/security/SECURITY_RELEASE_CHECKLIST.md)
+
+A known high-severity issue blocks release until it is fixed or explicitly
+accepted in writing by the project owner.
 
 See [docs/LOGGING_POLICY.md](docs/LOGGING_POLICY.md) for the logging rules and
 [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution process.

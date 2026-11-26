@@ -575,6 +575,12 @@ impl Engine {
             0x0906 => self.replica_verify(&params),
             0x0907 => self.hosting_limits_get(),
             0x0908 => self.hosting_limits_set(&params),
+            0x0C01 => self.security_block_list(&params).map(MethodOutcome::Result),
+            0x0C02 => self.security_block_add(&params),
+            0x0C03 => self.security_block_remove(&params),
+            0x0C04 => self.security_report_add(&params),
+            0x0C05 => self.security_report_list(&params).map(MethodOutcome::Result),
+            0x0C06 => self.security_notices().map(MethodOutcome::Result),
             0x0B01 => Ok(MethodOutcome::Result(self.test_echo(&params)?)),
             0x0B02 => self.test_fault(&params),
             _ => Err(CoreError::Unsupported(method_id)),
@@ -625,6 +631,12 @@ impl Engine {
             "replica.verify",
             "hosting.limits_get",
             "hosting.limits_set",
+            "security.block_list",
+            "security.block_add",
+            "security.block_remove",
+            "security.report_add",
+            "security.report_list",
+            "security.notices",
         ]
         .into_iter()
         .chain(
@@ -1020,7 +1032,27 @@ impl Engine {
             .network_error
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        self.refresh_network_blocklist();
         self.emit_network_state(status.state.as_str(), status.peer_count, status.transports, None);
+    }
+
+    /// Pushes the local block list into the running network driver.
+    ///
+    /// The list is local policy: it is never announced or shared. A failed
+    /// store read leaves the previous list in place.
+    pub(crate) fn refresh_network_blocklist(&self) {
+        let network = self
+            .network
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let Some(network) = network else {
+            return;
+        };
+        let Ok(blocked) = self.store.blocked_peers() else {
+            return;
+        };
+        network.set_blocked_peers(blocked.into_iter().map(|blocked| blocked.peer_id).collect());
     }
 
     /// Announces the optional index-provider role once the DHT has a peer.

@@ -335,22 +335,35 @@ The ABI remains 1. Stage 12 adds six methods:
 `download.list` returns at most 100 records per page (50 by default) and
 includes `download_id`, `content_id`, `display_name`, `expected_size`,
 `verified_prefix`, `verified_bytes`, `state`, `source_peer`, `manifest_root`,
-`last_error`, `created_at`, and `updated_at`. `verified_prefix` is the longest
-contiguous verified prefix; `verified_bytes` counts every verified chunk,
-including chunks beyond a gap.
+`last_error`, `created_at`, `updated_at`, and an advisory `safety` map.
+`verified_prefix` is the longest contiguous verified prefix; `verified_bytes`
+counts every verified chunk, including chunks beyond a gap.
+
+`download.start` and `download.resume` drop every source peer that is blocked
+locally before any request is made. When every supplied source is blocked, the
+call returns `permission_denied` and starts nothing. A source blocked after a
+download starts is refused by the network driver on its next request, and the
+normal failover path moves the chunk to another source.
 
 Events:
 
 | Event | Data |
 |---|---|
-| `download.started` | `download_id`, `content_id`, `total_bytes`, `total_chunks`, `source_peer`, `sources`, `publication_id?`, `display_name` |
+| `download.started` | `download_id`, `content_id`, `total_bytes`, `total_chunks`, `source_peer`, `sources`, `publication_id?`, `display_name`, `safety` |
 | `download.progress` | `download_id`, `verified_bytes`, `total_bytes`, `rate_bps`, `verified_chunks`, `total_chunks`, `source_peer`, `sources` |
-| `download.resumed` | `download_id`, `content_id`, `verified_bytes`, `total_bytes`, `verified_chunks`, `total_chunks`, `sources` |
+| `download.resumed` | `download_id`, `content_id`, `verified_bytes`, `total_bytes`, `verified_chunks`, `total_chunks`, `sources`, `display_name`, `safety` |
 | `download.paused` | `download_id`, `verified_bytes`, `reason` |
-| `download.completed` | `download_id`, `content_id`, `size` |
+| `download.completed` | `download_id`, `content_id`, `size`, `display_name`, `safety` |
 | `download.failed` | `download_id`, `error`, `verified_bytes` |
 | `download.cancelled` | `download_id`, `partial_kept` |
 | `download.removed` | `download_id`, `removed` |
+
+The `safety` map has `category`, `warn`, `message`, `auto_execute: false`, and
+`preview: "delegated"`. Categories are `document`, `media`, `archive`,
+`executable`, `script`, and `unknown`. The classification is advisory: it helps
+the UI warn the user, and it never decides whether to execute or open a file.
+The core has no execution path, and previews are delegated to a platform viewer
+or external sandbox.
 
 In `download.started` and `download.resumed`, `sources` is the ordered list of
 peer IDs this download may use. In `download.progress`, `sources` is an array of
@@ -393,7 +406,12 @@ A completed file becomes a normal verified content record with a
   signature, serving, and availability separately.
 - Previews are metadata only and limited to plain text and raster images. SVG,
   HTML, PDF, archives, binaries, and executable script extensions are not
-  previewed, and a downloaded file is never opened automatically.
+  previewed. The core never opens a downloaded file; it classifies the type,
+  reports `auto_execute: false` and `preview: "delegated"`, and leaves opening
+  to a platform viewer or sandbox the UI chooses.
+- Blocking is local. A blocked peer is refused and filtered, but blocking does
+  not remove content from the network, and a peer can return under a new
+  identity.
 - Transfers are bounded by the 4 GiB file cap and the 1 MiB chunk model from
   Stage 07.
 - Android runtime transfer behaviour is not exercised locally. The Android
@@ -429,6 +447,10 @@ A completed file becomes a normal verified content record with a
   observing the tombstone: `crates/nexus-core/tests/stage14.rs`.
 - Serving-gate, remote-cache, tombstone-retention, and manifest persistence
   tests: `crates/nexus-store/tests/stage14.rs`.
+- Malformed, truncated, and mutated file messages without a panic:
+  `crates/nexus-protocol/src/file.rs` unit tests.
+- Blocked-source filtering, safety fields, and local reports:
+  `crates/nexus-core/tests/stage18.rs`.
 
 See [STAGE_12.md](../progress/STAGE_12.md), [STAGE_14.md](../progress/STAGE_14.md),
 and [STAGE_17.md](../progress/STAGE_17.md) for commands and totals.

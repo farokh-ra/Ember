@@ -1,6 +1,6 @@
 //! Shared state between the network driver and synchronous callers.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -22,6 +22,7 @@ pub(crate) struct Shared {
     peers: RwLock<BTreeMap<String, PeerSnapshot>>,
     bootstrap: RwLock<Vec<String>>,
     relays: RwLock<Vec<String>>,
+    blocked: RwLock<BTreeSet<String>>,
     observer: Arc<dyn NetworkObserver>,
     started_at: Instant,
 }
@@ -34,6 +35,7 @@ impl Shared {
             peers: RwLock::new(BTreeMap::new()),
             bootstrap: RwLock::new(Vec::new()),
             relays: RwLock::new(Vec::new()),
+            blocked: RwLock::new(BTreeSet::new()),
             observer,
             started_at: Instant::now(),
         }
@@ -81,6 +83,30 @@ impl Shared {
         *relays = addresses;
         let mut status = self.status.write().unwrap_or_else(|poisoned| poisoned.into_inner());
         status.relays_configured = relays.len();
+    }
+
+    /// Replaces the local block list. Blocking is a local policy decision and
+    /// is never shared with other peers.
+    pub(crate) fn set_blocked(&self, peers: Vec<String>) {
+        let mut blocked = self.blocked.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        blocked.clear();
+        blocked.extend(peers.into_iter().filter(|peer| !peer.is_empty()));
+    }
+
+    /// Returns true when local policy blocks the peer.
+    pub(crate) fn is_blocked(&self, peer_id: &str) -> bool {
+        self.blocked
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(peer_id)
+    }
+
+    /// Number of locally blocked peers.
+    pub(crate) fn blocked_count(&self) -> usize {
+        self.blocked
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len()
     }
 
     pub(crate) fn configure_relay(
@@ -665,4 +691,40 @@ pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::Shared;
+    use crate::state::NetworkStatus;
+
+    fn shared() -> Shared {
+        Shared::new(NetworkStatus::starting("self".to_owned()), Arc::new(()))
+    }
+
+    #[test]
+    fn block_list_replaces_deduplicates_and_clears() {
+        let shared = shared();
+        assert_eq!(shared.blocked_count(), 0);
+        shared.set_blocked(vec![
+            "peer-one".to_owned(),
+            "peer-two".to_owned(),
+            "peer-one".to_owned(),
+            String::new(),
+        ]);
+        assert_eq!(shared.blocked_count(), 2);
+        assert!(shared.is_blocked("peer-one"));
+        assert!(shared.is_blocked("peer-two"));
+        assert!(!shared.is_blocked("peer-three"));
+
+        shared.set_blocked(vec!["peer-three".to_owned()]);
+        assert_eq!(shared.blocked_count(), 1);
+        assert!(!shared.is_blocked("peer-one"));
+        assert!(shared.is_blocked("peer-three"));
+
+        shared.set_blocked(Vec::new());
+        assert_eq!(shared.blocked_count(), 0);
+    }
 }

@@ -503,6 +503,10 @@ impl Driver {
         address: Multiaddr,
         respond: oneshot::Sender<Result<ConnectedPeer, NetError>>,
     ) {
+        if self.shared.is_blocked(&peer_id.to_string()) {
+            let _ = respond.send(Err(NetError::PeerBlocked));
+            return;
+        }
         if self.pending_dials.contains_key(&peer_id) {
             let _ = respond.send(Err(NetError::Busy));
             return;
@@ -539,7 +543,7 @@ impl Driver {
     }
 
     fn dial_background(&mut self, peer_id: PeerId, addresses: Vec<Multiaddr>) {
-        if addresses.is_empty() || self.swarm.is_connected(&peer_id) {
+        if addresses.is_empty() || self.swarm.is_connected(&peer_id) || self.shared.is_blocked(&peer_id.to_string()) {
             return;
         }
         self.shared.record_dialing(&peer_id.to_string());
@@ -732,6 +736,19 @@ impl Driver {
         self.refresh_relay_counts();
     }
 
+    /// Closes connections to peers that became blocked after connecting.
+    fn disconnect_blocked_peers(&mut self) {
+        let blocked: Vec<PeerId> = self
+            .swarm
+            .connected_peers()
+            .filter(|peer_id| self.shared.is_blocked(&peer_id.to_string()))
+            .copied()
+            .collect();
+        for peer_id in blocked {
+            let _ = self.swarm.disconnect_peer_id(peer_id);
+        }
+    }
+
     /// Fails reservations that did not complete within the configured deadline.
     fn expire_relay_reservations(&mut self, now: Instant) {
         let timeout = self.config.relay_reservation_timeout;
@@ -819,6 +836,10 @@ impl Driver {
         selector: FileSelector,
         respond: oneshot::Sender<Result<FileMetadata, NetError>>,
     ) {
+        if self.shared.is_blocked(&peer_id.to_string()) {
+            let _ = respond.send(Err(NetError::PeerBlocked));
+            return;
+        }
         if !self.shared.is_connected(&peer_id.to_string()) {
             let _ = respond.send(Err(NetError::NotConnected));
             return;
@@ -850,6 +871,10 @@ impl Driver {
         length: u32,
         respond: oneshot::Sender<Result<Vec<u8>, NetError>>,
     ) {
+        if self.shared.is_blocked(&peer_id.to_string()) {
+            let _ = respond.send(Err(NetError::PeerBlocked));
+            return;
+        }
         if !self.shared.is_connected(&peer_id.to_string()) {
             let _ = respond.send(Err(NetError::NotConnected));
             return;
@@ -884,6 +909,10 @@ impl Driver {
         request: Vec<u8>,
         respond: oneshot::Sender<Result<IndexResponse, NetError>>,
     ) {
+        if self.shared.is_blocked(&peer_id.to_string()) {
+            let _ = respond.send(Err(NetError::PeerBlocked));
+            return;
+        }
         if !self.shared.is_connected(&peer_id.to_string()) {
             let _ = respond.send(Err(NetError::NotConnected));
             return;
@@ -895,6 +924,10 @@ impl Driver {
     }
 
     fn send_test(&mut self, peer_id: PeerId, payload: Vec<u8>, respond: oneshot::Sender<Result<TestReply, NetError>>) {
+        if self.shared.is_blocked(&peer_id.to_string()) {
+            let _ = respond.send(Err(NetError::PeerBlocked));
+            return;
+        }
         if !self.shared.is_connected(&peer_id.to_string()) {
             let _ = respond.send(Err(NetError::NotConnected));
             return;
@@ -1255,6 +1288,7 @@ impl Driver {
 
     fn on_tick(&mut self) {
         let now = Instant::now();
+        self.disconnect_blocked_peers();
         self.flush_delayed_file_responses();
 
         let expired: Vec<PeerId> = self
@@ -1498,6 +1532,7 @@ impl Driver {
                         let mut peers: Vec<DiscoveredPeer> = ok
                             .peers
                             .into_iter()
+                            .filter(|info| !self.shared.is_blocked(&info.peer_id.to_string()))
                             .map(|info| DiscoveredPeer {
                                 peer_id: info.peer_id.to_string(),
                                 addresses: info
@@ -1633,6 +1668,9 @@ impl Driver {
                     let mut peers: Vec<DiscoveredPeer> = Vec::new();
                     for record in records {
                         providers.retain(|provider| provider != &record.provider);
+                        if self.shared.is_blocked(&record.provider.to_string()) {
+                            continue;
+                        }
                         let mut addresses: Vec<String> = record
                             .addresses
                             .iter()
@@ -1652,6 +1690,9 @@ impl Driver {
                         });
                     }
                     for provider in providers {
+                        if self.shared.is_blocked(&provider.to_string()) {
+                            continue;
+                        }
                         let mut addresses: Vec<String> = self
                             .routing_addresses(&provider)
                             .into_iter()
@@ -1800,12 +1841,21 @@ impl Driver {
                 }
             }
             SwarmEvent::ConnectionEstablished {
+                connection_id,
                 peer_id,
                 endpoint,
                 num_established,
                 established_in,
                 ..
             } => {
+                if self.shared.is_blocked(&peer_id.to_string()) {
+                    self.shared.record_failed(&peer_id.to_string(), "peer_blocked");
+                    let _ = self.swarm.close_connection(connection_id);
+                    if let Some(pending) = self.pending_dials.remove(&peer_id) {
+                        let _ = pending.respond.send(Err(NetError::PeerBlocked));
+                    }
+                    return;
+                }
                 let direction = if endpoint.is_dialer() { "outbound" } else { "inbound" };
                 let relayed = endpoint.is_relayed();
                 let path = if relayed { "relay" } else { "direct" };
@@ -2089,6 +2139,17 @@ impl Driver {
     }
 
     fn on_inbound_request(&mut self, peer: PeerId, request: Vec<u8>, channel: ResponseChannel<Vec<u8>>) {
+        if self.shared.is_blocked(&peer.to_string()) {
+            self.shared.record_request(false);
+            let response = TestResponse {
+                payload: None,
+                error: Some("blocked".to_owned()),
+            };
+            if let Ok(body) = encode_test_response(&response) {
+                let _ = self.swarm.behaviour_mut().test.send_response(channel, body);
+            }
+            return;
+        }
         if !self.allow_request(peer) {
             self.shared.record_request(false);
             let response = TestResponse {
@@ -2122,6 +2183,16 @@ impl Driver {
     }
 
     fn on_inbound_file_request(&mut self, peer: PeerId, request: Vec<u8>, channel: ResponseChannel<Vec<u8>>) {
+        if self.shared.is_blocked(&peer.to_string()) {
+            let response = FileResponse {
+                error: Some("blocked".to_owned()),
+                ..FileResponse::default()
+            };
+            if let Ok(body) = encode_file_response(&response) {
+                let _ = self.swarm.behaviour_mut().file.send_response(channel, body);
+            }
+            return;
+        }
         if !self.allow_file_request(peer) {
             let response = FileResponse {
                 error: Some("rate_limited".to_owned()),
@@ -2249,6 +2320,16 @@ impl Driver {
     }
 
     fn on_inbound_index_request(&mut self, peer: PeerId, request: Vec<u8>, channel: ResponseChannel<Vec<u8>>) {
+        if self.shared.is_blocked(&peer.to_string()) {
+            let response = IndexResponse {
+                error: Some("blocked".to_owned()),
+                ..IndexResponse::default()
+            };
+            if let Ok(body) = encode_index_response(&response) {
+                let _ = self.swarm.behaviour_mut().index.send_response(channel, body);
+            }
+            return;
+        }
         if !self.allow_index_request(peer) {
             let response = IndexResponse {
                 error: Some("rate_limited".to_owned()),
@@ -2290,13 +2371,14 @@ impl Driver {
             return;
         };
         let result = match decode_test_response(&response) {
-            Ok(response) => match response.payload {
-                Some(payload) => Ok(TestReply {
+            Ok(response) => match (response.payload, response.error.as_deref()) {
+                (Some(payload), _) => Ok(TestReply {
                     peer_id: pending.peer_id.to_string(),
                     payload,
                     round_trip_ms: u64::try_from(pending.started.elapsed().as_millis()).unwrap_or(u64::MAX),
                 }),
-                None => Err(NetError::Rejected),
+                (None, Some("blocked")) => Err(NetError::PeerBlocked),
+                (None, _) => Err(NetError::Rejected),
             },
             Err(_) => Err(NetError::ConnectionFailed),
         };
@@ -2403,6 +2485,7 @@ fn unavailable_response() -> FileResponse {
 fn map_file_error(code: &str) -> NetError {
     match code {
         "content_unavailable" => NetError::FileUnavailable,
+        "blocked" => NetError::PeerBlocked,
         "rate_limited" | "malformed" => NetError::Rejected,
         _ => NetError::Rejected,
     }
@@ -2412,6 +2495,7 @@ fn map_index_error(code: &str) -> NetError {
     match code {
         "unsupported" => NetError::UnsupportedProtocol,
         "unavailable" | "not_provider" => NetError::Unavailable,
+        "blocked" => NetError::PeerBlocked,
         _ => NetError::Rejected,
     }
 }

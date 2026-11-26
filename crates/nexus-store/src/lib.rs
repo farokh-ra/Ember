@@ -24,10 +24,12 @@ pub use chunk_map::ChunkMap;
 pub use error::{StoreError, StoreResult};
 pub use managed_store::ManagedStore;
 pub use model::{
-    ContentRecord, ContentReference, ContentState, DownloadRecord, DownloadState, HostingLimits, IdentityReference,
-    ImportedContent, MAX_UPLOAD_BYTES_PER_SECOND, MIN_UPLOAD_BYTES_PER_SECOND, PeerObservation, ProfileCacheOutcome,
-    ProfileConflict, ProfileFreshness, ProfileRecord, ProfileState, PublicationAvailability, PublicationCacheOutcome,
-    PublicationRecord, ReferenceType, ReleaseOutcome, ReplicaRecord, ReplicaState, ReplicaUsage, TombstoneRecord,
+    AbuseCategory, AbuseReport, BlockReason, BlockedPeer, ContentRecord, ContentReference, ContentState,
+    DownloadRecord, DownloadState, HostingLimits, IdentityReference, ImportedContent, MAX_ABUSE_REPORTS,
+    MAX_BLOCKED_PEERS, MAX_SECURITY_NOTE_BYTES, MAX_UPLOAD_BYTES_PER_SECOND, MIN_UPLOAD_BYTES_PER_SECOND,
+    PeerObservation, ProfileCacheOutcome, ProfileConflict, ProfileFreshness, ProfileRecord, ProfileState,
+    PublicationAvailability, PublicationCacheOutcome, PublicationRecord, ReferenceType, ReleaseOutcome, ReplicaRecord,
+    ReplicaState, ReplicaUsage, TombstoneRecord,
 };
 pub use paths::{
     FALLBACK_FILENAME, MAX_FILENAME_BYTES, safe_display_name, unique_export_path, validate_store_component,

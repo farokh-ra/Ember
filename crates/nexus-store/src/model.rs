@@ -615,6 +615,139 @@ impl HostingLimits {
     }
 }
 
+/// Maximum locally blocked peers.
+pub const MAX_BLOCKED_PEERS: usize = 4_096;
+/// Maximum local abuse reports.
+pub const MAX_ABUSE_REPORTS: usize = 4_096;
+/// Maximum bytes accepted in one block or report note.
+pub const MAX_SECURITY_NOTE_BYTES: usize = 512;
+
+/// Why a peer was blocked locally.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlockReason {
+    /// The user blocked the peer without a specific category.
+    Manual,
+    /// Unsolicited or repetitive content.
+    Spam,
+    /// Malware, a scam payload, or a corrupt file.
+    Malware,
+    /// Pretending to be another identity.
+    Impersonation,
+    /// Targeted harassment.
+    Harassment,
+    /// Fraudulent offers or payment requests.
+    Scam,
+    /// Another reason the user selected.
+    Other,
+}
+
+impl BlockReason {
+    /// SQLite representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Spam => "spam",
+            Self::Malware => "malware",
+            Self::Impersonation => "impersonation",
+            Self::Harassment => "harassment",
+            Self::Scam => "scam",
+            Self::Other => "other",
+        }
+    }
+
+    /// Parses a stored block reason.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "manual" => Some(Self::Manual),
+            "spam" => Some(Self::Spam),
+            "malware" => Some(Self::Malware),
+            "impersonation" => Some(Self::Impersonation),
+            "harassment" => Some(Self::Harassment),
+            "scam" => Some(Self::Scam),
+            "other" => Some(Self::Other),
+            _ => None,
+        }
+    }
+}
+
+/// Category for a locally recorded abuse report.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AbuseCategory {
+    /// Unsolicited or repetitive content.
+    Spam,
+    /// Malware, a scam payload, or a corrupt file.
+    Malware,
+    /// Pretending to be another identity.
+    Impersonation,
+    /// Targeted harassment.
+    Harassment,
+    /// Fraudulent offers or payment requests.
+    Scam,
+    /// Another reason the user selected.
+    Other,
+}
+
+impl AbuseCategory {
+    /// SQLite representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Spam => "spam",
+            Self::Malware => "malware",
+            Self::Impersonation => "impersonation",
+            Self::Harassment => "harassment",
+            Self::Scam => "scam",
+            Self::Other => "other",
+        }
+    }
+
+    /// Parses a stored abuse category.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "spam" => Some(Self::Spam),
+            "malware" => Some(Self::Malware),
+            "impersonation" => Some(Self::Impersonation),
+            "harassment" => Some(Self::Harassment),
+            "scam" => Some(Self::Scam),
+            "other" => Some(Self::Other),
+            _ => None,
+        }
+    }
+}
+
+/// A peer blocked by local policy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlockedPeer {
+    /// Network peer identifier.
+    pub peer_id: String,
+    /// Why the peer was blocked.
+    pub reason: BlockReason,
+    /// Optional bounded note that stays on this device.
+    pub note: Option<String>,
+    /// First block time.
+    pub created_at: u64,
+    /// Last reason or note update.
+    pub updated_at: u64,
+}
+
+/// A local abuse report. Reports are never uploaded automatically.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AbuseReport {
+    /// Local row identifier.
+    pub report_id: u64,
+    /// Network peer identifier.
+    pub peer_id: String,
+    /// Why the report was recorded.
+    pub category: AbuseCategory,
+    /// Optional bounded note that stays on this device.
+    pub note: Option<String>,
+    /// Report time.
+    pub created_at: u64,
+}
+
 /// A bounded peer observation record.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PeerObservation {

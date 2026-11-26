@@ -45,6 +45,7 @@ fn open(root: &TempRoot) -> Store {
             max_file_size: 8 * 1024 * 1024,
             busy_timeout: Duration::from_secs(5),
             cache_size_kib: 1024,
+            ..StoreConfig::default()
         },
     )
     .expect("open store")
@@ -78,7 +79,7 @@ fn record(
 fn local_profile_moves_from_draft_to_pending_to_published() {
     let root = TempRoot::new("local-lifecycle");
     let store = open(&root);
-    assert_eq!(store.schema_version().expect("schema"), 10);
+    assert_eq!(store.schema_version().expect("schema"), 11);
 
     let draft = record("nx1alice", 1, Some("ada"), ProfileState::Draft, b"draft-1");
     store.store_local_profile(&draft, None).expect("store draft");

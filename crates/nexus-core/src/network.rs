@@ -522,6 +522,7 @@ pub(crate) fn domain_error(error: &NetError) -> DomainError {
             "The network address must include a /p2p peer ID.",
         ),
         NetError::InvalidPeerId => (DomainCode::InvalidArgument, "The peer ID is invalid."),
+        NetError::PeerBlocked => (DomainCode::PermissionDenied, "The peer is blocked on this device."),
         NetError::MessageTooLarge => (
             DomainCode::InvalidArgument,
             "The transport-check message exceeds its size limit.",
