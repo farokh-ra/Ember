@@ -214,9 +214,9 @@ flowchart LR
 
 ## Roadmap
 
-Stage 18 is complete and awaits review and merge as a stacked pull request.
-Stage 17 and Stage 16 await review and merge as PR #24. Stage 15 is merged into
-`main`.
+Stage 18 is complete and awaits review and merge as PR #25, stacked on
+`feat/16-search`. Stage 17 and Stage 16 await review and merge as PR #24.
+Stage 15 is merged into `main`.
 
 | # | Stage | Status |
 |---|---|---|
