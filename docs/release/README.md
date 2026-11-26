@@ -11,6 +11,8 @@ Ember 0.1.0.
 | [UPDATE_AND_ROLLBACK.md](UPDATE_AND_ROLLBACK.md) | Windows and Android upgrade, downgrade, data, and channel policy. |
 | [RELEASE_NOTES_0.1.0.md](RELEASE_NOTES_0.1.0.md) | User-facing release notes, install, upgrade, and known limits. |
 | [ACCESSIBILITY_AND_LOCALIZATION.md](ACCESSIBILITY_AND_LOCALIZATION.md) | What is tested, what is missing, and the review plan. |
+| [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) | Product limits, platform evidence gaps, and public-launch blockers. |
+| [POST_LAUNCH_MAINTENANCE.md](POST_LAUNCH_MAINTENANCE.md) | Channels, cadence, security response, rollback, and post-launch review. |
 
 ## Scripts
 
@@ -42,6 +44,13 @@ A release is publishable only when all of these are true:
 Gates 5 and 6 are not satisfied by Stage 19 for Android because no device or
 emulator was available. A production release remains blocked on that evidence
 and on production signing material.
+
+Stage 20 adds the public protocol, governance, disclosure, infrastructure,
+known-limitations, and maintenance documents, but it does not close those gates.
+The current blockers are listed in
+[KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) and
+[../progress/STAGE_20.md](../progress/STAGE_20.md). No public release has been
+published.
 
 ## Crash reporting
 

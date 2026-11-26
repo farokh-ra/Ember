@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/farokh-ra/Ember/actions/workflows/ci.yml"><img src="https://github.com/farokh-ra/Ember/actions/workflows/ci.yml/badge.svg?branch=main&amp;style=flat-square" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/status-Stage%2018%20complete-2EA043?style=flat-square" alt="Stage 18 complete" />
+  <img src="https://img.shields.io/badge/status-Stage%2020%20in%20progress-D29922?style=flat-square" alt="Stage 20 in progress" />
   <img src="https://img.shields.io/badge/license-proprietary-B91C1C?style=flat-square" alt="Proprietary license" />
   <img src="https://img.shields.io/badge/Android-28%2B-3DDC84?style=flat-square&amp;logo=android&amp;logoColor=white" alt="Android 28+" />
   <img src="https://img.shields.io/badge/Windows-10%2F11-0078D4?style=flat-square&amp;logo=windows11&amp;logoColor=white" alt="Windows 10 and 11" />
@@ -33,9 +33,15 @@
 > viewable, but public visibility grants no right to copy, modify, distribute,
 > or reuse the source. See [LICENSE.md](LICENSE.md).
 >
-> **Stage 19 is complete on `feat/19-release`** and is awaiting review as PR #26
+> **Stage 20 repository deliverables are complete on `feat/20-launch`** and are
+> awaiting review as PR #27 against `feat/19-release`. **Stage 19 is PR #26**
 > against `main`. **Stage 18 is merged into `main`** as `8876350`, and **Stages
 > 16 and 17 are merged** through PR #24.
+>
+> Stage 20 does not mean Ember has launched. Production signing, Android runtime
+> evidence, independent-client interoperability, public infrastructure, and
+> project-owner launch approval are still missing. See
+> [Known Limitations](docs/release/KNOWN_LIMITATIONS.md).
 
 ## Overview
 
@@ -57,11 +63,11 @@ rewrites the original signed record.
 
 | Property | Detail |
 |---|---|
-| **Current stage** | 19 complete on `feat/19-release` · review pending as PR #26 |
+| **Current stage** | 20 repository deliverables complete; public launch blocked |
 | **Platforms** | Android 8.0+ (API 28) · Windows 10/11 x64 |
 | **UI** | Kotlin 2.4.21 · Compose Multiplatform 1.12.2 |
 | **Core** | Rust 1.99.1 · ABI 1 · FFI interface 1.11.0 · 51 callable methods |
-| **Protocol** | `0.1.0-stage-18` · schema v11 · `/nexus/file/1` · `/nexus/index/1` |
+| **Protocol** | Protocol v1 · identify `0.1.0-stage-12` · storage schema v11 · `/nexus/file/1` · `/nexus/index/1` |
 | **Network** | QUIC v1 · TCP + Noise + Yamux · Kademlia DHT · Relay v2 · DCUtR · AutoNAT |
 | **Transfer** | 1 MiB verified chunks · up to 4 sources · durable per-chunk resume |
 | **Storage** | Content-addressed managed store · quota, reserve, and reference-counted cleanup |
@@ -97,14 +103,15 @@ rewrites the original signed record.
 | **Security and abuse** | Local peer blocking, local abuse reports, blocked-peer enforcement across dial, connection, request, discovery, provider, and download sources, bounded moderation tables, and six `security.*` methods. |
 | **File safety** | Advisory type classification, visible warnings, `auto_execute: false`, and previews delegated to platform viewers or sandboxes. |
 | **Release engineering** | Per-user Windows MSI, portable ZIP, signed Android APK/AAB pipeline, SHA-256 checksums, release manifest, WiX bootstrap, and performance measurement. |
-| **Quality** | 372 Rust tests, shared Kotlin JVM tests, a C harness, Windows JNA and JNI proxy checks, six CI jobs, dependency review, and a release workflow. |
+| **Quality** | 380 Rust tests, shared Kotlin JVM tests, a C harness, Windows JNA and JNI proxy checks, six CI jobs, dependency review, and a release workflow. |
 
 ## Status
 
 | Area | State |
 |---|---|
-| Core foundations through Stage 18 | Complete on Windows loopback; Stage 18 awaiting merge |
-| Stage 19 release engineering | Complete and test-signed; Android runtime and production signing pending |
+| Core foundations through Stage 18 | Complete on Windows loopback; Stage 18 merged |
+| Stage 19 release engineering | PR #26 open; test-signed, with Android runtime and production signing pending |
+| Stage 20 launch and governance | Repository deliverables complete; public launch blocked |
 | Android and Windows applications | Shared clickable UI prototype with visibly labelled demo data |
 | Windows networking, transfer, profiles, publishing, hosting, search | Verified on Windows loopback |
 | Android runtime networking, hosting, search, and security | Libraries cross-build; on-device evidence deferred |
@@ -124,6 +131,15 @@ rewrites the original signed record.
   proxy.
 - Global-network behavior is not claimed yet. Current integration evidence is
   Windows loopback with configurable bootstrap and relay infrastructure.
+- No independent client, bootstrap operator, relay operator, or index provider
+  has been tested. The public conformance suite is self-conformance for the
+  reference implementation, not proof of interoperability.
+- No public infrastructure directory is published. The directory and health
+  measurement documents are policies, not evidence that community capacity
+  exists.
+- Stage 20 governance, disclosure, moderation, and maintenance documents are
+  proposals awaiting project-owner approval. They do not make Ember launched,
+  supported, or production-ready.
 - Distributed search coverage is inherently partial. Index providers are
   optional peers, not authorities, and search never claims complete network
   coverage.
@@ -229,9 +245,10 @@ flowchart LR
 
 ## Roadmap
 
-Stage 19 is complete and awaiting review as PR #26 against `main`. Stage 18 is
-merged into `main` as `8876350`. Stages 16 and 17 are merged through PR #24, and
-Stage 15 is merged into `main`.
+Stage 20 repository deliverables are complete on `feat/20-launch` as PR #27,
+stacked on `feat/19-release`. Stage 19 is PR #26 against `main`. Stage 18 is merged into
+`main` as `8876350`. Stages 16 and 17 are merged through PR #24, and Stage 15 is
+merged into `main`.
 
 | # | Stage | Status |
 |---|---|---|
@@ -252,9 +269,9 @@ Stage 15 is merged into `main`.
 | 15 | Voluntary replication and availability | Complete and merged |
 | 16 | Local and distributed search | Complete and merged |
 | 17 | Multi-peer downloads and advanced resilience | Complete and merged |
-| 18 | Threat model, abuse tests, dependency and protocol hardening | Complete on Windows loopback; merge pending |
-| 19 | Signed releases, installers, performance, parity, and release evidence | Complete and test-signed; Android runtime and production signing pending |
-| 20 | Global launch and network governance | Planned |
+| 18 | Threat model, abuse tests, dependency and protocol hardening | Complete on Windows loopback; merged |
+| 19 | Signed releases, installers, performance, parity, and release evidence | Complete and test-signed; PR #26 open; Android runtime and production signing pending |
+| 20 | Global launch and network governance | Repository deliverables complete; public launch blocked |
 
 **Stage 19 scope:** per-user Windows MSI and portable package, signed Android
 APK/AAB pipeline, checksums and release manifest, performance and compatibility
@@ -262,6 +279,14 @@ reports, release notes, update/rollback policy, and accessibility/localization
 review. Production signing keys and Android devices were unavailable, so the
 stage records test-signing and build-only Android evidence rather than claiming a
 public release.
+
+**Stage 20 scope:** public protocol specification, versioning and deprecation
+policy, interoperability and self-conformance suite, bootstrap and relay
+directory policy, privacy-preserving health design, governance and moderation
+principles, security disclosure process, known limitations, and post-launch
+maintenance plan. The stage does not publish a release or create public
+infrastructure. Production signing, Android runtime evidence, independent
+interoperability, and owner approval remain launch blockers.
 
 **Stage 18 scope:** local blocking and abuse reports with bounded storage,
 enforcement at dial, connection, request, discovery, provider, and download
@@ -400,7 +425,13 @@ commits, reviews, and releases.
 | [docs/progress/STAGE_17.md](docs/progress/STAGE_17.md) | Stage 17 multi-peer scheduling, resilience, schema, tests, and verification evidence. |
 | [docs/progress/STAGE_18.md](docs/progress/STAGE_18.md) | Stage 18 threat model, blocking, abuse reports, safe files, tests, and verification evidence. |
 | [docs/progress/STAGE_19.md](docs/progress/STAGE_19.md) | Stage 19 release pipeline, artifacts, performance, compatibility, and exit evidence. |
-| [docs/release](docs/release/README.md) | Performance, compatibility, signing, reproducibility, update/rollback, release notes, and accessibility review. |
+| [docs/progress/STAGE_20.md](docs/progress/STAGE_20.md) | Stage 20 protocol, conformance, governance, policy, and launch-gate evidence. |
+| [docs/protocol/PROTOCOL_SPEC.md](docs/protocol/PROTOCOL_SPEC.md) | Public protocol v1 specification, vectors, wire messages, limits, and security properties. |
+| [docs/protocol/INTEROPERABILITY.md](docs/protocol/INTEROPERABILITY.md) | Self-conformance coverage, independent-client gaps, and reporting process. |
+| [docs/governance/GOVERNANCE.md](docs/governance/GOVERNANCE.md) | Decision classes, maintainer roles, release authority, and conflicts of interest. |
+| [docs/governance/MODERATION_PRINCIPLES.md](docs/governance/MODERATION_PRINCIPLES.md) | Local-first safety, operator autonomy, abuse handling, and transparency. |
+| [docs/operations](docs/operations/INFRASTRUCTURE_DIRECTORY.md) | Bootstrap, relay, directory, and network-health operations policy. |
+| [docs/release](docs/release/README.md) | Performance, compatibility, signing, reproducibility, update/rollback, release notes, accessibility, known limitations, and maintenance. |
 | [docs/security/THREAT_MODEL.md](docs/security/THREAT_MODEL.md) | Assets, boundaries, threats, controls, residual risks, and non-goals. |
 | [docs/security/PRIVACY_REVIEW.md](docs/security/PRIVACY_REVIEW.md) | Data inventory, public and local data, telemetry, retention, and findings. |
 | [docs/security/SECURITY_RELEASE_CHECKLIST.md](docs/security/SECURITY_RELEASE_CHECKLIST.md) | Release gate for versions, analysis, keys, protocol, abuse, files, privacy, storage, and supply chain. |
@@ -427,11 +458,11 @@ phrases, or personal data. Report vulnerabilities privately as described in
 Debug logs must be redacted according to
 [docs/LOGGING_POLICY.md](docs/LOGGING_POLICY.md).
 
-Stage 18 documents the current threat model, privacy review, and release gate in
-[docs/security](docs/security/THREAT_MODEL.md). Local blocking and abuse reports
-stay on the device. Downloaded files are never executed, and previews are
-delegated to platform handlers or a sandbox. No telemetry or automatic crash
-reporting is enabled.
+Stages 18 and 20 document the current threat model, privacy review, disclosure
+process, and release gate in [docs/security](docs/security/THREAT_MODEL.md).
+Local blocking and abuse reports stay on the device. Downloaded files are never
+executed, and previews are delegated to platform handlers or a sandbox. No
+telemetry or automatic crash reporting is enabled.
 
 ## License
 

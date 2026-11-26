@@ -380,6 +380,26 @@ All notable changes to Ember are recorded here. The format follows
 - A JVM adapter check that loads the native core from the packaged Compose
   resources directory.
 - Stage 19 evidence record.
+- Public protocol v1 specification covering identity, canonical CBOR, signed
+  records, DHT keys, file and index wire messages, limits, errors, and security
+  properties.
+- Protocol versioning and deprecation policy with change classes, support
+  windows, migration rules, and a review checklist.
+- Interoperability and conformance documentation plus an eight-test public
+  conformance suite for the v1 identity, record, manifest, and rejection
+  vectors. Rust tests are now 380.
+- Community infrastructure directory policy for independent bootstrap, relay,
+  and index operators, explicitly marked as unpublished.
+- Privacy-preserving network-health design with local-only diagnostics and a
+  not-yet-implemented opt-in aggregate tier.
+- Governance, moderation, and security disclosure policy drafts, including
+  decision classes, local-first abuse handling, severity targets, embargo, and
+  advisory format.
+- ADR-0011 records the public-protocol, self-conformance, and launch-gate
+  decision as proposed.
+- Public known-limitations and post-launch maintenance documents with an
+  explicit launch gate.
+- Stage 20 evidence record.
 
 ### Changed
 

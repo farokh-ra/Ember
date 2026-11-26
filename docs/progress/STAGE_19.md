@@ -188,5 +188,7 @@ not collected.
 ## 10. Next stage
 
 Stage 20 covers public protocol publication, bootstrap and relay operator
-instructions, independent infrastructure, and ongoing network governance. It
-requires explicit project-owner approval.
+instructions, independent infrastructure, and ongoing network governance. Its
+repository deliverables are on `feat/20-launch`; see
+[STAGE_20.md](STAGE_20.md). Public launch still requires explicit project-owner
+approval and the missing production evidence.
