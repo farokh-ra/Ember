@@ -2,6 +2,7 @@
 
 **Status:** Repository deliverables complete; public launch blocked
 **Branch:** `feat/20-launch`, stacked on Stage 19 `feat/19-release`
+**Pull request:** #27 (`feat/20-launch` -> `feat/19-release`)
 **Last updated:** 2026-11-26
 
 Stage 20 is the final roadmap stage. It covers public protocol documentation,

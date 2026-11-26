@@ -33,10 +33,10 @@
 > viewable, but public visibility grants no right to copy, modify, distribute,
 > or reuse the source. See [LICENSE.md](LICENSE.md).
 >
-> **Stage 20 repository deliverables are complete on `feat/20-launch`**, stacked
-> on the Stage 19 branch and awaiting review as a pull request. **Stage 19 is
-> PR #26** against `main`. **Stage 18 is merged into `main`** as `8876350`, and
-> **Stages 16 and 17 are merged** through PR #24.
+> **Stage 20 repository deliverables are complete on `feat/20-launch`** and are
+> awaiting review as PR #27 against `feat/19-release`. **Stage 19 is PR #26**
+> against `main`. **Stage 18 is merged into `main`** as `8876350`, and **Stages
+> 16 and 17 are merged** through PR #24.
 >
 > Stage 20 does not mean Ember has launched. Production signing, Android runtime
 > evidence, independent-client interoperability, public infrastructure, and
@@ -245,8 +245,8 @@ flowchart LR
 
 ## Roadmap
 
-Stage 20 repository deliverables are complete on `feat/20-launch`, stacked on
-`feat/19-release`. Stage 19 is PR #26 against `main`. Stage 18 is merged into
+Stage 20 repository deliverables are complete on `feat/20-launch` as PR #27,
+stacked on `feat/19-release`. Stage 19 is PR #26 against `main`. Stage 18 is merged into
 `main` as `8876350`. Stages 16 and 17 are merged through PR #24, and Stage 15 is
 merged into `main`.
 

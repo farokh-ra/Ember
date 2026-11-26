@@ -4,8 +4,8 @@
 **Stage status:** Repository deliverables complete; public launch blocked
 **Last updated:** 2026-11-26
 **Branch:** `feat/20-launch`, stacked on Stage 19 `feat/19-release`
-**Pull requests:** #26 (`feat/19-release` -> `main`) is open; the Stage 20 pull
-request targets `feat/19-release`
+**Pull requests:** #27 (`feat/20-launch` -> `feat/19-release`) is open; #26
+(`feat/19-release` -> `main`) is also open
 **Next stage:** none in the roadmap; launch readiness and maintenance remain
 
 ## What Stage 20 adds
@@ -153,8 +153,8 @@ trusted. See [STAGE_19.md](progress/STAGE_19.md) for the full record.
 ## Exact next action
 
 1. Keep PR #26 open; do not merge without project-owner approval.
-2. Open the Stage 20 pull request against `feat/19-release`; do not merge it
-   without approval.
+2. Keep PR #27 open against `feat/19-release`; do not merge it without
+   approval.
 3. Obtain production signing material and collect Android and Windows 11
    evidence before any public release.
 4. Complete dependency locking, verification metadata, SBOM, and third-party
