@@ -1,234 +1,179 @@
 # Ember Project Handoff
 
-**Current stage:** 18 - security, abuse resistance, and privacy hardening
-**Stage status:** Complete on Windows loopback; review and merge pending
+**Current stage:** 19 - performance, compatibility, and release engineering
+**Stage status:** Release pipeline complete and test-signed; Android runtime and
+production signing evidence unavailable
 **Last updated:** 2026-11-26
-**Branch:** `feat/18-security`, based on `feat/16-search` at `8abaa50`;
-pull request #25 targets `main` because Stages 16 and 17 are merged
-**Next stage:** 19 - performance, compatibility, and release engineering
-(requires explicit project-owner approval)
+**Branch:** `feat/19-release`, based on `feat/18-security` at `4932c69`
+**Pull requests:** #25 (`feat/18-security` -> `main`) remains open; Stage 19 is a
+stacked PR into `feat/18-security`
+**Next stage:** 20 - global launch and ongoing network governance (requires
+explicit project-owner approval)
 
 ## What was implemented
 
-Stage 18 hardens the existing product without adding a new user-facing feature:
+Stage 19 turns the build into a release pipeline:
 
-- A 34-entry threat model covering identity and key theft, fake records, Sybil
-  behaviour, DHT poisoning, malicious peers, spam, resource exhaustion, unsafe
-  files, privacy, local device access, and supply chain.
-- A privacy review with a data inventory, public-versus-local data, telemetry
-  status, logging rules, retention, platform permissions, and findings.
-- A security release checklist with an explicit high-severity release block.
-- Schema version 11 with `blocked_peers` and `abuse_reports`. Both tables have
-  no foreign key to observed peers, so moderation survives observation pruning.
-- Store caps from `StoreConfig`: 4096 blocks and 4096 reports by default,
-  configurable from 1 to 65,536 and enforced inside the writer transaction.
-- Bounded notes (512 bytes, truncated on a UTF-8 boundary), validated peer IDs,
-  reason and category constraints, and truncated peer observations.
-- `nexus-net` block-list state and enforcement on outbound dial, inbound
-  connection, inbound test/file/index requests, discovery results, and
-  providers. A blocked peer fails with `peer_blocked`.
-- Core methods `0x0C01`-`0x0C06`: block list, block add, block remove, report
-  add, report list, and notices. `system.info` advertises all six.
-- Blocked-source filtering in `download.start` and `download.resume`, with
-  `permission_denied` when every source is blocked.
-- Advisory safe-file classification, visible warnings, `auto_execute: false`,
-  and `preview: "delegated"` on download events and listings.
-- Standing notices for no automatic execution, delegated previews, key-loss
-  risk, public visibility, and local-only blocking.
-- Truncation and single-byte mutation tests for file protocol messages, plus
-  malformed and oversized request tests in the core.
-- 19 new Rust tests, for 372 total. Existing Stage 17 behavior remains passing.
+- Per-user Windows MSI produced by jpackage with WiX 3.14.1. It installs under
+  `%LOCALAPPDATA%\Ember` without elevation, uses the stable upgrade UUID
+  `c7c225ee-ae2c-4c58-822d-ea7bda7ac48c`, and supports in-place upgrades.
+- Portable Windows ZIP containing the same app image.
+- Android release APK and AAB with an environment-driven signing config. The
+  native core is packaged for arm64-v8a and x86_64 and debug sections are
+  stripped.
+- `INTERNET`, `ACCESS_NETWORK_STATE`, and `CHANGE_WIFI_MULTICAST_STATE` Android
+  permissions.
+- `emberVersion` and `emberVersionCode` Gradle properties for release overrides,
+  with `0.1.0` defaults and MSI segment validation.
+- Native Windows core staged through `appResourcesRootDir` and loaded by JNA from
+  `compose.application.resources.dir`.
+- `scripts/fetch-wix.ps1`: pinned WiX download with SHA-256 verification.
+- `scripts/package-release.ps1`: builds, signs, checksums, manifests, and
+  verifies APK, AAB, MSI, and portable ZIP.
+- `scripts/verify-release.ps1`: independent digest, signature, and payload
+  verification.
+- `scripts/measure-performance.ps1`: startup, working set, idle CPU, soak growth,
+  and package sizes.
+- `.github/workflows/release.yml`: tag or manual signed release with secrets.
+- Release documentation set under `docs/release/`: performance report,
+  compatibility matrix, signing and reproducibility, update/rollback, release
+  notes, and accessibility/localization review.
+- One new JVM adapter test for loading the core from packaged resources. Rust
+  tests remain 372.
 
 ## Files changed
 
-Store crate:
+Build:
 
-- `crates/nexus-store/migrations/0011_security_hardening.sql` (new)
-- `crates/nexus-store/src/migrations.rs`
-- `crates/nexus-store/src/model.rs`
-- `crates/nexus-store/src/store.rs`
-- `crates/nexus-store/src/lib.rs`
-- `crates/nexus-store/tests/stage18.rs` (new)
-- `crates/nexus-store/tests/storage.rs`, `profiles.rs`, `local_import.rs`
-  (schema assertion only)
+- `build.gradle.kts`
+- `apps/androidApp/build.gradle.kts`
+- `apps/androidApp/src/main/AndroidManifest.xml`
+- `apps/desktopApp/build.gradle.kts`
+- `shared/core-client/src/jvmMain/kotlin/io/nexus/core/client/JnaNativeBridge.kt`
+- `shared/core-client/src/jvmTest/kotlin/io/nexus/core/client/NativeContractTest.kt`
 
-Network crate:
+Scripts:
 
-- `crates/nexus-net/src/shared.rs`
-- `crates/nexus-net/src/driver.rs`
-- `crates/nexus-net/src/error.rs`
-- `crates/nexus-net/src/lib.rs`
+- `scripts/dev-env.ps1`
+- `scripts/build-native.ps1`
+- `scripts/fetch-wix.ps1` (new)
+- `scripts/package-release.ps1` (new)
+- `scripts/verify-release.ps1` (new)
+- `scripts/measure-performance.ps1` (new)
 
-Core crate:
+CI and docs:
 
-- `crates/nexus-core/src/security.rs` (new)
-- `crates/nexus-core/src/safety.rs` (new)
-- `crates/nexus-core/src/engine.rs`
-- `crates/nexus-core/src/downloads.rs`
-- `crates/nexus-core/src/network.rs`
-- `crates/nexus-core/src/lib.rs` (modules and protocol version)
-- `crates/nexus-core/tests/stage18.rs` (new)
-
-Protocol crate:
-
-- `crates/nexus-protocol/src/file.rs` (malformed-input tests only)
-
-Documentation:
-
-- `docs/security/THREAT_MODEL.md` (new)
-- `docs/security/PRIVACY_REVIEW.md` (new)
-- `docs/security/SECURITY_RELEASE_CHECKLIST.md` (new)
-- `docs/progress/STAGE_18.md` (new)
-- `docs/architecture/FFI_INTERFACE.md` (version 1.11.0)
-- `docs/architecture/FILE_TRANSFER.md`
-- `docs/ARCHITECTURE.md`
-- `SECURITY.md`
+- `.github/workflows/release.yml` (new)
+- `docs/release/README.md` (new)
+- `docs/release/PERFORMANCE_REPORT.md` (new)
+- `docs/release/COMPATIBILITY_MATRIX.md` (new)
+- `docs/release/SIGNING_AND_REPRODUCIBILITY.md` (new)
+- `docs/release/UPDATE_AND_ROLLBACK.md` (new)
+- `docs/release/RELEASE_NOTES_0.1.0.md` (new)
+- `docs/release/ACCESSIBILITY_AND_LOCALIZATION.md` (new)
+- `docs/progress/STAGE_19.md` (new)
+- `docs/decisions/ADR-0009-build-packaging-dependency-policy.md`
+- `docs/DEVELOPMENT_WORKFLOW.md`
+- `README.md`
+- `CHANGELOG.md`
 - `docs/HANDOFF.md`
-- `README.md`, `CHANGELOG.md`
-
-No Kotlin, FFI adapter, or new network protocol changed in Stage 18.
 
 ## Commands and results
 
-### Rust tests
+Local gates (Windows, GNU fallback for native tests):
 
-```text
-cargo test --workspace
-```
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace` | 372 Rust tests passed |
+| `cargo deny check` | Passed |
+| `cargo audit` | No vulnerability reported |
+| `.\gradlew.bat spotlessCheck detekt` | Passed |
+| Shared JVM tests | Passed, including the new packaged-resource load test |
+| `.\scripts\check_repo_hygiene.py` | Passed |
 
-Result: PASS, 372 tests, 0 failures.
+Release packaging:
 
-Stage 18-specific suites:
+| Command | Result |
+|---|---|
+| `.\scripts\package-release.ps1 -Version 0.1.0 -AllowDirty` with test signing | Passed; APK, AAB, MSI, ZIP, checksums, manifest |
+| `.\scripts\verify-release.ps1 -Directory .\dist\0.1.0 -RequireSigned` | Passed |
+| `:apps:androidApp:assembleRelease` / `bundleRelease` | Passed |
+| `:apps:desktopApp:createDistributable` / `packageMsi` | Passed |
+| MSI install | Exit 0, installed 0.1.0 |
+| Installed launch | 2,609 ms to main window |
+| MSI upgrade 0.1.0 -> 0.1.1 | Exit 0, product version 0.1.1 |
+| MSI uninstall | Exit 0, install directory and uninstall entry removed |
+| Portable ZIP launch | 2,646 ms to main window |
+| APK signature | `apksigner` v2 verified, 1 signer |
+| AAB signature | `jarsigner` `jar verified` with self-signed warnings |
 
-```text
-cargo test -p nexus-store --test stage18
-cargo test -p nexus-core --test stage18
-```
+Performance (3 runs, 180-second soak, Windows 10 19045, i5-10300H, 16 GB):
 
-Result: PASS, 5 and 7 tests respectively.
-
-### Test breakdown
-
-| Suite | Tests | Failures |
-|---|---:|---:|
-| `nexus-core` unit tests | 69 | 0 |
-| `nexus-core` Stage 09 tests | 4 | 0 |
-| `nexus-core` Stage 10 tests | 2 | 0 |
-| `nexus-core` Stage 11 tests | 4 | 0 |
-| `nexus-core` Stage 12 tests | 1 | 0 |
-| `nexus-core` Stage 13 tests | 1 | 0 |
-| `nexus-core` Stage 14 tests | 1 | 0 |
-| `nexus-core` Stage 15 tests | 3 | 0 |
-| `nexus-core` Stage 16 tests | 4 | 0 |
-| `nexus-core` Stage 17 tests | 2 | 0 |
-| `nexus-core` Stage 18 tests | 7 | 0 |
-| `nexus-crypto` unit tests | 24 | 0 |
-| `nexus-ffi` unit tests | 4 | 0 |
-| `nexus-ffi` C ABI tests | 6 | 0 |
-| `nexus-identity` unit tests | 9 | 0 |
-| `nexus-identity` integration tests | 12 | 0 |
-| `nexus-net` unit tests | 23 | 0 |
-| `nexus-net` Stage 09 tests | 8 | 0 |
-| `nexus-net` Stage 10 tests | 4 | 0 |
-| `nexus-net` Stage 11 tests | 5 | 0 |
-| `nexus-net` Stage 12 tests | 2 | 0 |
-| `nexus-observability` unit tests | 3 | 0 |
-| `nexus-protocol` unit tests | 39 | 0 |
-| `nexus-protocol` signed-record tests | 9 | 0 |
-| `nexus-protocol` Stage 07 tests | 8 | 0 |
-| `nexus-search` unit tests | 27 | 0 |
-| `nexus-store` unit tests | 24 | 0 |
-| `nexus-store` local-import tests | 4 | 0 |
-| `nexus-store` profile tests | 5 | 0 |
-| `nexus-store` search tests | 4 | 0 |
-| `nexus-store` Stage 07 tests | 4 | 0 |
-| `nexus-store` Stage 14 tests | 5 | 0 |
-| `nexus-store` Stage 15 tests | 2 | 0 |
-| `nexus-store` Stage 18 tests | 5 | 0 |
-| `nexus-store` storage tests | 14 | 0 |
-| `nexus-transfer` unit tests | 16 | 0 |
-| `nexus-transfer` integration tests | 7 | 0 |
-| `nexus-types` unit tests | 1 | 0 |
-| **Rust total** | **372** | **0** |
-
-Stage 17 had 353 tests. Stage 18 adds 7 core integration tests, 5 store
-integration tests, 2 core unit tests for safety, 2 core unit tests for security
-value shaping, 1 network unit test, 1 protocol unit test, and 1 migration test.
-
-### Kotlin and native builds
-
-No Kotlin, FFI adapter, or native symbol changed in Stage 18, so the Stage 16
-Kotlin and native build gates were not re-run. The Stage 16 results still
-describe the current Kotlin and native code. The core library and all Rust
-targets build and test with the pinned toolchain.
-
-### Formatting, linting, and dependency policy
-
-```text
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-python scripts/check_repo_hygiene.py
-python scripts/validate_stage01_docs.py
-python scripts/validate_stage02_docs.py
-cargo deny check
-cargo audit
-```
-
-- Formatting, Clippy with warnings denied, repository hygiene, and both
-  documentation validators: PASS.
-- `cargo deny check`: PASS (advisories, bans, licenses, and sources).
-- `cargo audit`: PASS with the documented allowed `paste` unmaintained warning.
-- No dependency added; `Cargo.lock` remains at 411 packages.
-- The FFI interface document is at version 1.11.0 with fifty-one callable
-  methods.
-- The ABI remains 1; the core protocol version is `0.1.0-stage-18`. The
-  identify protocol remains `/nexus/0.1.0-stage-12`; Stage 18 adds no new
-  network protocol or frame type.
+| Metric | Result |
+|---|---|
+| Median startup | 2,771 ms |
+| Median working set | 207.2 MiB |
+| Idle CPU | 0.008% of the machine |
+| 180-second idle growth | 0.9 MiB |
+| App image | 154.3 MiB |
+| MSI | 71.0 MiB |
+| APK / AAB | 61.3 MiB / 22.2 MiB |
 
 ## Errors and failed attempts
 
-1. The first core Stage 18 test used a 64 MiB quota, below the core's 1 GiB
-   minimum, so engine creation failed. The test config now uses 1 GiB.
-2. Category and note validation initially surfaced as a raw `CoreError` instead
-   of a domain response. The test now asserts the real contract: parameter
-   errors return `InvalidArgument`, and store ID errors return `Store`.
-3. The first workspace build could not find the MinGW linker because the PATH
-   pointed at the toolchain root instead of `mingw64\bin`. The corrected path
-   builds and links every test.
-4. Clippy rejected a useless `vec!` in the new protocol test and a needless
-   borrow in the new store test. Both were fixed without relaxing the gate.
-5. `cargo fmt --check` initially failed on the new download safety fields, the
-   network error mapping, and the safety extension table. They were formatted.
-6. A previous attempt to read and rewrite UTF-8 test files with PowerShell text
-   cmdlets mangled non-ASCII data and added a BOM. This stage uses the file edit
-   tools for UTF-8 content.
+- Unquoted `-PemberVersion=1.2.3` reached Gradle as `1`. The packaging script
+  now passes the argument as a quoted string.
+- The MSI needs an explicit package version and Windows segment limits. Both are
+  enforced in the script.
+- Windows PowerShell 5.1 mishandled `@lockArgs` for native commands; cargo
+  received a bare `-`. The script now builds an explicit argument array.
+- jpackage marks `Ember.exe` read-only; signing now clears and restores the
+  attribute.
+- `apksigner.bat` returns -1 to PowerShell on success. Verification calls it
+  through `cmd.exe` and checks the `Verifies` line.
+- `Compress-Archive` writes backslash ZIP entries. Verification accepts both
+  separators.
+- Reinstalling the same MSI from a different path failed with 1603 while a stale
+  0.1.0 product was registered. Uninstalling first produced clean evidence.
+- `--strip-unneeded` removed symbols read by verification; `--strip-debug` keeps
+  exported symbols and removes debug sections.
+- An early app image contained duplicate native DLLs from manual staging. Gradle
+  now owns the staged copy.
 
 ## Decisions and unresolved questions
 
-- Blocking and reporting are local by design. There is no central moderation
-  authority, no automatic upload, and no gossip of moderation data.
-- Security tables do not reference observed peers, so a block survives
-  observation pruning.
-- New tables are not required by the archive validator, preserving restore of
-  pre-Stage-18 archives; migration 11 creates them empty.
-- The FFI namespace is `0x0C`, leaving `0x0A` reserved for settings and
-  diagnostics.
-- File safety classification is advisory and has no execution path.
-- Enforcement lives in the network layer and in download source selection, not
-  only in the UI.
-- A blocked peer is refused at request time and on new connections; libp2p's
-  native allow/block list is not used.
-- A metadata export is a full local database snapshot and includes security
-  rows. It is documented as private; diagnostics export must exclude them.
-- Per-report deletion, Kotlin UI binding for safety and notices, Android runtime
-  evidence, independent security review, and fuzzing remain open.
-- Sybil resistance remains partial and is documented as accepted residual risk.
+Decisions:
+
+- The Windows package is a per-user MSI. ADR-0009 is amended from Inno Setup.
+- Release signing is entirely environment-driven; builds fail closed without it.
+- The portable ZIP is described as an unsigned container with a signed
+  executable, not as a signed artifact.
+- Test signing used an ephemeral Android key and a self-signed Windows
+  certificate, both deleted after the run.
+- No telemetry or crash reporting was added. A future reporter needs explicit
+  opt-in, local preview, and redaction.
+- No chunk, hash, or index tuning was made without a realistic workload.
+- Production versions remain `0.1.0`; release overrides use Gradle properties.
+
+Unresolved:
+
+- Android runtime, low-memory device, battery, Doze, and network evidence.
+- Poor Wi-Fi, mobile, IPv6, and network-change testing.
+- Production Android keystore and Windows code-signing certificate.
+- Windows 11 runtime testing.
+- Uninstall keep/remove prompt for future user data.
+- Gradle dependency locking, verification metadata, and CycloneDX SBOM.
+- Localization and screen-reader testing.
+- Closed alpha and beta with real users.
 
 ## Exact next action
 
-1. Review PR #25 from `feat/18-security` into `main`.
-2. Stages 16 and 17 are merged into `main` through PR #24.
-3. Merge only after review, then delete merged branches.
-4. Do not start Stage 19 without explicit project-owner approval.
-5. Stage 19 covers performance, compatibility, fuzzing, installers, signed
-   releases, and final release evidence.
+1. Run the full local gates and the clean-checkout verification.
+2. Commit `feat/19-release`, push it, and open a stacked pull request into
+   `feat/18-security`.
+3. Keep PR #25 open for review; do not merge it or the Stage 19 PR without
+   project-owner approval.
+4. Do not start Stage 20. It requires explicit approval and a decision on how to
+   collect the missing Android and network evidence.

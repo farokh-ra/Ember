@@ -22,7 +22,7 @@ buildscript {
 
 allprojects {
     group = "io.nexus"
-    version = "0.1.0"
+    version = providers.gradleProperty("emberVersion").getOrElse("0.1.0")
 }
 
 subprojects {

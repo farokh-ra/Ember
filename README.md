@@ -81,7 +81,7 @@ rewrites the original signed record.
 
 ## Capabilities
 
-| Area | Delivered through Stage 18 |
+| Area | Delivered through Stage 19 |
 |---|---|
 | **Identity** | Local Ed25519 identities, stable Bech32m `nx1...` IDs, encrypted key storage, and passphrase-encrypted backups. |
 | **Signed records** | Canonical CBOR, exact-byte envelopes, profile and publication v1, revisions, and signed tombstones. |
@@ -96,20 +96,22 @@ rewrites the original signed record.
 | **Native boundary** | C ABI 1, JNI and JNA adapters, versioned CBOR envelopes, event queue, cancellation, and streaming import/export. |
 | **Security and abuse** | Local peer blocking, local abuse reports, blocked-peer enforcement across dial, connection, request, discovery, provider, and download sources, bounded moderation tables, and six `security.*` methods. |
 | **File safety** | Advisory type classification, visible warnings, `auto_execute: false`, and previews delegated to platform viewers or sandboxes. |
-| **Quality** | 372 Rust tests, shared Kotlin JVM tests, a C harness, Windows JNA and JNI proxy checks, and seven CI jobs. |
+| **Release engineering** | Per-user Windows MSI, portable ZIP, signed Android APK/AAB pipeline, SHA-256 checksums, release manifest, WiX bootstrap, and performance measurement. |
+| **Quality** | 372 Rust tests, shared Kotlin JVM tests, a C harness, Windows JNA and JNI proxy checks, six CI jobs, dependency review, and a release workflow. |
 
 ## Status
 
 | Area | State |
 |---|---|
 | Core foundations through Stage 18 | Complete on Windows loopback; Stage 18 awaiting merge |
+| Stage 19 release engineering | Complete and test-signed; Android runtime and production signing pending |
 | Android and Windows applications | Shared clickable UI prototype with visibly labelled demo data |
 | Windows networking, transfer, profiles, publishing, hosting, search | Verified on Windows loopback |
 | Android runtime networking, hosting, search, and security | Libraries cross-build; on-device evidence deferred |
 | Local and distributed search | Complete; provider role is opt-in |
 | Multi-peer transfer | Complete on `feat/17-multi-peer`; up to four sources per download |
 | Local blocking, abuse reports, and safe-file notices | Complete at the core and network layers on `feat/18-security`; UI binding pending |
-| Windows installer and signed releases | Stage 19; the current Windows build is an app image |
+| Windows installer and signed release pipeline | Per-user MSI, portable ZIP, APK/AAB, checksums, and manifest; test-signed only |
 
 ### Honest limits
 
@@ -137,8 +139,21 @@ rewrites the original signed record.
   detection. Previews are delegated; Ember never executes a downloaded file.
 - No independent security review has been commissioned. The threat model and
   privacy review record this as a pre-release gap.
-- The Windows build is an application image, not an installer. Inno Setup
-  packaging is Stage 19.
+- The Windows installer is a per-user MSI, not an Inno Setup EXE. It installs
+  under `%LOCALAPPDATA%\Ember` without elevation and supports upgrades through a
+  stable UUID. It does not yet offer an uninstall keep/remove choice for user
+  data; the packaged UI stores no core data, so this must be added before core
+  data is wired in.
+- Release artifacts were test-signed with an ephemeral Android key and a
+  self-signed Windows certificate. Production signing material was not available,
+  so the artifacts are verifiable but not publicly trusted.
+- Android runtime, low-memory device, battery, poor-network, mobile, and IPv6
+  evidence is still missing.
+- Gradle dependency locking, verification metadata, and a CycloneDX SBOM are not
+  yet part of the release build. Reproducibility is therefore claimed for inputs
+  and checksums, not bit-identical output.
+- Third-party license notices for the bundled JDK and Compose runtime are not
+  packaged yet; publishing them is a pre-release legal gate.
 
 ## Architecture
 
@@ -214,9 +229,9 @@ flowchart LR
 
 ## Roadmap
 
-Stage 18 is complete and awaits review and merge as PR #25 against `main`.
-Stages 16 and 17 are merged into `main` through PR #24. Stage 15 is merged into
-`main`.
+Stage 19 is complete and ready for review as a stacked PR on `feat/18-security`.
+Stage 18 awaits review and merge as PR #25 against `main`. Stages 16 and 17 are
+merged into `main` through PR #24. Stage 15 is merged into `main`.
 
 | # | Stage | Status |
 |---|---|---|
@@ -238,7 +253,15 @@ Stages 16 and 17 are merged into `main` through PR #24. Stage 15 is merged into
 | 16 | Local and distributed search | Complete and merged |
 | 17 | Multi-peer downloads and advanced resilience | Complete and merged |
 | 18 | Threat model, abuse tests, dependency and protocol hardening | Complete on Windows loopback; merge pending |
-| 19 | Signed releases, installers, performance, parity, and release evidence | Planned |
+| 19 | Signed releases, installers, performance, parity, and release evidence | Complete and test-signed; Android runtime and production signing pending |
+| 20 | Global launch and network governance | Planned |
+
+**Stage 19 scope:** per-user Windows MSI and portable package, signed Android
+APK/AAB pipeline, checksums and release manifest, performance and compatibility
+reports, release notes, update/rollback policy, and accessibility/localization
+review. Production signing keys and Android devices were unavailable, so the
+stage records test-signing and build-only Android evidence rather than claiming a
+public release.
 
 **Stage 18 scope:** local blocking and abuse reports with bounded storage,
 enforcement at dial, connection, request, discovery, provider, and download
@@ -295,19 +318,33 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny check
 cargo audit
+
+# Release packaging, verification, and performance
+.\scripts\fetch-wix.ps1
+.\scripts\package-release.ps1 -Version 0.1.0 -AllowDirty -AllowUnsigned
+.\scripts\verify-release.ps1 -Directory .\dist\0.1.0
+.\scripts\measure-performance.ps1 -Runs 3 -SoakSeconds 180
 ```
+
+Signing is required for a real release. See
+[docs/release/SIGNING_AND_REPRODUCIBILITY.md](docs/release/SIGNING_AND_REPRODUCIBILITY.md).
 
 ### Build artifacts
 
 | Artifact | Path |
 |---|---|
 | Android debug APK | `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk` |
+| Android release APK/AAB | `apps/androidApp/build/outputs/apk/release/` and `.../bundle/release/` |
 | Windows application image | `apps/desktopApp/build/compose/binaries/main/app/Ember` |
+| Windows per-user MSI | `apps/desktopApp/build/compose/binaries/main/msi/Ember-<version>.msi` |
+| Release directory | `dist/<version>/` with APK, AAB, MSI, portable ZIP, `SHA256SUMS`, and `release-manifest.json` |
 | Windows native core | `build/native/windows-x64/nexus_core.dll` |
 | Android native cores | `build/native/android-arm64-v8a/libnexus_core.so` and `build/native/android-x86_64/libnexus_core.so` |
 
-The Windows image is not yet an installer. The Inno Setup per-user installer is
-scheduled for Stage 19, as defined by ADR-0009.
+The Windows MSI installs per user under `%LOCALAPPDATA%\Ember`; the portable ZIP
+runs from any extracted directory. The native core is packaged under
+`app/resources`, which the JNA loader checks through
+`compose.application.resources.dir`.
 
 ### Pinned toolchain
 
@@ -325,7 +362,7 @@ scheduled for Stage 19, as defined by ADR-0009.
 | Android NDK | 29.0.14206865 |
 | Rust | 1.99.1, edition 2024 |
 | Windows Rust host | `x86_64-pc-windows-msvc` in CI and release; `x86_64-pc-windows-gnu` fallback locally |
-| Inno Setup | 6.4.3 (Stage 19 packaging) |
+| WiX | 3.14.1.8722 (MSI packaging, downloaded with a pinned SHA-256) |
 
 Version pins live in `gradle/libs.versions.toml`, `rust-toolchain.toml`, and
 `Cargo.toml`. Do not change a pin without updating
@@ -341,7 +378,7 @@ Every change must pass the same gates locally and in CI:
 | Kotlin | Spotless, detekt, shared JVM tests, and adapter contract tests. |
 | Rust | Formatting, Clippy with warnings denied, and the full workspace test suite. |
 | Dependency policy | `cargo deny check` and `cargo audit`. |
-| Packaging | Android debug assembly and Windows application image. |
+| Packaging | Android debug assembly, Windows application image, and the signed release pipeline. |
 | Pull request | Conventional Commit title and dependency review. |
 
 The CI workflow lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
@@ -362,6 +399,8 @@ commits, reviews, and releases.
 | [docs/progress/STAGE_16.md](docs/progress/STAGE_16.md) | Stage 16 scope, architecture, tests, and verification evidence. |
 | [docs/progress/STAGE_17.md](docs/progress/STAGE_17.md) | Stage 17 multi-peer scheduling, resilience, schema, tests, and verification evidence. |
 | [docs/progress/STAGE_18.md](docs/progress/STAGE_18.md) | Stage 18 threat model, blocking, abuse reports, safe files, tests, and verification evidence. |
+| [docs/progress/STAGE_19.md](docs/progress/STAGE_19.md) | Stage 19 release pipeline, artifacts, performance, compatibility, and exit evidence. |
+| [docs/release](docs/release/README.md) | Performance, compatibility, signing, reproducibility, update/rollback, release notes, and accessibility review. |
 | [docs/security/THREAT_MODEL.md](docs/security/THREAT_MODEL.md) | Assets, boundaries, threats, controls, residual risks, and non-goals. |
 | [docs/security/PRIVACY_REVIEW.md](docs/security/PRIVACY_REVIEW.md) | Data inventory, public and local data, telemetry, retention, and findings. |
 | [docs/security/SECURITY_RELEASE_CHECKLIST.md](docs/security/SECURITY_RELEASE_CHECKLIST.md) | Release gate for versions, analysis, keys, protocol, abuse, files, privacy, storage, and supply chain. |

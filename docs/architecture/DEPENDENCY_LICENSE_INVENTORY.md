@@ -29,7 +29,7 @@ Allowed for distributed code: Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, 
 
 Not allowed for linked or distributed code: GPL, AGPL, SSPL, and any license requiring Ember source disclosure or network-service obligations. LGPL is not allowed for linked code unless a future ADR approves dynamic linking and relinking rights. JNA is used under its Apache-2.0 option, not LGPL.
 
-Build-only tools may use other licenses because they are not distributed with the application: Git, Inno Setup, MSVC/Windows SDK, Android SDK, and Python. The JDK runtime bundled by `jpackage` is distributed under GPLv2 with the Classpath Exception and requires notices and source availability.
+Build-only tools may use other licenses because they are not distributed with the application: Git, WiX, MSVC/Windows SDK, Android SDK, and Python. The JDK runtime bundled by `jpackage` is distributed under GPLv2 with the Classpath Exception and requires notices and source availability.
 
 ## 3. Toolchain pins
 
@@ -49,7 +49,7 @@ Build-only tools may use other licenses because they are not distributed with th
 | MSVC | 19.4x (VS 2022 17.14+ or VS 2026 18.x) | Proprietary | Windows Rust and packaging | CI and release only; not present on the Stage 03 local machine. |
 | Windows SDK | 10.0.26100 | Proprietary | Windows native build and signing | CI and release only. |
 | MinGW-w64 GCC | 16.2.0 | GPL-3.0-with-GCC-exception, runtime libs permissive | Local Windows Rust linker fallback | Build-only; not distributed. Used only when MSVC C++ tools are absent. |
-| Inno Setup | 6.4.3 | Inno Setup License (freeware) | Per-user Windows installer | Build-time only; not linked or distributed. |
+| WiX | 3.14.1.8722 | MS-RL | Per-user Windows MSI build | Build-time only; downloaded with a pinned SHA-256, not linked or distributed. |
 | Git | 2.56.0 | GPL-2.0-only | Version control | Build-only; not distributed. |
 | Python | 3.11 | PSF-2.0 | Documentation validators and hygiene scripts | Build-only; not distributed. |
 | Spotless | 8.11.0 | Apache-2.0 | Kotlin formatting | Build-only. |
@@ -59,7 +59,7 @@ Build-only tools may use other licenses because they are not distributed with th
 | cargo-deny | 0.20.2 | MIT OR Apache-2.0 | License, advisory, and source gates | CI and release. |
 | cargo-audit | 0.23.0 | Apache-2.0 OR MIT | Advisory scan | CI and release. |
 | cargo-nextest | 0.9.151 | Apache-2.0 OR MIT | Rust test runner | CI. |
-| CycloneDX tooling | Version pinned before release | Apache-2.0 | SBOM generation | CI and release. |
+| CycloneDX tooling | Version pinned before release | Apache-2.0 | SBOM generation | Required before the first public release; not yet active. |
 
 ## 4. Rust direct dependencies
 
@@ -168,7 +168,7 @@ JNA is used under the Apache-2.0 option. The LGPL option is not selected. Test-o
 | SQLite | Public domain | Yes, compiled into the core | Attribution in notices; no copyleft obligation. |
 | AndroidX and Jetpack libraries | Apache-2.0 | Yes, in the Android app | Include license and notices. |
 | Kotlin and Compose compilers | Apache-2.0 | No, build-time | No runtime obligation. |
-| Inno Setup | Inno Setup License | No, build-time only | Do not redistribute the installer compiler. |
+| WiX | MS-RL | No, build-time only | Do not redistribute the WiX toolset. |
 | MSVC and Windows SDK | Proprietary | No, build-time only | Build machine license only. |
 | Android SDK and NDK | Android SDK License | No, build-time only | Do not redistribute SDK tools. |
 | Git | GPL-2.0-only | No, build-time only | No distribution obligation. |
@@ -202,7 +202,7 @@ JNA is used under the Apache-2.0 option. The LGPL option is not selected. Test-o
 - GPLv2+CE JDK: include the license, notices, and source availability information for the bundled runtime.
 - EPL-2.0 JUnit: test-only; keep out of release artifacts.
 
-The release pipeline generates a third-party notices file from the SBOM and license reports. The file is packaged with the Windows application and linked from the Android About screen and the project release notes.
+The release pipeline must generate a third-party notices file from the SBOM and license reports and package it with the Windows application and link it from the Android About screen and the project release notes. Stage 19 does not generate an SBOM or a notices file yet; this is a documented pre-release gap.
 
 ## 9. Verification and update process
 
@@ -212,7 +212,7 @@ The release pipeline generates a third-party notices file from the SBOM and lice
 | Rust advisory scan | `cargo audit` | 03 and every release |
 | Gradle dependency locking and verification | Enable and commit lockfiles plus verification metadata; clean build with locks | Before first signed release |
 | Gradle license report | Dependency license report reviewed against section 2 | Before first signed release and every dependency change |
-| SBOM | CycloneDX for Android, Windows, and Rust | 19 |
+| SBOM | CycloneDX for Android, Windows, and Rust | Required before the first public release; not yet implemented. |
 | Release artifact inspection | No test, debug, or build-only package in the app | 19 |
 | New dependency review | Reason, license, platform support, owner, fallback recorded here | Before merge |
 
@@ -254,8 +254,8 @@ evidence it does not have.
 | Confirm JNA 5.14.0 loads the Windows DLL and JNI loads the Android `.so`. | 08 | JNA and the JNI shim load `nexus_core.dll` on a Windows JVM and pass the shared contract. Android `.so` loading is deferred until an emulator or device is available. |
 | Confirm Android Rust cross-compilation and native library packaging. | 08 | Complete for arm64-v8a and x86_64. Both `libnexus_core.so` files build, package, and export-check; runtime execution is deferred. |
 | Confirm the C ABI compiles and runs through an independent C consumer. | 08 | Complete on Windows. The C harness compiles against `nexus_core.h` with `-Wall -Wextra -Werror`, passes 100 lifecycle cycles, and verifies events, errors, panic containment, cancellation, and streaming. |
-| Confirm Inno Setup 6.4.3 produces a per-user installer and prompts on uninstall. | 19 | Deferred; releases produce an app image only until Stage 19. |
-| Confirm the bundled JDK notices and source availability text are packaged. | 19 | Deferred to release packaging. |
+| Confirm WiX 3.14.1 produces a per-user MSI and upgrades in place. | 19 | Complete on Windows 10: install, 0.1.0 -> 0.1.1 upgrade, and uninstall were verified. The MSI does not yet prompt to keep user data on uninstall. |
+| Confirm the bundled JDK notices and source availability text are packaged. | 19 | Not yet complete; recorded as a release gap. |
 
 ## 11. Dependency ownership
 
@@ -264,7 +264,7 @@ evidence it does not have.
 | Rust core | Core maintainers | Runtime crates, licenses, advisories, MSRV, cross-platform builds. |
 | Kotlin and Compose | Application maintainers | UI, coroutines, serialization, JNA, AndroidX alignment. |
 | Android build | Android maintainers | SDK, NDK, AGP, Gradle, signing. |
-| Windows build | Desktop maintainers | JDK, jpackage, Inno Setup, signing, Windows SDK. |
+| Windows build | Desktop maintainers | JDK, jpackage, WiX, signing, Windows SDK. |
 | Release and SBOM | Release maintainers | Lockfiles, notices, SBOM, artifact inspection. |
 
 A dependency without an owner is not approved for release.

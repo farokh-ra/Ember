@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-11-12
 - **Amended:** 2026-11-13 (Stage 03 toolchain verification and local GNU fallback)
+- **Amended:** 2026-11-26 (Stage 19 shipping MSI instead of Inno Setup)
 - **Deciders:** Ember engineering
 - **Supersedes:** none
 - **Related:** ADR-0001, ADR-0003, ADR-0005, ADR-0006, [Dependency inventory](../architecture/DEPENDENCY_LICENSE_INVENTORY.md)
@@ -37,7 +38,7 @@ The Windows installer must install per-user without administrator rights, preser
 | Kotlin formatting | Spotless 8.11.0 with ktlint 1.8.0 | Gradle plugin. |
 | Kotlin static analysis | detekt 1.23.8 | Gradle plugin. |
 | Rust policy tools | cargo-deny 0.20.2, cargo-audit 0.23.0, cargo-nextest 0.9.151 | CI and release gates. |
-| Installer | Inno Setup 6.4.3 | Build-time only; per-user EXE installer. |
+| Installer | jpackage MSI with WiX 3.14.1.8722 | Build-time only; per-user MSI. Inno Setup 6.4.3 was the original plan and is replaced by the Stage 19 amendment below. |
 | SBOM | CycloneDX | Generated in CI for Android, Windows, and Rust. |
 
 Exact transitive Rust versions are locked in `Cargo.lock`. Gradle resolves the pinned direct versions through `gradle/libs.versions.toml` and the committed wrapper; Gradle dependency locking and verification metadata are required before the first signed release. No dynamic versions, version ranges, or snapshot dependencies are allowed in release builds.
@@ -74,13 +75,34 @@ host linker choice does not change the exported interface.
 
 ### Windows packaging
 
-- Gradle builds a Compose Desktop **app image** with `jpackage` and a pinned JDK 21 runtime.
-- Inno Setup wraps the app image in a **per-user EXE installer** under `%LOCALAPPDATA%\Programs\Ember`. No administrator rights are required.
-- The installer creates Start Menu and optional desktop shortcuts, registers an uninstaller, and on uninstall asks whether to keep `%LOCALAPPDATA%\Ember\data`. Application binaries and user data are separate.
-- Upgrades install in place, close a running Ember process, and preserve user data and the sealed local secret.
-- The installer and main executable are Authenticode-signed in the release pipeline. The certificate is supplied by the release environment.
-- The Rust core is `nexus_core.dll` x64, loaded by JNA from the application directory.
+Stage 19 amendment (2026-11-26): the shipping Windows package is a **per-user
+MSI** produced by jpackage with WiX 3.14.1. Inno Setup was not adopted because it
+would add a second installer toolchain and a manual wrapping step, while
+jpackage's MSI path is already part of the Compose Desktop build. The MSI:
+
+- installs per user under `%LOCALAPPDATA%\Ember` without administrator rights;
+- uses the stable upgrade UUID `c7c225ee-ae2c-4c58-822d-ea7bda7ac48c`, so a newer
+  version replaces the older product;
+- creates Start menu and optional desktop shortcuts and registers an uninstaller;
+- packages `nexus_core.dll` under the application's `app/resources` directory,
+  which the JNA loader checks through `compose.application.resources.dir`;
+- is Authenticode-signed in the release pipeline, along with the main executable
+  in the portable ZIP.
+
+The MSI does not implement the interactive uninstall data prompt that the Inno
+Setup plan described. The current packaged UI stores no core user data, so this
+does not affect 0.1.0. Before the UI is wired to the core, user data must live
+outside the install directory and uninstall must offer a keep/remove choice. That
+remains a release requirement.
+
+The rest of the original packaging decision still applies:
+
+- Gradle builds a Compose Desktop app image with `jpackage` and a pinned JDK 21
+  runtime.
+- The Rust core is `nexus_core.dll` x64, loaded by JNA from the packaged
+  resources directory.
 - The app does not install a login auto-start entry in v1.
+- A portable ZIP is published for users who cannot install an MSI.
 
 ### Dependency policy
 
@@ -100,21 +122,21 @@ Allowed licenses for distributed code:
 
 Disallowed for linked or distributed code: GPL, AGPL, SSPL, and any license that would require Ember source disclosure or impose network-service obligations. LGPL is not allowed for linked code unless a future ADR approves dynamic linking and provides relinking rights; JNA is used under its Apache-2.0 option, not LGPL.
 
-Build-only tools may carry other licenses because they are not distributed: Git (GPL-2.0), Inno Setup (custom freeware license), MSVC/Windows SDK (proprietary), Android SDK (proprietary license), Python (PSF). The JDK runtime bundled by jpackage is GPLv2 with the Classpath Exception and is distributed with notices.
+Build-only tools may carry other licenses because they are not distributed: Git (GPL-2.0), WiX (MS-RL), MSVC/Windows SDK (proprietary), Android SDK (proprietary license), Python (PSF). The JDK runtime bundled by jpackage is GPLv2 with the Classpath Exception and is distributed with notices.
 
 ### License and vulnerability gates
 
 - `cargo-deny` checks licenses, banned crates, duplicate versions, and advisory sources on every CI run.
 - `cargo-audit` and the GitHub Advisory Database feed are checked before release.
-- Gradle resolves only locked versions and produces a dependency license report; the report is reviewed when dependencies change.
-- A CycloneDX SBOM is produced for each release artifact.
+- Gradle resolves only locked versions and produces a dependency license report; the report is reviewed when dependencies change. Gradle dependency locking and verification metadata are required before a public release and are **not yet enabled**; see the Stage 19 amendment.
+- A CycloneDX SBOM is required for each release artifact. It is **not yet generated**; the dependency inventory, `cargo-deny` output, and artifact manifest are the current evidence.
 - The release includes third-party notices and the exact protocol/app versions.
 - New dependencies require a reason, a license check, a platform check, and an owner in the dependency inventory.
 - No analytics, crash-reporting, advertising, or account SDK is included by default.
 
 ### Reproducibility and release evidence
 
-- Release builds use `--locked` Cargo builds, Gradle dependency locking, and checksum verification.
+- Release builds use `--locked` Cargo builds and checksum verification. Gradle dependency locking is required before a public release and remains pending.
 - Build metadata records the toolchain versions, source commit, and artifact SHA-256.
 - Android and Windows artifacts are signed; SHA-256 checksums and release notes are published.
 - A clean checkout must build with the documented commands. The build must not depend on a developer's global Gradle, Cargo, or JDK configuration beyond the documented toolchain.
@@ -125,14 +147,14 @@ Build-only tools may carry other licenses because they are not distributed: Git 
 **Positive**
 
 - One repository produces both first-class platforms with pinned, auditable versions.
-- Per-user Windows installation avoids administrator rights and supports an explicit uninstall data choice.
+- Per-user Windows installation avoids administrator rights; the uninstall data choice is deferred until the packaged application stores core user data.
 - License and vulnerability gates are defined before code lands.
 - The JDK and core runtime are bundled, so users do not install Java or Rust.
-- SBOM and checksums support release review.
+- SBOM and checksums support release review. Checksums and the release manifest exist; SBOM generation remains pending.
 
 **Negative / trade-offs**
 
-- Inno Setup is an extra build-time dependency with a custom license.
+- WiX 3 is an extra build-time dependency, downloaded under a pinned hash; the MSI does not yet provide an uninstall data choice.
 - Bundling a JDK increases the Windows artifact size.
 - Pinning the latest stable tool lines requires a deliberate upgrade cadence.
 - Android and Windows signing certificates are release-operations dependencies.
@@ -152,7 +174,7 @@ Build-only tools may carry other licenses because they are not distributed: Git 
 
 ## Alternatives considered
 
-1. **jpackage MSI with WiX.** Native MSI and familiar enterprise deployment, but requires WiX, does not provide the required interactive uninstall data prompt, and adds MSI authoring complexity. Rejected.
+1. **jpackage MSI with WiX.** Native MSI and familiar enterprise deployment, but requires WiX, does not provide the required interactive uninstall data prompt, and adds MSI authoring complexity. Rejected for Stage 03; **revisited and adopted in the Stage 19 amendment** because it removes a second installer toolchain, and the data prompt is deferred until the packaged app stores core data.
 2. **MSIX.** Good Windows integration and signing, but packaging, identity, and uninstall data handling are more complex for a per-user side-loadable app. Rejected for v1.
 3. **Electron or a web wrapper.** Violates the first-class native platform rule and adds a browser runtime. Rejected.
 4. **Gradle-only Windows packaging without an installer.** Users would manage a folder manually; no uninstall or upgrade story. Rejected.
@@ -166,5 +188,5 @@ Build-only tools may carry other licenses because they are not distributed: Git 
   build. Evidence is recorded in `docs/progress/STAGE_03.md`.
 - Stage 08 packages the Rust library into both apps and proves the same core API
   is callable.
-- Stage 19 produces signed release candidates, verifies signatures and checksums, installs/upgrades/uninstalls on Windows, installs the APK/AAB on Android, and audits the SBOM and license report.
+- Stage 19 produces signed release candidates, verifies signatures and checksums, and installs, upgrades, and uninstalls the Windows MSI. Android APK/AAB install and runtime verification remain blocked on device availability. SBOM and Gradle lock auditing remain pre-release requirements.
 - CI fails on an unapproved license, a known high-severity vulnerability without a documented exception, or a dynamic dependency version.

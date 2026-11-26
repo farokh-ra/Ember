@@ -634,7 +634,7 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 - Backup bytes are returned only to the requesting operation and are not logged or cached.
 - Error details and logs redact local paths, keys, and unnecessary peer identifiers.
 - The FFI validates every pointer, length, handle, method ID, and CBOR limit before use.
-- Unsafe code is confined to `nexus-ffi` and the JNI shim, with documented invariants; fuzzing is scheduled for Stage 19.
+- Unsafe code is confined to `nexus-ffi` and the JNI shim, with documented invariants. Bounded truncation and mutation sweeps cover file protocol decoding; coverage-guided fuzzing remains deferred.
 - Panic payloads are not exposed to the UI; only a redacted internal error and diagnostics marker are returned.
 - The handle registry prevents use-after-free; stale handles return `NEXUS_STATUS_INVALID_HANDLE`.
 - Local blocks and abuse reports are never uploaded, announced, or written into signed records. A user-initiated metadata export is a full local database snapshot and therefore includes these rows; it is a private file, and a diagnostics export must exclude them.

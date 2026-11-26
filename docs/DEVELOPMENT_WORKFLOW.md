@@ -210,27 +210,30 @@ upgrades are separate from feature work.
 Releases are cut from `main` after the stage exit criteria are approved.
 
 1. Confirm all stage records and documentation are current.
-2. Update `CHANGELOG.md` and set the version in:
-   - `build.gradle.kts` (`allprojects.version`),
-   - `apps/androidApp/build.gradle.kts` (`versionName`, `versionCode`),
-   - `apps/desktopApp/build.gradle.kts` (`packageVersion`),
-   - `Cargo.toml` (`workspace.package.version`).
+2. Set the release version with Gradle properties instead of editing files:
+   - `emberVersion` drives the root version, Android `versionName`, and Windows
+     MSI version,
+   - `emberVersionCode` optionally overrides the derived Android version code
+     (`major * 10000 + minor * 100 + patch`).
+   Also set `workspace.package.version` in `Cargo.toml` so the native core
+   reports the same version as the packages.
 3. Run `.\scripts\build.ps1 -WithDependencyScan`.
 4. Run `.\scripts\verify-clean-checkout.ps1`.
 5. Create a `release/<version>` branch, open a pull request, and merge it.
 6. Tag `main` with `v<version>`.
-7. The release environment supplies signing keys and publishes:
-   - the Android APK/AAB,
-   - the Windows per-user installer,
-   - SHA-256 checksums,
-   - the CycloneDX SBOM,
-   - third-party notices,
-   - generated release notes from `.github/release.yml`.
-8. Verify the signatures, checksums, install, upgrade, and uninstall paths.
+7. The release environment supplies signing keys and runs
+   `.\scripts\package-release.ps1 -Version <version>`. The script builds,
+   signs, writes `SHA256SUMS` and `release-manifest.json`, and runs
+   `verify-release.ps1`. Alternatively, push the tag and let
+   `.github/workflows/release.yml` run the same script with repository secrets.
+8. Verify the signatures, checksums, install, upgrade, and uninstall paths. The
+   Android APK/AAB, Windows MSI, portable ZIP, checksums, and manifest are the
+   published artifacts. See `docs/release/` for the evidence and policy.
 
 No signing key, keystore, certificate, or password is committed or attached to a
 release note. Release artifacts are never built from an unlocked dependency
-graph.
+graph. Gradle dependency locking is a known pre-release gap recorded in
+`docs/release/SIGNING_AND_REPRODUCIBILITY.md`.
 
 ## 9. Hotfixes
 

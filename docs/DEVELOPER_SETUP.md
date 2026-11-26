@@ -198,12 +198,15 @@ cargo install cargo-audit --version 0.23.0 --locked
 | Artifact | Path |
 |---|---|
 | Android debug APK | `apps/androidApp/build/outputs/apk/debug/androidApp-debug.apk` |
-| Windows app image | `apps/desktopApp/build/compose/binaries/main/app/Ember` |
+| Android release APK/AAB | `apps/androidApp/build/outputs/apk/release/` and `apps/androidApp/build/outputs/bundle/release/` |
+| Windows MSI | `apps/desktopApp/build/compose/binaries/main/msi/Ember-<version>.msi` |
+| Release directory | `dist/<version>/` with checksums and a release manifest |
 | detekt reports | `build/reports/detekt/` |
 | Kotlin test reports | `shared/*/build/reports/tests/jvmTest/` |
 | Rust test output | Console, or `cargo test --workspace` |
 
-The Windows app image is not an installer. Inno Setup packaging is Stage 19.
+The Windows MSI installs per user under `%LOCALAPPDATA%\Ember`. See
+[docs/release/README.md](release/README.md) for packaging and verification.
 
 ## 6. Clean-checkout proof
 
