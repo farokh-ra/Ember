@@ -3,8 +3,8 @@
 **Status:** Release pipeline complete and test-signed; Android runtime and
 production-signing evidence unavailable
 **Completed:** 2026-11-26
-**Branch:** `feat/19-release`, based on `feat/18-security` at `4932c69`
-**Pull request:** stacked on #25 (`feat/18-security` -> `main`)
+**Branch:** `feat/19-release`, based on Stage 18 commit `4932c69`
+**Pull request:** #26 (`feat/19-release` -> `main`), open and awaiting review
 **Progress guide:** 90-95%
 **Next stage:** 20 - global launch and ongoing network governance (requires
 explicit project-owner approval)

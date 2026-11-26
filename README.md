@@ -33,9 +33,9 @@
 > viewable, but public visibility grants no right to copy, modify, distribute,
 > or reuse the source. See [LICENSE.md](LICENSE.md).
 >
-> **Stage 18 is complete on `feat/18-security`** and is awaiting review and merge
-> as PR #25 against `main`. **Stages 16 and 17 are merged into `main`** through
-> PR #24.
+> **Stage 19 is complete on `feat/19-release`** and is awaiting review as PR #26
+> against `main`. **Stage 18 is merged into `main`** as `8876350`, and **Stages
+> 16 and 17 are merged** through PR #24.
 
 ## Overview
 
@@ -57,7 +57,7 @@ rewrites the original signed record.
 
 | Property | Detail |
 |---|---|
-| **Current stage** | 18 complete on `feat/18-security` · review and merge pending |
+| **Current stage** | 19 complete on `feat/19-release` · review pending as PR #26 |
 | **Platforms** | Android 8.0+ (API 28) · Windows 10/11 x64 |
 | **UI** | Kotlin 2.4.21 · Compose Multiplatform 1.12.2 |
 | **Core** | Rust 1.99.1 · ABI 1 · FFI interface 1.11.0 · 51 callable methods |
@@ -110,7 +110,7 @@ rewrites the original signed record.
 | Android runtime networking, hosting, search, and security | Libraries cross-build; on-device evidence deferred |
 | Local and distributed search | Complete; provider role is opt-in |
 | Multi-peer transfer | Complete on `feat/17-multi-peer`; up to four sources per download |
-| Local blocking, abuse reports, and safe-file notices | Complete at the core and network layers on `feat/18-security`; UI binding pending |
+| Local blocking, abuse reports, and safe-file notices | Complete at the core and network layers; UI binding pending |
 | Windows installer and signed release pipeline | Per-user MSI, portable ZIP, APK/AAB, checksums, and manifest; test-signed only |
 
 ### Honest limits
@@ -229,9 +229,9 @@ flowchart LR
 
 ## Roadmap
 
-Stage 19 is complete and ready for review as a stacked PR on `feat/18-security`.
-Stage 18 awaits review and merge as PR #25 against `main`. Stages 16 and 17 are
-merged into `main` through PR #24. Stage 15 is merged into `main`.
+Stage 19 is complete and awaiting review as PR #26 against `main`. Stage 18 is
+merged into `main` as `8876350`. Stages 16 and 17 are merged through PR #24, and
+Stage 15 is merged into `main`.
 
 | # | Stage | Status |
 |---|---|---|

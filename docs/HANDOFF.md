@@ -4,9 +4,9 @@
 **Stage status:** Release pipeline complete and test-signed; Android runtime and
 production signing evidence unavailable
 **Last updated:** 2026-11-26
-**Branch:** `feat/19-release`, based on `feat/18-security` at `4932c69`
-**Pull requests:** #25 (`feat/18-security` -> `main`) remains open; Stage 19 is a
-stacked PR into `feat/18-security`
+**Branch:** `feat/19-release`, based on Stage 18 commit `4932c69`
+**Pull requests:** #25 (`feat/18-security` -> `main`) merged as `8876350`;
+Stage 19 is #26 (`feat/19-release` -> `main`), open and awaiting review
 **Next stage:** 20 - global launch and ongoing network governance (requires
 explicit project-owner approval)
 
@@ -170,10 +170,7 @@ Unresolved:
 
 ## Exact next action
 
-1. Run the full local gates and the clean-checkout verification.
-2. Commit `feat/19-release`, push it, and open a stacked pull request into
-   `feat/18-security`.
-3. Keep PR #25 open for review; do not merge it or the Stage 19 PR without
-   project-owner approval.
-4. Do not start Stage 20. It requires explicit approval and a decision on how to
+1. Stage 19 is committed, pushed, and verified in PR #26 against `main`.
+2. Keep PR #26 open for review; do not merge it without project-owner approval.
+3. Do not start Stage 20. It requires explicit approval and a decision on how to
    collect the missing Android and network evidence.
