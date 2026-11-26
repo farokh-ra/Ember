@@ -102,10 +102,10 @@ Release packaging:
 | `:apps:androidApp:assembleRelease` / `bundleRelease` | Passed |
 | `:apps:desktopApp:createDistributable` / `packageMsi` | Passed |
 | MSI install | Exit 0, installed 0.1.0 |
-| Installed launch | 2,609 ms to main window |
+| Installed launch | 2,887 ms to main window |
 | MSI upgrade 0.1.0 -> 0.1.1 | Exit 0, product version 0.1.1 |
 | MSI uninstall | Exit 0, install directory and uninstall entry removed |
-| Portable ZIP launch | 2,646 ms to main window |
+| Portable ZIP launch | 2,890 ms to main window |
 | APK signature | `apksigner` v2 verified, 1 signer |
 | AAB signature | `jarsigner` `jar verified` with self-signed warnings |
 
@@ -113,9 +113,9 @@ Performance (3 runs, 180-second soak, Windows 10 19045, i5-10300H, 16 GB):
 
 | Metric | Result |
 |---|---|
-| Median startup | 2,771 ms |
-| Median working set | 207.2 MiB |
-| Idle CPU | 0.008% of the machine |
+| Median startup | 2,805 ms |
+| Median working set | 207.1 MiB |
+| Idle CPU | 0.021% of the machine |
 | 180-second idle growth | 0.9 MiB |
 | App image | 154.3 MiB |
 | MSI | 71.0 MiB |

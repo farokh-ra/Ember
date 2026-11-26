@@ -115,11 +115,24 @@ if ($null -ne $apk) {
     if (-not $apk.signed -and -not $RequireSigned) {
         Write-Host "APK is unsigned (local dry run): $($apk.name)"
     } else {
-        $apksigner = Get-ChildItem (Join-Path $env:ANDROID_HOME "build-tools") -Directory -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending |
-            ForEach-Object { Join-Path $_.FullName "apksigner.bat" } |
-            Where-Object { Test-Path -LiteralPath $_ } |
-            Select-Object -First 1
+        $androidSdk = $env:ANDROID_HOME
+        if ([string]::IsNullOrWhiteSpace($androidSdk)) {
+            $androidSdk = $env:ANDROID_SDK_ROOT
+        }
+        $apksigner = $null
+        if (-not [string]::IsNullOrWhiteSpace($androidSdk)) {
+            $apksigner = Get-ChildItem (Join-Path $androidSdk "build-tools") -Directory -ErrorAction SilentlyContinue |
+                Sort-Object Name -Descending |
+                ForEach-Object { Join-Path $_.FullName "apksigner.bat" } |
+                Where-Object { Test-Path -LiteralPath $_ } |
+                Select-Object -First 1
+        }
+        if ($null -eq $apksigner) {
+            $apksignerCommand = Get-Command apksigner.bat -ErrorAction SilentlyContinue
+            if ($null -ne $apksignerCommand) {
+                $apksigner = $apksignerCommand.Source
+            }
+        }
         if ($null -eq $apksigner) {
             if ($RequireSigned) {
                 Add-Failure "apksigner was not found, so $($apk.name) could not be verified."
@@ -159,8 +172,20 @@ if ($null -ne $aab) {
     if (-not $aab.signed -and -not $RequireSigned) {
         Write-Host "AAB is unsigned (local dry run): $($aab.name)"
     } else {
-        $jarsigner = Join-Path $env:JAVA_HOME "bin\jarsigner.exe"
-        if (Test-Path -LiteralPath $jarsigner) {
+        $jarsigner = $null
+        if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+            $candidate = Join-Path $env:JAVA_HOME "bin\jarsigner.exe"
+            if (Test-Path -LiteralPath $candidate) {
+                $jarsigner = $candidate
+            }
+        }
+        if ($null -eq $jarsigner) {
+            $jarsignerCommand = Get-Command jarsigner.exe -ErrorAction SilentlyContinue
+            if ($null -ne $jarsignerCommand) {
+                $jarsigner = $jarsignerCommand.Source
+            }
+        }
+        if ($null -ne $jarsigner -and (Test-Path -LiteralPath $jarsigner)) {
             $result = Test-NativeOutput -Step "jarsigner" -Action { & $jarsigner -verify $aabPath }
             $aabText = $result.Output -join "`n"
             if ($aabText -match "(?m)^jar is unsigned|no manifest") {

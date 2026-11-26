@@ -36,20 +36,20 @@ and not a test harness.
 
 | Metric | Result |
 |---|---|
-| Startup, median of 3 | **2,771 ms** |
-| Startup samples | 2,771 / 2,893 / 2,679 ms |
-| Working set after 5 s, median | **207.2 MiB** (217,255,936 bytes) |
-| Working set samples | 207.2 / 207.7 / 200.8 MiB |
-| Idle CPU over 180 s | **0.008% of the machine**, 0.061% of one core |
-| Working-set growth over 180 s idle | **0.9 MiB** (966,656 bytes) |
-| Desktop application image | **154.3 MiB** (161,810,736 bytes) |
+| Startup, median of 3 | **2,805 ms** |
+| Startup samples | 2,805 / 2,938 / 2,719 ms |
+| Working set after 5 s, median | **207.1 MiB** (217,124,864 bytes) |
+| Working set samples | 207.1 / 200.5 / 207.5 MiB |
+| Idle CPU over 180 s | **0.021% of the machine**, 0.165% of one core |
+| Working-set growth over 180 s idle | **0.9 MiB** (925,696 bytes) |
+| Desktop application image | **154.3 MiB** (161,810,737 bytes) |
 | Windows MSI | **71.0 MiB** (74,465,280 bytes) |
-| Windows portable ZIP | **69.7 MiB** (73,063,856 bytes) |
+| Windows portable ZIP | **69.7 MiB** (73,063,852 bytes) |
 | Android APK (arm64-v8a + x86_64) | **61.3 MiB** (64,282,841 bytes) |
-| Android AAB | **22.2 MiB** (23,285,466 bytes) |
+| Android AAB | **22.2 MiB** (23,285,459 bytes) |
 
-The installed application started in **2,609 ms** on the same machine, consistent
-with the image measurement. The portable ZIP started in **2,646 ms**.
+The installed application started in **2,887 ms** on the same machine, consistent
+with the image measurement. The portable ZIP started in **2,890 ms**.
 
 ## 4. Interpretation
 
@@ -76,8 +76,8 @@ this evidence:
 
 | Target | Proposed | Result |
 |---|---|---|
-| Windows cold startup to first window | under 3,000 ms on the baseline x64 machine | Met (2,771 ms median) |
-| Windows idle CPU | under 0.5% of the machine | Met (0.008%) |
+| Windows cold startup to first window | under 3,000 ms on the baseline x64 machine | Met (2,805 ms median) |
+| Windows idle CPU | under 0.5% of the machine | Met (0.021%) |
 | Windows 3-minute idle memory growth | under 5 MiB | Met (0.9 MiB) |
 | Windows idle working set | under 350 MiB | Met (207 MiB) |
 | Android cold startup | under 3,000 ms on a 4 GB device | **Not measured** |
