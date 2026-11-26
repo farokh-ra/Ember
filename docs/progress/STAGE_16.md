@@ -1,6 +1,6 @@
 # Stage 16 - Verified Local and Distributed Search
 
-**Status:** Complete on Windows loopback; review and merge pending
+**Status:** Complete on Windows loopback; merged into `main`
 **Completed:** 2026-11-24
 **Branch:** `feat/16-search`, based on `main` at `05385de`
 **Progress guide:** 75-80%

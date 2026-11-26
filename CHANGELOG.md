@@ -366,6 +366,20 @@ All notable changes to Ember are recorded here. The format follows
 - Threat model, privacy review, and security release checklist.
 - 19 new Stage 18 Rust tests, for 372 Rust tests total.
 - Stage 18 evidence record.
+- Per-user Windows MSI package, portable Windows ZIP, signed Android release APK
+  and AAB, SHA-256 checksums, and a machine-readable release manifest.
+- `emberVersion` and `emberVersionCode` Gradle properties for release overrides,
+  with a `0.1.0` default, a stable Windows upgrade UUID, and an Android
+  `versionCode` derived from the version unless overridden.
+- Release scripts for the pinned WiX download, packaging, verification, and
+  performance measurement.
+- A tag and manual-dispatch release workflow that restores signing material from
+  repository secrets, builds, signs, verifies, uploads, and publishes.
+- Release, performance, compatibility, signing, reproducibility, update/rollback,
+  and accessibility/localization documents.
+- A JVM adapter check that loads the native core from the packaged Compose
+  resources directory.
+- Stage 19 evidence record.
 
 ### Changed
 
@@ -481,6 +495,18 @@ All notable changes to Ember are recorded here. The format follows
   `permission_denied` with `peer_blocked`.
 - Peer observation addresses and error text are truncated at 512 and 256 bytes
   so a hostile peer cannot grow the peer table with unbounded strings.
+- The Windows package is now an MSI instead of an application image only. It
+  installs per user under `%LOCALAPPDATA%\Ember` and uses a stable upgrade UUID.
+- The native Windows core is staged through `appResourcesRootDir` and loaded from
+  `compose.application.resources.dir`.
+- Android release packaging includes arm64-v8a and x86_64 JNI libraries and strips
+  debug sections from the packaged libraries.
+- Android release builds declare `INTERNET`, `ACCESS_NETWORK_STATE`, and
+  `CHANGE_WIFI_MULTICAST_STATE` permissions.
+- `dev-env.ps1` falls back to an operator-provided JDK and Rust toolchain when the
+  pinned local toolchain is absent, so the same scripts run in CI.
+- `build-native.ps1` supports `--locked` release builds and skips GNU-only import
+  library and C harness steps when those tools are unavailable.
 
 ### Fixed
 
@@ -507,6 +533,12 @@ All notable changes to Ember are recorded here. The format follows
   the store.
 - A graceful core stop records the `pause_interrupted_downloads` result and
   still completes the state and identity shutdown before returning the error.
+- Signing a read-only jpackage launcher restores the read-only attribute after
+  signing instead of failing.
+- Release verification accepts Windows ZIP entry separators and self-signed
+  `jarsigner` warnings without hiding a failed signature.
+- Native argument splatting under Windows PowerShell 5.1 no longer produces a
+  bare `-` for release cargo builds.
 
 ### Security
 
@@ -581,6 +613,22 @@ All notable changes to Ember are recorded here. The format follows
   must exclude them.
 
 ### Known limitations
+
+- Release artifacts are test-signed only. Production Android keystore and Windows
+  code-signing certificates were unavailable, so the 0.1.0 evidence build is
+  verifiable but not publicly trusted.
+- Android runtime, low-memory device, battery, poor-network, mobile, IPv6, and
+  network-change behaviour were not tested; no emulator or device was available.
+- The Windows MSI does not yet offer an uninstall keep/remove choice for user
+  data. The packaged UI stores no core data, so this must be added before core
+  data is wired in.
+- Gradle dependency locking, verification metadata, and a CycloneDX SBOM are not
+  part of the release build yet.
+- Third-party license notices for the bundled JDK and Compose runtime are not
+  packaged yet. This is a legal pre-release gate.
+- The UI is not localized. It ships English copy only, with no RTL or
+  pseudo-localization test.
+- Screen-reader and platform high-contrast testing were not performed.
 
 - Identity, publication, download, hosting, search, and network data in the UI
   are visibly labelled mock content. The native core and Kotlin client exist, but
@@ -713,8 +761,9 @@ All notable changes to Ember are recorded here. The format follows
   navigation and screenshot review were used to complete the journeys.
 - In the identity bio field, Tab inserts a tab character instead of moving
   focus; Shift+Tab moves focus back to the display-name field.
-- The Windows application image is not yet an installer; Inno Setup packaging is
-  Stage 19.
+- The Windows application image is now also packaged as a per-user MSI and a
+  portable ZIP by Stage 19. The MSI does not yet offer an uninstall keep/remove
+  choice for user data.
 - The local non-admin Windows toolchain uses a MinGW GNU Rust host when MSVC C++
   tools are unavailable. CI and release builds use MSVC.
 - Android Rust cross-compilation and native library packaging are wired in a

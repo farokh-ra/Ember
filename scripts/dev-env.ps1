@@ -25,15 +25,27 @@ $ErrorActionPreference = "Continue"
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $ToolchainRoot = Join-Path $env:LOCALAPPDATA "NEXUS\toolchain"
-$JdkHome = Join-Path $ToolchainRoot "jdk\jdk-21.0.13+9"
+# Prefer the pinned portable toolchain. A CI runner or an operator-provided JDK
+# is used when the pinned copy is absent, so the same scripts work in both
+# places without changing local behavior.
+$PinnedJdkHome = Join-Path $ToolchainRoot "jdk\jdk-21.0.13+9"
+$JdkHome = if (Test-Path (Join-Path $PinnedJdkHome "bin\java.exe")) {
+    $PinnedJdkHome
+} elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) {
+    $env:JAVA_HOME
+} else {
+    $PinnedJdkHome
+}
 $GradleHome = Join-Path $ToolchainRoot "gradle\gradle-9.9.1"
 # Keep this project's Gradle downloads and caches inside the repository so they
-# do not land in the user profile. The directory is gitignored.
+# do not land in the user profile. The directory is gitignored. CI uses its own
+# managed cache instead.
 $GradleUserHome = Join-Path $RepoRoot "NeededToolsHere\gradle-home"
 $MingwHome = Join-Path $ToolchainRoot "mingw\mingw64"
 $CargoHome = Join-Path $ToolchainRoot "cargo"
 $RustupHome = Join-Path $ToolchainRoot "rustup"
 $AndroidHome = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { Join-Path $env:LOCALAPPDATA "Android\Sdk" }
+$IsCi = $env:CI -eq "true"
 
 function Add-ToPath {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -48,23 +60,30 @@ function Add-ToPath {
 }
 
 if (-not (Test-Path (Join-Path $JdkHome "bin\java.exe"))) {
-    throw "JDK 21 not found at $JdkHome. Run .\scripts\setup-windows.ps1."
+    throw "JDK 21 not found at $JdkHome. Run .\scripts\setup-windows.ps1 or set JAVA_HOME."
 }
-if (-not (Test-Path (Join-Path $GradleHome "bin\gradle.bat"))) {
-    throw "Gradle 9.9.1 not found at $GradleHome. Run .\scripts\setup-windows.ps1."
-}
-if (-not (Test-Path (Join-Path $CargoHome "bin\cargo.exe"))) {
+if (-not (Test-Path (Join-Path $CargoHome "bin\cargo.exe")) -and -not $IsCi) {
     throw "Rust not found at $CargoHome. Run .\scripts\setup-windows.ps1."
 }
 
 $env:JAVA_HOME = $JdkHome
-$env:GRADLE_HOME = $GradleHome
-$env:GRADLE_USER_HOME = $GradleUserHome
+if (Test-Path (Join-Path $GradleHome "bin\gradle.bat")) {
+    $env:GRADLE_HOME = $GradleHome
+}
+if (-not $IsCi) {
+    $env:GRADLE_USER_HOME = $GradleUserHome
+}
 $env:ANDROID_HOME = $AndroidHome
 $env:ANDROID_SDK_ROOT = $AndroidHome
-$env:ANDROID_NDK_HOME = Join-Path $AndroidHome "ndk\29.0.14206865"
-$env:CARGO_HOME = $CargoHome
-$env:RUSTUP_HOME = $RustupHome
+$env:ANDROID_NDK_HOME = if ($env:ANDROID_NDK_HOME) {
+    $env:ANDROID_NDK_HOME
+} else {
+    Join-Path $AndroidHome "ndk\29.0.14206865"
+}
+if (Test-Path (Join-Path $CargoHome "bin\cargo.exe")) {
+    $env:CARGO_HOME = $CargoHome
+    $env:RUSTUP_HOME = $RustupHome
+}
 
 Add-ToPath (Join-Path $JdkHome "bin")
 Add-ToPath (Join-Path $GradleHome "bin")

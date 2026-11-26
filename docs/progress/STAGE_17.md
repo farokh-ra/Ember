@@ -1,6 +1,6 @@
 # Stage 17 - Multi-Peer Downloads and Advanced Resilience
 
-**Status:** Complete on Windows loopback; review and merge pending
+**Status:** Complete on Windows loopback; merged into `main`
 **Completed:** 2026-11-25
 **Branch:** `feat/17-multi-peer`, based on `feat/16-search` at `4e42574`
 **Progress guide:** 81-85%

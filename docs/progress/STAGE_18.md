@@ -1,9 +1,9 @@
 # Stage 18 - Security, Abuse Resistance, and Privacy Hardening
 
-**Status:** Complete on Windows loopback; review and merge pending
+**Status:** Complete on Windows loopback; merged into `main` as `8876350`
 **Completed:** 2026-11-26
 **Branch:** `feat/18-security`, based on `feat/16-search` at `8abaa50`
-**Pull request:** #25 into `main`; Stages 16 and 17 are merged through #24
+**Pull request:** #25 into `main`, merged; Stages 16 and 17 are merged through #24
 **Progress guide:** 85-90%
 **Next stage:** 19 - performance, compatibility, and release engineering
 (requires explicit project-owner approval)

@@ -284,15 +284,32 @@ public class JnaNativeBridge private constructor(
     }
 
     public companion object {
-        /** Loads the library from an absolute path, or by name when null. */
+        /**
+         * Loads the library from an absolute path, or from the packaged
+         * application resources directory, or by name.
+         *
+         * Compose Desktop copies `appResourcesRootDir` content into
+         * `app/resources` and exposes it through `compose.application.resources.dir`.
+         * Checking it first keeps a packaged MSI self-contained without
+         * requiring PATH changes or a working-directory assumption.
+         */
         public fun load(libraryPath: String? = null): JnaNativeBridge {
+            val resolved =
+                libraryPath?.takeUnless { it.isBlank() }
+                    ?: packagedLibraryPath()
             val library =
-                if (libraryPath.isNullOrBlank()) {
+                if (resolved == null) {
                     Native.load("nexus_core", NexusLibrary::class.java)
                 } else {
-                    Native.load(libraryPath, NexusLibrary::class.java)
+                    Native.load(resolved, NexusLibrary::class.java)
                 }
             return JnaNativeBridge(library)
+        }
+
+        private fun packagedLibraryPath(): String? {
+            val resourcesDir = System.getProperty("compose.application.resources.dir") ?: return null
+            val candidate = java.io.File(resourcesDir, "nexus_core.dll")
+            return if (candidate.isFile) candidate.absolutePath else null
         }
     }
 }

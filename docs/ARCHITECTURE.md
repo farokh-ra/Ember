@@ -478,7 +478,7 @@ See ADR-0010 for the index boundary and `docs/architecture/FFI_INTERFACE.md` sec
 | Metadata privacy leaks | No default telemetry; redacted diagnostics; separate peer identity. | Stage 18, 19 |
 | Spam, harassment, or unwanted peers | Local block list enforced at dial, connection, request, discovery, provider, and download-source layers; local abuse reports. | Stage 18 |
 | Unsafe downloaded file | No execution path; advisory type classification; delegated previews and visible warnings. | Stage 18 |
-| Dependency compromise | Pinned versions, lockfiles, license and advisory gates, SBOM. | Stage 03, 19 |
+| Dependency compromise | Pinned versions, Cargo lockfile, license and advisory gates; Gradle locking and SBOM are required before a public release. | Stage 03, 19 |
 
 The full threat model, privacy review, and release gate are in
 [`docs/security/THREAT_MODEL.md`](security/THREAT_MODEL.md),
@@ -523,7 +523,7 @@ must show the warning before handing the file to a platform viewer or sandbox.
 | Window/task close | Stop after grace period if no foreground work | Hide to tray if active work; explicit Exit stops |
 | Secure secret | Android Keystore | Windows DPAPI |
 | File picker | Storage Access Framework | Native file dialog |
-| Installer | APK/AAB | Inno Setup per-user EXE |
+| Installer | APK/AAB | Per-user MSI with WiX 3.14.1, plus portable ZIP |
 | Single instance | Single application process | Named guard; second launch reports existing instance |
 | Auto-start | None | None |
 
@@ -583,10 +583,10 @@ Platform-specific presentation is allowed for pickers, notifications, background
 ## 16. Build, packaging, and dependencies
 
 - Android: Gradle, Kotlin, Compose Multiplatform, Rust `cdylib` for arm64-v8a and x86_64, signed APK/AAB.
-- Windows: Gradle, Compose Desktop, `jpackage` app image, Inno Setup per-user installer, signed executable and installer.
+- Windows: Gradle, Compose Desktop, `jpackage` app image, WiX 3.14.1 per-user MSI, portable ZIP, signed executable and installer.
 - Rust: Cargo workspace, edition 2024, pinned toolchain, `cargo-deny`, `cargo-audit`, `cargo-nextest`.
 - JDK 21 LTS, Gradle 9.9.2, Kotlin 2.4.21, Compose 1.12.2, AGP 9.5.2, Rust 1.99.1, NDK 29.0.14206865.
-- No dynamic versions in release builds. Lockfiles and SBOM are release evidence.
+- No dynamic versions in release builds. `Cargo.lock` is committed; Gradle dependency locking and an SBOM remain pre-release requirements.
 - License policy and the direct dependency inventory are in [DEPENDENCY_LICENSE_INVENTORY.md](architecture/DEPENDENCY_LICENSE_INVENTORY.md).
 
 See ADR-0009 for the packaging and license decision.
@@ -605,7 +605,7 @@ See ADR-0009 for the packaging and license decision.
 | Android Keystore unavailable | Key unwrap failure | Fail closed; restore encrypted backup or reset | No plaintext fallback. |
 | DPAPI unavailable | Key unwrap failure | Fail closed; restore encrypted backup or reset | No plaintext fallback. |
 | Argon2id too slow on baseline | Calibration exceeds UX budget | Lower memory within the versioned header | Slightly weaker brute-force resistance; documented. |
-| Inno Setup unavailable | Build environment restriction | WiX MSI plus a pre-uninstall data-choice helper | Installer behavior must preserve the data prompt. |
+| WiX unavailable | Build environment restriction | Prebuilt MSI from a trusted build host, or portable ZIP | No MSI on that host; portable package still works. |
 | libp2p upgrade breaks APIs | Pinned version cannot build | Hold the previous pinned line; patch only with tests | Delayed upgrade, not a protocol change. |
 
 A fallback that changes product behaviour, privacy, or protocol compatibility requires an ADR update before adoption.

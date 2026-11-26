@@ -30,4 +30,27 @@ class NativeContractTest {
     fun windowsJniProxySatisfiesTheContract() {
         runNativeContract("jni", JvmJniNativeBridge())
     }
+
+    @Test
+    fun jnaAdapterLoadsFromPackagedResourcesDirectory() {
+        val dll =
+            requireNotNull(System.getProperty("nexus.native.path")) {
+                "nexus.native.path must point at nexus_core.dll"
+            }
+        val resourcesDir =
+            java.io
+                .File(dll)
+                .parentFile.absolutePath
+        val previous = System.getProperty("compose.application.resources.dir")
+        System.setProperty("compose.application.resources.dir", resourcesDir)
+        try {
+            runNativeContract("jna-packaged", JnaNativeBridge.load())
+        } finally {
+            if (previous == null) {
+                System.clearProperty("compose.application.resources.dir")
+            } else {
+                System.setProperty("compose.application.resources.dir", previous)
+            }
+        }
+    }
 }

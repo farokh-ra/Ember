@@ -132,7 +132,25 @@ document, or a signed review note. “Looks fine” is not evidence.
 - [ ] No dependency phones home at runtime.
 - [ ] Native libraries and binaries ship from pinned, verified sources.
 
-## 11. Documentation and disclosure
+## 11. Release artifacts and signing
+
+- [ ] The release directory contains the APK, AAB, MSI, portable ZIP,
+      `SHA256SUMS`, and `release-manifest.json`.
+- [ ] `verify-release.ps1 -RequireSigned` passes on the exact published bytes.
+- [ ] Android artifacts carry the production signing identity, not the debug key
+      or a test key.
+- [ ] Windows executables and the MSI carry the organization's Authenticode
+      certificate with a trusted chain.
+- [ ] Signatures are timestamped, or the absence of a timestamp authority is
+      recorded as an accepted risk.
+- [ ] `SHA256SUMS` and the manifest are published next to the artifacts and
+      describe those exact bytes.
+- [ ] Signing keys, keystores, certificates, and passwords are absent from the
+      repository, CI logs, and release notes.
+- [ ] The compatibility matrix and performance report match the release commit.
+- [ ] Install, upgrade, and uninstall were exercised on each shipped platform.
+
+## 12. Documentation and disclosure
 
 - [ ] `SECURITY.md` lists the current supported versions and reporting channel.
 - [ ] `CHANGELOG.md` records security-relevant changes without exploit detail.
@@ -142,7 +160,7 @@ document, or a signed review note. “Looks fine” is not evidence.
       blocking in plain language.
 - [ ] A security contact and coordinated-disclosure expectation are published.
 
-## 12. Sign-off
+## 13. Sign-off
 
 | Role | Name | Date | Decision |
 |---|---|---|---|
@@ -151,7 +169,7 @@ document, or a signed review note. “Looks fine” is not evidence.
 | Platform reviewer (Android) | | | |
 | Platform reviewer (Windows) | | | |
 
-## 13. Accepted risks for this release
+## 14. Accepted risks for this release
 
 Record each accepted risk with severity, rationale, owner, and expiry.
 

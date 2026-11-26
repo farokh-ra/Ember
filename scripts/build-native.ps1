@@ -17,7 +17,8 @@ param(
     [string]$Configuration = "Release",
     [ValidateSet("Windows", "Android", "All")]
     [string]$Target = "All",
-    [switch]$SkipHarness
+    [switch]$SkipHarness,
+    [switch]$Locked
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,15 +71,24 @@ function Copy-NativeArtifact {
 function Get-NativeSymbols {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    $nm = Get-Command llvm-nm -ErrorAction SilentlyContinue
-    if ($null -eq $nm) {
-        $nm = Get-Command nm -ErrorAction SilentlyContinue
+    # Prefer the NDK's llvm-nm: it reads both PE and ELF and is present on every
+    # release runner even when MinGW is not installed. Fall back to PATH tools.
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:ANDROID_NDK_HOME)) {
+        $candidates += Join-Path $env:ANDROID_NDK_HOME "toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-nm.exe"
     }
-    if ($null -eq $nm) {
+    foreach ($name in @("llvm-nm", "nm")) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            $candidates += $command.Source
+        }
+    }
+    $nm = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($nm)) {
         Write-Warning "No nm tool found; exported symbols were not inspected."
-        return @()
+        return $null
     }
-    $output = & $nm.Source --defined-only $Path 2>&1
+    $output = & $nm --defined-only $Path 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Symbol inspection failed for $Path with exit code $LASTEXITCODE."
     }
@@ -93,33 +103,46 @@ try {
     if ($buildWindows) {
         Write-Host "== Native: Windows $Configuration =="
         Invoke-NativeStep "cargo build (windows)" {
+            $cargoArgs = @("build", "-p", "nexus-ffi")
             if ($Configuration -eq "Release") {
-                & cargo build -p nexus-ffi --release 2>&1
-            } else {
-                & cargo build -p nexus-ffi 2>&1
+                $cargoArgs += "--release"
             }
+            if ($Locked) {
+                $cargoArgs += "--locked"
+            }
+            & cargo @cargoArgs 2>&1
         }
         $windowsOut = Join-Path $NativeRoot "windows-x64"
         Copy-NativeArtifact `
             -Source (Join-Path $RepoRoot "target\$ProfileDir\nexus_ffi.dll") `
             -Destination (Join-Path $windowsOut "nexus_core.dll")
 
-        # The linker's import library records the DLL name compiled into the
-        # artifact (`nexus_ffi.dll`). Regenerate it so the C harness and any
-        # other native consumer link against the shipped `nexus_core.dll`.
-        Push-Location $windowsOut
-        try {
-            Invoke-NativeStep "gendef (windows)" {
-                & gendef nexus_core.dll 2>&1 | Out-Null
+        # The GNU link tools regenerate the import library under the shipped
+        # name and build the C harness. MSVC release builders do not ship them,
+        # so their absence skips only these developer checks, never the artifact.
+        $hasGnuLinkTools = $null -ne (Get-Command gendef -ErrorAction SilentlyContinue) -and
+            $null -ne (Get-Command dlltool -ErrorAction SilentlyContinue)
+        $hasGcc = $null -ne (Get-Command gcc -ErrorAction SilentlyContinue)
+        if ($hasGnuLinkTools) {
+            # The linker's import library records the DLL name compiled into the
+            # artifact (`nexus_ffi.dll`). Regenerate it so the C harness and any
+            # other native consumer link against the shipped `nexus_core.dll`.
+            Push-Location $windowsOut
+            try {
+                Invoke-NativeStep "gendef (windows)" {
+                    & gendef nexus_core.dll 2>&1 | Out-Null
+                }
+                $definition = Get-Content -LiteralPath (Join-Path $windowsOut "nexus_core.def") -Raw
+                $definition = $definition -replace 'LIBRARY "nexus_ffi.dll"', 'LIBRARY "nexus_core.dll"'
+                Set-Content -LiteralPath (Join-Path $windowsOut "nexus_core.def") -Value $definition -Encoding Ascii
+                Invoke-NativeStep "dlltool (windows)" {
+                    & dlltool -d nexus_core.def -l libnexus_core.dll.a 2>&1
+                }
+            } finally {
+                Pop-Location
             }
-            $definition = Get-Content -LiteralPath (Join-Path $windowsOut "nexus_core.def") -Raw
-            $definition = $definition -replace 'LIBRARY "nexus_ffi.dll"', 'LIBRARY "nexus_core.dll"'
-            Set-Content -LiteralPath (Join-Path $windowsOut "nexus_core.def") -Value $definition -Encoding Ascii
-            Invoke-NativeStep "dlltool (windows)" {
-                & dlltool -d nexus_core.def -l libnexus_core.dll.a 2>&1
-            }
-        } finally {
-            Pop-Location
+        } else {
+            Write-Warning "gendef/dlltool not found; skipped the renamed import library."
         }
 
         $symbols = Get-NativeSymbols -Path (Join-Path $windowsOut "nexus_core.dll")
@@ -144,14 +167,18 @@ try {
             "Java_io_nexus_core_client_NexusNative_nativeAbiVersion",
             "JNI_OnLoad"
         )
-        foreach ($name in $required) {
-            if (-not ($symbols | Select-String -SimpleMatch $name -Quiet)) {
-                throw "Missing exported symbol: $name"
+        if ($null -eq $symbols) {
+            Write-Warning "Skipped Windows exported-symbol verification because no nm tool is available."
+        } else {
+            foreach ($name in $required) {
+                if (-not ($symbols | Select-String -SimpleMatch $name -Quiet)) {
+                    throw "Missing exported symbol: $name"
+                }
             }
+            Write-Host "  Exported symbols verified: $($required.Count) required entries present."
         }
-        Write-Host "  Exported symbols verified: $($required.Count) required entries present."
 
-        if (-not $SkipHarness) {
+        if (-not $SkipHarness -and $hasGcc -and $hasGnuLinkTools) {
             Write-Host "== Native: C harness =="
             $harnessSource = Join-Path $RepoRoot "native\c_harness\main.c"
             $harnessExe = Join-Path $windowsOut "nexus_c_harness.exe"
@@ -165,6 +192,8 @@ try {
             Invoke-NativeStep "C harness run" {
                 & $harnessExe 2>&1
             }
+        } elseif (-not $SkipHarness) {
+            Write-Warning "gcc or GNU link tools not found; skipped the C harness."
         }
     }
 
@@ -204,24 +233,52 @@ try {
             Set-Item -Path "Env:AR_$($androidTarget.EnvSuffix)" -Value (Join-Path $ndkBin "llvm-ar.exe")
             Write-Host "  target: $($androidTarget.Rust)"
             Invoke-NativeStep "cargo build (android $($androidTarget.Rust))" {
+                $cargoArgs = @("build", "-p", "nexus-ffi")
                 if ($Configuration -eq "Release") {
-                    & cargo build -p nexus-ffi --release --target $androidTarget.Rust 2>&1
-                } else {
-                    & cargo build -p nexus-ffi --target $androidTarget.Rust 2>&1
+                    $cargoArgs += "--release"
                 }
+                $cargoArgs += @("--target", $androidTarget.Rust)
+                if ($Locked) {
+                    $cargoArgs += "--locked"
+                }
+                & cargo @cargoArgs 2>&1
             }
             $androidOut = Join-Path $NativeRoot "android-$($androidTarget.Abi)"
             Copy-NativeArtifact `
                 -Source (Join-Path $RepoRoot "target\$($androidTarget.Rust)\$ProfileDir\libnexus_ffi.so") `
                 -Destination (Join-Path $androidOut "libnexus_core.so")
+            Copy-NativeArtifact `
+                -Source (Join-Path $RepoRoot "target\$($androidTarget.Rust)\$ProfileDir\libnexus_ffi.so") `
+                -Destination (Join-Path $NativeRoot "android-jni\$($androidTarget.Abi)\libnexus_core.so")
+
+            # Release Rust libraries embed debug information. Strip the packaged
+            # copies so the APK carries only loadable code and symbols needed at
+            # runtime; the build output under target/ keeps its full symbols.
+            $strip = Join-Path $ndkBin "llvm-strip.exe"
+            if (Test-Path -LiteralPath $strip) {
+                foreach ($library in @(
+                        (Join-Path $androidOut "libnexus_core.so"),
+                        (Join-Path $NativeRoot "android-jni\$($androidTarget.Abi)\libnexus_core.so")
+                    )) {
+                    Invoke-NativeStep "llvm-strip ($($androidTarget.Abi))" {
+                        & $strip --strip-debug $library 2>&1
+                    }
+                }
+            } else {
+                Write-Warning "llvm-strip not found; packaged Android libraries keep debug symbols."
+            }
 
             $symbols = Get-NativeSymbols -Path (Join-Path $androidOut "libnexus_core.so")
-            foreach ($name in @("nexus_core_abi_version", "nexus_core_create", "Java_io_nexus_core_client_NexusNative_nativeAbiVersion")) {
-                if (-not ($symbols | Select-String -SimpleMatch $name -Quiet)) {
-                    throw "Missing exported Android symbol in $($androidTarget.Abi): $name"
+            if ($null -eq $symbols) {
+                Write-Warning "Skipped Android exported-symbol verification because no nm tool is available."
+            } else {
+                foreach ($name in @("nexus_core_abi_version", "nexus_core_create", "Java_io_nexus_core_client_NexusNative_nativeAbiVersion")) {
+                    if (-not ($symbols | Select-String -SimpleMatch $name -Quiet)) {
+                        throw "Missing exported Android symbol in $($androidTarget.Abi): $name"
+                    }
                 }
+                Write-Host "  Android $($androidTarget.Abi) exported symbols verified."
             }
-            Write-Host "  Android $($androidTarget.Abi) exported symbols verified."
         }
     }
 

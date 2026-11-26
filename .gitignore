@@ -23,7 +23,7 @@ keystore.properties
 *.keystore
 *.p12
 *.pfx
-release/
+/release/
 
 # Rust
 target/
@@ -49,6 +49,9 @@ Desktop.ini
 # Local build and packaging output
 dist/
 out/
+/META-INF/
+/default-compose-desktop-*
+/default-entitlements.plist
 *.msi
 *.exe
 *.dmg
