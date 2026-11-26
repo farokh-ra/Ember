@@ -33,6 +33,11 @@ repository profile and include:
 You will receive an acknowledgement when the report is reviewed. Please allow
 time for a fix and coordinated disclosure before publishing details.
 
+The detailed intake, severity, embargo, advisory, and safe-harbor process is in
+[docs/security/DISCLOSURE_AND_ADVISORIES.md](docs/security/DISCLOSURE_AND_ADVISORIES.md).
+That document is a Stage 20 proposal and does not create a bug bounty or a
+service-level guarantee.
+
 ## Scope
 
 Examples of in-scope issues:

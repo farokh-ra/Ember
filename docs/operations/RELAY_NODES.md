@@ -7,6 +7,11 @@ Relay nodes help peers connect when a direct path is blocked by NAT, a
 firewall, or carrier-grade NAT. They forward Circuit Relay v2 traffic. They do
 not own identities, approve accounts, store user files, or inspect content.
 
+> **Public directory status:** Ember does not publish a community relay
+> directory yet. This document covers operating and testing a relay. Listing
+> criteria, independence requirements, and the current "no public list" status
+> are in [INFRASTRUCTURE_DIRECTORY.md](INFRASTRUCTURE_DIRECTORY.md).
+
 A relay can run on the same host as a bootstrap node, but the two roles are
 independent. Enabling relay serving does not make a node a bootstrap entry
 point, and DHT server mode does not enable relay serving.

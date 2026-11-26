@@ -2,10 +2,11 @@
 
 **Release date:** not yet published
 **Version:** 0.1.0 (`versionCode` 100)
-**Protocol:** `0.1.0-stage-18`
+**Protocol:** v1 (identify `0.1.0-stage-12`)
 **Database schema:** 11
 **Status:** Stage 19 release candidate. Test-signed only; production signing,
-Android runtime testing, and real-network testing remain open.
+Android runtime testing, and real-network testing remain open. See
+[Known Limitations](KNOWN_LIMITATIONS.md).
 
 ## What Ember is
 

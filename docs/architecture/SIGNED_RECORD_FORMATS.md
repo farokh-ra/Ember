@@ -6,13 +6,15 @@
 | Version | 1.1.0 |
 | Status | Stage 07 implementation reference |
 | Date | 2026-11-14 |
-| Normative sources | [ADR-0006](../decisions/ADR-0006-crypto-and-record-formats.md), [ADR-0007](../decisions/ADR-0007-protocol-boundaries-versioning.md) |
+| Normative sources | [Public protocol specification](../protocol/PROTOCOL_SPEC.md), [ADR-0006](../decisions/ADR-0006-crypto-and-record-formats.md), [ADR-0007](../decisions/ADR-0007-protocol-boundaries-versioning.md) |
 | Code | `nexus-crypto`, `nexus-identity`, `nexus-protocol`, `nexus-transfer`, `nexus-store` |
 
 This document defines the exact v1 bytes for identity IDs, canonical CBOR,
 signed record envelopes, profile, publication, chunk-manifest, and tombstone
 bodies, identity-at-rest storage, and encrypted identity backups. It also records
-the committed cross-platform vectors. Changing a byte layout, a domain tag, a
+the committed cross-platform vectors. The public, implementation-independent
+summary is [PROTOCOL_SPEC.md](../protocol/PROTOCOL_SPEC.md); this document keeps
+the deeper storage and backup detail. Changing a byte layout, a domain tag, a
 field meaning, or a canonical-encoding rule requires a protocol major-version
 review.
 
