@@ -66,10 +66,15 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "multi-source download chunk map",
         sql: include_str!("../migrations/0010_multi_source_downloads.sql"),
     },
+    Migration {
+        version: 11,
+        name: "local security controls",
+        sql: include_str!("../migrations/0011_security_hardening.sql"),
+    },
 ];
 
 /// Newest schema version understood by this build.
-pub(crate) const LATEST_VERSION: i64 = 10;
+pub(crate) const LATEST_VERSION: i64 = 11;
 
 /// Runs all outstanding migrations on the writer connection.
 pub(crate) fn run(conn: &mut Connection) -> StoreResult<()> {
@@ -256,6 +261,8 @@ mod tests {
             "search_index",
             "search_meta",
             "search_docs",
+            "blocked_peers",
+            "abuse_reports",
         ] {
             assert!(table_exists(&conn, table), "missing table {table}");
         }
@@ -423,6 +430,44 @@ mod tests {
             [&content_id],
         )
         .expect("replica may reference a publication not cached locally");
+    }
+
+    #[test]
+    fn upgrades_version_ten_database_with_local_security_tables() {
+        let mut conn = Connection::open_in_memory().expect("open memory database");
+        run_with(&mut conn, &MIGRATIONS[..10]).expect("run version ten");
+        assert_eq!(user_version(&conn), 10);
+        assert!(!table_exists(&conn, "blocked_peers"));
+        assert!(!table_exists(&conn, "abuse_reports"));
+
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES ('theme', 'dark', 42)",
+            [],
+        )
+        .expect("insert setting");
+
+        run_with(&mut conn, MIGRATIONS).expect("upgrade to latest");
+        assert_eq!(user_version(&conn), LATEST_VERSION);
+        assert!(table_exists(&conn, "blocked_peers"));
+        assert!(table_exists(&conn, "abuse_reports"));
+
+        let theme: String = conn
+            .query_row("SELECT value FROM settings WHERE key = 'theme'", [], |row| row.get(0))
+            .expect("read setting");
+        assert_eq!(theme, "dark");
+
+        conn.execute(
+            "INSERT INTO blocked_peers (peer_id, reason, note, created_at, updated_at)
+             VALUES ('12D3KooWtestpeer', 'spam', 'unsolicited', 1, 1)",
+            [],
+        )
+        .expect("insert block");
+        conn.execute(
+            "INSERT INTO abuse_reports (peer_id, category, note, created_at)
+             VALUES ('12D3KooWtestpeer', 'spam', NULL, 1)",
+            [],
+        )
+        .expect("insert report");
     }
 
     #[test]

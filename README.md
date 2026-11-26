@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/farokh-ra/Ember/actions/workflows/ci.yml"><img src="https://github.com/farokh-ra/Ember/actions/workflows/ci.yml/badge.svg?branch=main&amp;style=flat-square" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/status-Stage%2017%20complete-2EA043?style=flat-square" alt="Stage 17 complete" />
+  <img src="https://img.shields.io/badge/status-Stage%2018%20complete-2EA043?style=flat-square" alt="Stage 18 complete" />
   <img src="https://img.shields.io/badge/license-proprietary-B91C1C?style=flat-square" alt="Proprietary license" />
   <img src="https://img.shields.io/badge/Android-28%2B-3DDC84?style=flat-square&amp;logo=android&amp;logoColor=white" alt="Android 28+" />
   <img src="https://img.shields.io/badge/Windows-10%2F11-0078D4?style=flat-square&amp;logo=windows11&amp;logoColor=white" alt="Windows 10 and 11" />
@@ -33,9 +33,9 @@
 > viewable, but public visibility grants no right to copy, modify, distribute,
 > or reuse the source. See [LICENSE.md](LICENSE.md).
 >
-> **Stage 17 is complete on `feat/17-multi-peer`** and is awaiting review and merge.
-> **Stage 16 is complete on `feat/16-search`** (PR #22) and is the merge base for
-> Stage 17.
+> **Stage 18 is complete on `feat/18-security`** and is awaiting review and merge
+> as PR #25 against `main`. **Stages 16 and 17 are merged into `main`** through
+> PR #24.
 
 ## Overview
 
@@ -57,11 +57,11 @@ rewrites the original signed record.
 
 | Property | Detail |
 |---|---|
-| **Current stage** | 17 complete on `feat/17-multi-peer` · review and merge pending |
+| **Current stage** | 18 complete on `feat/18-security` · review and merge pending |
 | **Platforms** | Android 8.0+ (API 28) · Windows 10/11 x64 |
 | **UI** | Kotlin 2.4.21 · Compose Multiplatform 1.12.2 |
-| **Core** | Rust 1.99.1 · ABI 1 · FFI interface 1.10.0 · 45 callable methods |
-| **Protocol** | `0.1.0-stage-17` · schema v10 · `/nexus/file/1` · `/nexus/index/1` |
+| **Core** | Rust 1.99.1 · ABI 1 · FFI interface 1.11.0 · 51 callable methods |
+| **Protocol** | `0.1.0-stage-18` · schema v11 · `/nexus/file/1` · `/nexus/index/1` |
 | **Network** | QUIC v1 · TCP + Noise + Yamux · Kademlia DHT · Relay v2 · DCUtR · AutoNAT |
 | **Transfer** | 1 MiB verified chunks · up to 4 sources · durable per-chunk resume |
 | **Storage** | Content-addressed managed store · quota, reserve, and reference-counted cleanup |
@@ -81,11 +81,11 @@ rewrites the original signed record.
 
 ## Capabilities
 
-| Area | Delivered through Stage 17 |
+| Area | Delivered through Stage 18 |
 |---|---|
 | **Identity** | Local Ed25519 identities, stable Bech32m `nx1...` IDs, encrypted key storage, and passphrase-encrypted backups. |
 | **Signed records** | Canonical CBOR, exact-byte envelopes, profile and publication v1, revisions, and signed tombstones. |
-| **Storage** | SQLite schema v10, atomic managed imports, per-chunk download state, 10 GiB default quota, 1 GiB reserve, 4 GiB file cap, crash reconciliation, and corrupt-file quarantine. |
+| **Storage** | SQLite schema v11, atomic managed imports, per-chunk download state, 10 GiB default quota, 1 GiB reserve, 4 GiB file cap, crash reconciliation, corrupt-file quarantine, and local moderation tables. |
 | **Discovery** | Kademlia DHT, signed provider records, 24 h record TTL, persisted bootstrap peers, and bounded reconnection. |
 | **Connectivity** | QUIC v1, TCP + Noise + Yamux, authenticated direct connections, Circuit Relay v2 fallback, DCUtR hole punching, and AutoNAT reachability. |
 | **Transfer** | `/nexus/file/1`, every chunk verified before writing, up to four concurrent sources, observed-reliability scheduling, corrupt-source quarantine, per-chunk resume, and failover when a source disappears. |
@@ -94,18 +94,21 @@ rewrites the original signed record.
 | **Hosting** | Explicit `replica.add`, full verification before advertisement, pause/resume/remove, storage and upload limits, metered and battery gates, and seven-day re-verification. |
 | **Search** | Verified local FTS5 index, bounded query language, Explore modes, generation-bound pagination, signed index providers over `/nexus/index/1`, coverage labels, and conflict/duplicate handling. |
 | **Native boundary** | C ABI 1, JNI and JNA adapters, versioned CBOR envelopes, event queue, cancellation, and streaming import/export. |
-| **Quality** | 353 Rust tests, shared Kotlin JVM tests, a C harness, Windows JNA and JNI proxy checks, and seven CI jobs. |
+| **Security and abuse** | Local peer blocking, local abuse reports, blocked-peer enforcement across dial, connection, request, discovery, provider, and download sources, bounded moderation tables, and six `security.*` methods. |
+| **File safety** | Advisory type classification, visible warnings, `auto_execute: false`, and previews delegated to platform viewers or sandboxes. |
+| **Quality** | 372 Rust tests, shared Kotlin JVM tests, a C harness, Windows JNA and JNI proxy checks, and seven CI jobs. |
 
 ## Status
 
 | Area | State |
 |---|---|
-| Core foundations through Stage 17 | Complete on Windows loopback; Stages 16-17 awaiting merge |
+| Core foundations through Stage 18 | Complete on Windows loopback; Stage 18 awaiting merge |
 | Android and Windows applications | Shared clickable UI prototype with visibly labelled demo data |
 | Windows networking, transfer, profiles, publishing, hosting, search | Verified on Windows loopback |
-| Android runtime networking, hosting, and search | Libraries cross-build; on-device evidence deferred |
-| Local and distributed search | Complete on `feat/16-search`; provider role is opt-in |
+| Android runtime networking, hosting, search, and security | Libraries cross-build; on-device evidence deferred |
+| Local and distributed search | Complete; provider role is opt-in |
 | Multi-peer transfer | Complete on `feat/17-multi-peer`; up to four sources per download |
+| Local blocking, abuse reports, and safe-file notices | Complete at the core and network layers on `feat/18-security`; UI binding pending |
 | Windows installer and signed releases | Stage 19; the current Windows build is an app image |
 
 ### Honest limits
@@ -125,6 +128,15 @@ rewrites the original signed record.
 - Multi-peer speedup is measured as a deterministic scheduler simulation, not a
   realistic-network benchmark. Android runtime multi-peer transfer and resume
   are deferred.
+- Local blocking and reporting are enforced by the core and network layers but
+  are not yet rendered in the Kotlin UI. The UI still needs to show the safety
+  map and the standing notices.
+- Blocking is local. It does not remove content from the network, and a blocked
+  peer can return under a new identity.
+- File safety classification is extension-based and advisory, not malware
+  detection. Previews are delegated; Ember never executes a downloaded file.
+- No independent security review has been commissioned. The threat model and
+  privacy review record this as a pre-release gap.
 - The Windows build is an application image, not an installer. Inno Setup
   packaging is Stage 19.
 
@@ -144,7 +156,7 @@ flowchart LR
     FFI --> CORE["Rust core: lifecycle, dispatch, events"]
     CORE --> NET["libp2p: QUIC, TCP, DHT, relay, NAT traversal"]
     CORE --> XFER["Transfer: verify, resume, failover"]
-    CORE --> STORE["SQLite v9 + managed blob store"]
+    CORE --> STORE["SQLite v11 + managed blob store"]
     CORE --> SEARCH["Verified FTS5 index + optional index providers"]
     CORE --> CRYPTO["Ed25519 + signed records"]
     NET <--> PEERS[("Ember peers")]
@@ -202,8 +214,9 @@ flowchart LR
 
 ## Roadmap
 
-Stage 17 is complete and awaits review and merge as PR #24. Stage 16 is merged
-into `main` through PR #22.
+Stage 18 is complete and awaits review and merge as PR #25 against `main`.
+Stages 16 and 17 are merged into `main` through PR #24. Stage 15 is merged into
+`main`.
 
 | # | Stage | Status |
 |---|---|---|
@@ -222,18 +235,19 @@ into `main` through PR #22.
 | 13 | Profiles and signed public metadata | Complete on Windows loopback |
 | 14 | Publishing and file pages | Complete on Windows loopback |
 | 15 | Voluntary replication and availability | Complete and merged |
-| 16 | Local and distributed search | Complete on Windows loopback; merge pending |
-| 17 | Multi-peer downloads and advanced resilience | Complete on Windows loopback; merge pending |
-| 18 | Threat model, abuse tests, dependency and protocol hardening | Planned |
+| 16 | Local and distributed search | Complete and merged |
+| 17 | Multi-peer downloads and advanced resilience | Complete and merged |
+| 18 | Threat model, abuse tests, dependency and protocol hardening | Complete on Windows loopback; merge pending |
 | 19 | Signed releases, installers, performance, parity, and release evidence | Planned |
 
-**Stage 17 scope:** one download may take verified chunks from up to four
-connected peers, schedule them by observed reliability and latency, retry
-failed or corrupt chunks elsewhere, quarantine bad sources, and resume across
-peers. Every chunk is checked against the signed manifest before it is written.
+**Stage 18 scope:** local blocking and abuse reports with bounded storage,
+enforcement at dial, connection, request, discovery, provider, and download
+source layers, advisory safe-file warnings, delegated previews, malformed-input
+tests, a threat model, a privacy review, and a security release checklist.
+Downloaded content is never executed.
 
-Android runtime evidence for Stages 08–17 remains deferred. Those gaps do not
-change the completed Windows-loopback evidence for Stage 17.
+Android runtime evidence for Stages 08-18 remains deferred. Those gaps do not
+change the completed Windows-loopback evidence for Stage 18.
 
 ## Quick start
 
@@ -347,6 +361,10 @@ commits, reviews, and releases.
 | [docs/architecture/FILE_TRANSFER.md](docs/architecture/FILE_TRANSFER.md) | `/nexus/file/1`, chunk verification, resume, failover, and limits. |
 | [docs/progress/STAGE_16.md](docs/progress/STAGE_16.md) | Stage 16 scope, architecture, tests, and verification evidence. |
 | [docs/progress/STAGE_17.md](docs/progress/STAGE_17.md) | Stage 17 multi-peer scheduling, resilience, schema, tests, and verification evidence. |
+| [docs/progress/STAGE_18.md](docs/progress/STAGE_18.md) | Stage 18 threat model, blocking, abuse reports, safe files, tests, and verification evidence. |
+| [docs/security/THREAT_MODEL.md](docs/security/THREAT_MODEL.md) | Assets, boundaries, threats, controls, residual risks, and non-goals. |
+| [docs/security/PRIVACY_REVIEW.md](docs/security/PRIVACY_REVIEW.md) | Data inventory, public and local data, telemetry, retention, and findings. |
+| [docs/security/SECURITY_RELEASE_CHECKLIST.md](docs/security/SECURITY_RELEASE_CHECKLIST.md) | Release gate for versions, analysis, keys, protocol, abuse, files, privacy, storage, and supply chain. |
 | [docs/HANDOFF.md](docs/HANDOFF.md) | Current project state, decisions, and exact next action. |
 | [docs/decisions](docs/decisions/README.md) | Accepted architecture decision records. |
 | [docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md) | Repeatable Windows setup and troubleshooting. |
@@ -369,6 +387,12 @@ phrases, or personal data. Report vulnerabilities privately as described in
 [SECURITY.md](SECURITY.md); do not open a public issue with exploit details.
 Debug logs must be redacted according to
 [docs/LOGGING_POLICY.md](docs/LOGGING_POLICY.md).
+
+Stage 18 documents the current threat model, privacy review, and release gate in
+[docs/security](docs/security/THREAT_MODEL.md). Local blocking and abuse reports
+stay on the device. Downloaded files are never executed, and previews are
+delegated to platform handlers or a sandbox. No telemetry or automatic crash
+reporting is enabled.
 
 ## License
 

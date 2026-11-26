@@ -34,6 +34,7 @@ use crate::error::{CoreError, DomainCode, DomainError};
 use crate::event::{EventQueue, PendingEvent};
 use crate::hosting::HostingState;
 use crate::network::domain_error as network_domain_error;
+use crate::safety::safety_value;
 
 /// Number of worker threads dedicated to downloads.
 pub const DOWNLOAD_WORKERS: usize = 2;
@@ -522,6 +523,10 @@ fn finish_cancel(context: &DownloadContext, download_id: &str, keep: bool) {
 }
 
 fn emit_completed(context: &DownloadContext, download_id: &str, content_id: &str, size: u64) {
+    let display_name = context
+        .store
+        .download(download_id)
+        .map_or_else(|_| String::new(), |record| record.display_name);
     let event = PendingEvent::durable(
         "download.completed",
         Value::Map(vec![
@@ -531,6 +536,11 @@ fn emit_completed(context: &DownloadContext, download_id: &str, content_id: &str
             ),
             (Value::Text("content_id".to_owned()), Value::Text(content_id.to_owned())),
             (Value::Text("size".to_owned()), Value::Unsigned(size)),
+            (
+                Value::Text("display_name".to_owned()),
+                Value::Text(display_name.clone()),
+            ),
+            (Value::Text("safety".to_owned()), safety_value(&display_name)),
         ]),
     )
     .with_download(download_id.to_owned());
@@ -574,6 +584,11 @@ fn transfer(
                     Value::Unsigned(u64::from(metadata.chunk_map.total())),
                 ),
                 (Value::Text("sources".to_owned()), peer_list_value(&job.sources)),
+                (
+                    Value::Text("display_name".to_owned()),
+                    Value::Text(metadata.display_name.clone()),
+                ),
+                (Value::Text("safety".to_owned()), safety_value(&metadata.display_name)),
             ]),
         )
         .with_download(job.download_id.clone());
@@ -608,6 +623,7 @@ fn transfer(
             Value::Text("display_name".to_owned()),
             Value::Text(metadata.display_name.clone()),
         ));
+        data.push((Value::Text("safety".to_owned()), safety_value(&metadata.display_name)));
         let event = PendingEvent::durable("download.started", Value::Map(data)).with_download(job.download_id.clone());
         let _ = context.events.push(event);
     }
@@ -1346,10 +1362,6 @@ fn now_secs() -> u64 {
 impl Engine {
     pub(crate) fn download_start(&self, params: &Value) -> Result<MethodOutcome, CoreError> {
         self.require_running()?;
-        let network = match self.require_network() {
-            Ok(network) => network,
-            Err(error) => return Ok(MethodOutcome::Domain(error)),
-        };
         let publication_id = optional_text(params, "publication_id")?;
         let content_id = optional_text(params, "content_id")?;
         if publication_id.is_none() && content_id.is_none() {
@@ -1367,6 +1379,17 @@ impl Engine {
             )
         };
         let sources = parse_sources(params)?;
+        let sources = self.without_blocked_sources(sources)?;
+        if sources.is_empty() {
+            return Ok(MethodOutcome::Domain(DomainError::new(
+                DomainCode::PermissionDenied,
+                "Every selected source is blocked on this device.",
+            )));
+        }
+        let network = match self.require_network() {
+            Ok(network) => network,
+            Err(error) => return Ok(MethodOutcome::Domain(error)),
+        };
         let download_id = match optional_text(params, "download_id")? {
             Some(id) => {
                 validate_download_id(&id)?;
@@ -1482,10 +1505,6 @@ impl Engine {
 
     pub(crate) fn download_resume(&self, params: &Value) -> Result<MethodOutcome, CoreError> {
         self.require_running()?;
-        let network = match self.require_network() {
-            Ok(network) => network,
-            Err(error) => return Ok(MethodOutcome::Domain(error)),
-        };
         let download_id = required_text(params, "download_id")?;
         let record = self.store.download(&download_id)?;
         if record.state == DownloadState::Completed {
@@ -1516,6 +1535,17 @@ impl Engine {
                 "a source peer is required to resume this download",
             ));
         }
+        let sources = self.without_blocked_sources(sources)?;
+        if sources.is_empty() {
+            return Ok(MethodOutcome::Domain(DomainError::new(
+                DomainCode::PermissionDenied,
+                "Every selected source is blocked on this device.",
+            )));
+        }
+        let network = match self.require_network() {
+            Ok(network) => network,
+            Err(error) => return Ok(MethodOutcome::Domain(error)),
+        };
         let control = Arc::new(DownloadControl::new());
         {
             let mut running = lock_downloads(&self.downloads);
@@ -1701,6 +1731,15 @@ impl Engine {
         .with_download(record.download_id.clone());
         self.try_emit(event);
     }
+
+    /// Drops locally blocked peers from a source list before any request.
+    fn without_blocked_sources(&self, sources: Vec<String>) -> Result<Vec<String>, CoreError> {
+        let blocked = self.store.blocked_peers()?;
+        Ok(sources
+            .into_iter()
+            .filter(|source| !blocked.iter().any(|entry| &entry.peer_id == source))
+            .collect())
+    }
 }
 
 fn download_record_value(record: &DownloadRecord) -> Value {
@@ -1743,6 +1782,7 @@ fn download_record_value(record: &DownloadRecord) -> Value {
         ),
         (Value::Text("created_at".to_owned()), Value::Unsigned(record.created_at)),
         (Value::Text("updated_at".to_owned()), Value::Unsigned(record.updated_at)),
+        (Value::Text("safety".to_owned()), safety_value(&record.display_name)),
     ])
 }
 

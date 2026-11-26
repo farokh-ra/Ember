@@ -56,6 +56,9 @@ pub enum NetError {
     /// The peer is not currently connected.
     #[error("the peer is not connected")]
     NotConnected,
+    /// Local policy blocks this peer.
+    #[error("the peer is blocked locally")]
+    PeerBlocked,
     /// No configured relay is connected or reachable.
     #[error("no relay is available")]
     RelayUnavailable,
@@ -119,6 +122,7 @@ impl NetError {
             Self::UnsupportedProtocol => "unsupported_protocol",
             Self::PeerNotFound => "not_found",
             Self::NotConnected => "not_connected",
+            Self::PeerBlocked => "peer_blocked",
             Self::RelayUnavailable => "relay_unavailable",
             Self::RelayReservationFailed => "relay_reservation_failed",
             Self::HolePunchFailed => "hole_punch_failed",

@@ -3,8 +3,8 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-FFI-001 |
-| Version | 1.10.0 (ABI 1) |
-| Status | Implemented through Stage 17; Android runtime verification deferred |
+| Version | 1.11.0 (ABI 1) |
+| Status | Implemented through Stage 18; Android runtime verification deferred |
 | Date | 2026-11-24 |
 | Header | [nexus_core.h](nexus_core.h) |
 | Related | [ADR-0003](../decisions/ADR-0003-ffi-c-abi-jni-jna.md), [Architecture](../ARCHITECTURE.md) |
@@ -264,10 +264,16 @@ All production methods are available on both Android and Windows. Method IDs are
 | 0x0A03 | `diagnostics.export` | A | `sections` | `diagnostics.ready` with redacted archive bytes. |
 | 0x0B01 | `test.echo` | D | `payload` | Echo payload for Stage 08 integration. |
 | 0x0B02 | `test.fault` | D | `fault`, `delay_ms` | Injected fault for Stage 08 and 19 tests. |
+| 0x0C01 | `security.block_list` | S | none | Local block list with `count`, `cap`, and `peers`. |
+| 0x0C02 | `security.block_add` | S | `peer_id`, `reason?`, `note?` | Blocked peer with reason, bounded local note, and timestamps; emits `security.peer_blocked`. |
+| 0x0C03 | `security.block_remove` | S | `peer_id` | `{peer_id, removed}`; emits `security.peer_unblocked` when a row was removed. |
+| 0x0C04 | `security.report_add` | S | `peer_id`, `category?`, `note?` | Local abuse report with `report_id`, category, note, and timestamp. |
+| 0x0C05 | `security.report_list` | S | `limit?` | Newest local reports with `count`, `total`, and `local_only`. |
+| 0x0C06 | `security.notices` | S | none | Safety notices, `auto_execute: false`, and `previews: "delegated"`. |
 
 Method IDs are grouped by domain. A future minor ABI may add methods in unused IDs; a released ID is never renumbered. Unknown IDs return `NEXUS_STATUS_UNSUPPORTED` with a domain error.
 
-Stage 17 implements forty-five callable methods: `system.info`, `system.health`, `system.snapshot`, the three `profile.*` methods above, the five `publication.*` methods above, `store.usage`, `store.set_quota`, the thirteen `network.*` methods above, the three search and Explore methods above, the six `download.*` methods, the six `replica.*` methods, the two `hosting.*` methods, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
+Stage 18 implements fifty-one callable methods: `system.info`, `system.health`, `system.snapshot`, the three `profile.*` methods above, the five `publication.*` methods above, `store.usage`, `store.set_quota`, the thirteen `network.*` methods above, the three search and Explore methods above, the six `download.*` methods, the six `replica.*` methods, the two `hosting.*` methods, the six `security.*` methods above, `test.echo`, and `test.fault`. Every other row above is reserved for its owning stage and currently returns `NEXUS_STATUS_UNSUPPORTED`. `test.*` additionally requires `enable_test_methods` in the config.
 
 ### 6.1 Network method semantics
 
@@ -378,6 +384,15 @@ Stage 17 implements forty-five callable methods: `system.info`, `system.health`,
 - Sensitivity: query text, result rows, and provider IDs are safe plain text. Titles and summaries are sanitized and truncated before they leave the core. Provider IDs are peer identifiers, not identities or authorities, and `verified` means signature-valid, not endorsed.
 - The optional provider role is enabled by `search_provider` at create time. A provider answers bounded `/nexus/index/1` requests from the same verified local index, re-reads exact signed bytes, and never returns draft or tombstoned records. The role announcement is best-effort and retried for up to 60 seconds after a DHT peer appears.
 
+### 6.9 Security method semantics
+
+- `security.block_list`, `security.block_add`, `security.block_remove`, `security.report_add`, `security.report_list`, and `security.notices` are local queries. They never contact another peer and never publish or upload their contents.
+- A block is keyed by network peer ID and stores a reason (`manual`, `spam`, `malware`, `impersonation`, `harassment`, `scam`, or `other`) plus an optional note capped at 512 bytes. Re-blocking updates the reason and note in place and keeps the original block time. The store is capped at 4096 blocks by default; the cap is enforced inside one writer transaction.
+- `security.report_add` appends a local report with category (`spam`, `malware`, `impersonation`, `harassment`, `scam`, or `other`) and an optional 512-byte note. Reports are capped at 4096 entries by default. There is no central moderation authority and no automatic report upload.
+- Blocked peers are refused by the networking layer: existing connections are closed, new inbound and outbound attempts return `peer_blocked`, discovery results omit them, and inbound test, file, and index requests receive a `blocked` response. `download.start` and `download.resume` drop blocked sources before any request and return `permission_denied` when every source is blocked.
+- `security.notices` always returns `auto_execute: false` and `previews: "delegated"`. Its notices cover no automatic execution, delegated previews, identity/key backup, public visibility of published records, and the local-only nature of blocking.
+- `download.started`, `download.resumed`, `download.completed`, and `download.list` include a `safety` map with `category`, `warn`, `message`, `auto_execute: false`, and `preview: "delegated"`. Categories are `document`, `media`, `archive`, `executable`, `script`, and `unknown`; the UI must show the warning before delegating the file to a platform handler.
+
 ## 7. Domain error codes
 
 | Code | Retryable | Typical cause |
@@ -392,11 +407,11 @@ Stage 17 implements forty-five callable methods: `system.info`, `system.health`,
 | `timeout` | Yes | Bounded deadline expired. |
 | `cancelled` | Yes | User or lifecycle cancellation. |
 | `io_error` | Sometimes | Local file, database, or export failure. |
-| `permission_denied` | After user action | Missing platform permission or inaccessible picker result. |
+| `permission_denied` | After user action | Missing platform permission, inaccessible picker result, or a locally blocked peer or source. |
 | `locked` | After user action | Identity is locked because the LEK is unavailable. |
 | `internal` | With diagnostics | Guarded core fault. |
 
-Network failures add a `net_code` detail from a small stable set: `disabled`, `invalid_config`, `invalid_address`, `missing_peer_id`, `invalid_peer_id`, `message_too_large`, `peer_key_locked`, `peer_key_unavailable`, `peer_key_invalid`, `not_running`, `busy`, `network_unavailable`, `timeout`, `connection_failed`, `wrong_peer_id`, `unsupported_protocol`, `not_found`, `not_connected`, `rejected`, `io_error`, `crypto_error`, and `driver_failed`. A wrong remote identity maps to `verification_failed` with `net_code` = `wrong_peer_id`.
+Network failures add a `net_code` detail from a small stable set: `disabled`, `invalid_config`, `invalid_address`, `missing_peer_id`, `invalid_peer_id`, `message_too_large`, `peer_key_locked`, `peer_key_unavailable`, `peer_key_invalid`, `not_running`, `busy`, `network_unavailable`, `timeout`, `connection_failed`, `wrong_peer_id`, `unsupported_protocol`, `not_found`, `not_connected`, `peer_blocked`, `rejected`, `io_error`, `crypto_error`, and `driver_failed`. A wrong remote identity maps to `verification_failed` with `net_code` = `wrong_peer_id`; a locally blocked peer maps to `permission_denied` with `net_code` = `peer_blocked`.
 
 ## 8. Streaming file APIs
 
@@ -473,7 +488,7 @@ NexusStatus nexus_core_export_close(
 
 Events use the envelope in section 5.4.
 
-Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. Stage 13 adds the `profile.*` signed-profile family. Stage 14 adds the `publication.*` publishing family. Stage 15 adds the `replica.*` hosting family and `hosting.limits_changed`. Stage 16 adds `search.result_page` and `search.completed`; Explore is synchronous and emits no events. Stage 17 extends the `download.*` events with chunk counters and observed per-source statistics; no new event type is added. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
+Stage 08 emits `core.state` (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`), `core.stopped`, `identity.ready`, `identity.locked`, and the `test.progress` / `test.completed` / `test.failed` / `test.cancelled` family. Stage 09 adds the `network.state` / `network.peer_event` reports and the `network.reconnect_*`, `network.connect_*`, and `network.test_*` terminal events. Stage 10 adds the `network.discovery_*` terminal events. Stage 11 extends the peer and connect events with path and relay fields; no new event type is added. Stage 12 adds the `download.*` transfer family. Stage 13 adds the `profile.*` signed-profile family. Stage 14 adds the `publication.*` publishing family. Stage 15 adds the `replica.*` hosting family and `hosting.limits_changed`. Stage 16 adds `search.result_page` and `search.completed`; Explore is synchronous and emits no events. Stage 17 extends the `download.*` events with chunk counters and observed per-source statistics; no new event type is added. Stage 18 adds `security.peer_blocked` and `security.peer_unblocked` and attaches a `safety` map to download events and listings; downloads are never executed. The remaining rows are reserved for their owning stages; they are documented now so IDs and semantics do not drift.
 
 | Event | Meaning | Data |
 |---|---|---|
@@ -622,6 +637,8 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 - Unsafe code is confined to `nexus-ffi` and the JNI shim, with documented invariants; fuzzing is scheduled for Stage 19.
 - Panic payloads are not exposed to the UI; only a redacted internal error and diagnostics marker are returned.
 - The handle registry prevents use-after-free; stale handles return `NEXUS_STATUS_INVALID_HANDLE`.
+- Local blocks and abuse reports are never uploaded, announced, or written into signed records. A user-initiated metadata export is a full local database snapshot and therefore includes these rows; it is a private file, and a diagnostics export must exclude them.
+- Downloaded content is never executed. File safety classification is advisory, and previews are delegated to a platform viewer or sandbox, never opened in the core process.
 
 ## 13. Verification plan
 
@@ -655,6 +672,9 @@ The C harness compiles against `nexus_core.h` and covers the same lifecycle, ech
 | 17 | Chunks from two peers combine into one file, and each chunk is verified against the signed manifest before it is written. | Passed in `nexus-core/tests/stage17.rs` and the `nexus-core` multi-peer unit tests. |
 | 17 | A corrupt or disappearing source cannot silently corrupt the file or stop the download while another usable source remains. | Passed in the `nexus-transfer` scheduler tests and the `nexus-core` malicious-peer and source-loss tests. |
 | 17 | A paused download resumes from verified chunks across peers, and locally corrupted chunks are re-verified and refetched. | Passed in the `nexus-store` chunk-map tests and the `nexus-core` cross-peer resume tests. |
+| 18 | Local blocks and reports persist, stay device-local, enforce bounded caps, and reject malformed identifiers and notes. | Passed in `nexus-store/tests/stage18.rs` and `nexus-core/tests/stage18.rs`. |
+| 18 | Blocked peers are excluded from download sources and refused by the network layer, and safety notices state that downloads are never executed. | Passed in `nexus-core/tests/stage18.rs` and the `nexus-net` shared-state tests. |
+| 18 | Truncated and mutated protocol messages and oversized requests are rejected without panicking. | Passed in the `nexus-protocol` file-codec tests and `nexus-core/tests/stage18.rs`. |
 | 19 | Fuzzing covers malformed CBOR, oversized buffers, invalid handles, and cancellation races. | Not yet implemented. |
 
 The detailed evidence, commands, and test counts are in
@@ -662,4 +682,5 @@ The detailed evidence, commands, and test counts are in
 [STAGE_10.md](../progress/STAGE_10.md), [STAGE_11.md](../progress/STAGE_11.md),
 [STAGE_12.md](../progress/STAGE_12.md), [STAGE_13.md](../progress/STAGE_13.md),
 [STAGE_14.md](../progress/STAGE_14.md), [STAGE_15.md](../progress/STAGE_15.md),
-[STAGE_16.md](../progress/STAGE_16.md), and [STAGE_17.md](../progress/STAGE_17.md).
+[STAGE_16.md](../progress/STAGE_16.md), [STAGE_17.md](../progress/STAGE_17.md), and
+[STAGE_18.md](../progress/STAGE_18.md).

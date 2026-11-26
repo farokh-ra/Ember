@@ -222,6 +222,27 @@ impl Network {
         self.shared.peers()
     }
 
+    /// Replaces the local block list enforced by this node.
+    ///
+    /// Blocking is local: the list is never announced, shared, or uploaded.
+    /// Existing connections from a newly blocked peer are closed on the next
+    /// driver step and later requests are refused.
+    pub fn set_blocked_peers(&self, peers: Vec<String>) {
+        self.shared.set_blocked(peers);
+    }
+
+    /// Number of locally blocked peers currently enforced.
+    #[must_use]
+    pub fn blocked_peer_count(&self) -> usize {
+        self.shared.blocked_count()
+    }
+
+    /// Returns true when local policy blocks the peer.
+    #[must_use]
+    pub fn is_peer_blocked(&self, peer_id: &str) -> bool {
+        self.shared.is_blocked(peer_id)
+    }
+
     /// Persisted bootstrap and manual peer addresses.
     #[must_use]
     pub fn bootstrap_list(&self) -> Vec<String> {
