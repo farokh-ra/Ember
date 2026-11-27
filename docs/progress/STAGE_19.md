@@ -4,7 +4,7 @@
 production-signing evidence unavailable
 **Completed:** 2026-11-26
 **Branch:** `feat/19-release`, based on Stage 18 commit `4932c69`
-**Pull request:** #26 (`feat/19-release` -> `main`), open and awaiting review
+**Pull request:** #26 (`feat/19-release` -> `main`), merged as `2c2b7cf`
 **Progress guide:** 90-95%
 **Next stage:** 20 - global launch and ongoing network governance (requires
 explicit project-owner approval)

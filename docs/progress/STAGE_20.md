@@ -1,10 +1,10 @@
 # Stage 20 Evidence: Global Launch and Network Governance
 
 **Status:** Repository deliverables complete; public launch blocked
-**Branch:** `feat/20-launch`, stacked on Stage 19 `feat/19-release`
-**Pull requests:** #27 (`feat/20-launch` -> `feat/19-release`); #28
-(`chore/20-launch-readiness` -> `feat/20-launch`) adds the launch-readiness
-follow-up
+**Branch:** `feat/20-launch`, merged into Stage 19 `feat/19-release`
+**Pull requests:** #27 (`feat/20-launch` -> `feat/19-release`) merged as
+`4f38a8a`; #28 (`chore/20-launch-readiness` -> `feat/19-release`) adds the
+launch-readiness follow-up
 **Last updated:** 2026-11-27
 
 Stage 20 is the final roadmap stage. It covers public protocol documentation,

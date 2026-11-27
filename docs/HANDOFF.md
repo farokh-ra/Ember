@@ -3,10 +3,10 @@
 **Current stage:** 20 - global launch and ongoing network governance
 **Stage status:** Repository deliverables complete; public launch blocked
 **Last updated:** 2026-11-27
-**Branch:** `feat/20-launch`, stacked on Stage 19 `feat/19-release`
-**Pull requests:** #28 (`chore/20-launch-readiness` -> `feat/20-launch`), #27
-(`feat/20-launch` -> `feat/19-release`), and #26 (`feat/19-release` -> `main`)
-are open and unmerged
+**Branch:** `chore/20-launch-readiness`, based on Stage 20 `feat/20-launch`
+**Pull requests:** #28 (`chore/20-launch-readiness` -> `feat/19-release`) is
+open; #27 (`feat/20-launch` -> `feat/19-release`) is merged as `4f38a8a`; #26
+(`feat/19-release` -> `main`) is merged as `2c2b7cf`
 **Next stage:** none in the roadmap; launch readiness and maintenance remain
 
 ## What Stage 20 adds
@@ -35,9 +35,9 @@ satisfy the production launch gate.
 
 ## Launch-readiness follow-up
 
-A stacked change on `chore/20-launch-readiness`, open as PR #28, closes the
-repository-side supply-chain gap and fills the community files. It still does
-not publish a release.
+A change on `chore/20-launch-readiness`, open as PR #28 against
+`feat/19-release`, closes the repository-side supply-chain gap and fills the
+community files. It still does not publish a release.
 
 - Gradle dependency locking is enabled for every project; one `gradle.lockfile`
   per project and `settings-gradle.lockfile` are committed.
@@ -200,16 +200,15 @@ trusted. See [STAGE_19.md](progress/STAGE_19.md) for the full record.
 
 ## Exact next action
 
-1. Keep PR #26 open; do not merge without project-owner approval.
-2. Keep PR #27 open against `feat/19-release`; do not merge it without
-   approval.
-3. Keep PR #28 open against `feat/20-launch`; do not merge it without approval.
-4. Obtain production signing material and collect Android and Windows 11
+1. Keep PR #28 open against `feat/19-release`; do not merge it without approval.
+2. Obtain project-owner approval to open `feat/19-release` -> `main` so Stage 20
+   and the launch-readiness follow-up reach `main`.
+3. Obtain production signing material and collect Android and Windows 11
    evidence before any public release.
-5. Run a closed alpha or beta and record failures.
-6. Recruit an independent client implementer or operator, or explicitly scope a
+4. Run a closed alpha or beta and record failures.
+5. Recruit an independent client implementer or operator, or explicitly scope a
    limited preview without an interoperability claim.
-7. Obtain owner approval for governance, disclosure, directory, and launch
+6. Obtain owner approval for governance, disclosure, directory, and launch
    policy.
-8. Review and approve the generated third-party notice bundle.
-9. Re-run the full release gate before publishing any artifact.
+7. Review and approve the generated third-party notice bundle.
+8. Re-run the full release gate before publishing any artifact.

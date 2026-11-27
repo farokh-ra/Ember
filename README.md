@@ -33,11 +33,10 @@
 > viewable, but public visibility grants no right to copy, modify, distribute,
 > or reuse the source. See [LICENSE.md](LICENSE.md).
 >
-> **Stage 20 repository deliverables are complete on `feat/20-launch`** and are
-> awaiting review as PR #27 against `feat/19-release`. The launch-readiness
-> follow-up is PR #28, stacked on `feat/20-launch`. **Stage 19 is PR #26**
-> against `main`. **Stage 18 is merged into `main`** as `8876350`, and **Stages
-> 16 and 17 are merged** through PR #24.
+> **Stage 20 is merged into `feat/19-release`** as merge commit `4f38a8a` (PR
+> #27). The launch-readiness follow-up is PR #28, stacked on `feat/19-release`.
+> **Stage 19 is merged into `main`** as `2c2b7cf` (PR #26). **Stage 18 is merged
+> into `main`** as `8876350`, and **Stages 16 and 17 are merged** through PR #24.
 >
 > Stage 20 does not mean Ember has launched. Production signing, Android runtime
 > evidence, independent-client interoperability, public infrastructure, and
@@ -112,7 +111,7 @@ rewrites the original signed record.
 | Area | State |
 |---|---|
 | Core foundations through Stage 18 | Complete on Windows loopback; Stage 18 merged |
-| Stage 19 release engineering | PR #26 open; test-signed, with Android runtime and production signing pending |
+| Stage 19 release engineering | Merged as `2c2b7cf`; test-signed, with Android runtime and production signing pending |
 | Stage 20 launch and governance | Repository deliverables complete; public launch blocked |
 | Android and Windows applications | Shared clickable UI prototype with visibly labelled demo data |
 | Windows networking, transfer, profiles, publishing, hosting, search | Verified on Windows loopback |
@@ -253,9 +252,9 @@ flowchart LR
 
 ## Roadmap
 
-Stage 20 repository deliverables are complete on `feat/20-launch` as PR #27,
-stacked on `feat/19-release`. The launch-readiness follow-up is PR #28 against
-`feat/20-launch`. Stage 19 is PR #26 against `main`. Stage 18 is merged into
+Stage 20 repository deliverables are complete and merged into `feat/19-release`
+as PR #27; the launch-readiness follow-up is PR #28 against `feat/19-release`.
+Stage 19 is merged into `main` as `2c2b7cf` (PR #26). Stage 18 is merged into
 `main` as `8876350`. Stages 16 and 17 are merged through PR #24, and Stage 15 is
 merged into `main`.
 
@@ -279,7 +278,7 @@ merged into `main`.
 | 16 | Local and distributed search | Complete and merged |
 | 17 | Multi-peer downloads and advanced resilience | Complete and merged |
 | 18 | Threat model, abuse tests, dependency and protocol hardening | Complete on Windows loopback; merged |
-| 19 | Signed releases, installers, performance, parity, and release evidence | Complete and test-signed; PR #26 open; Android runtime and production signing pending |
+| 19 | Signed releases, installers, performance, parity, and release evidence | Complete and test-signed; merged as `2c2b7cf`; Android runtime and production signing pending |
 | 20 | Global launch and network governance | Repository deliverables complete; public launch blocked |
 
 **Stage 19 scope:** per-user Windows MSI and portable package, signed Android
