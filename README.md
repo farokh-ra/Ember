@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/farokh-ra/Ember/actions/workflows/ci.yml"><img src="https://github.com/farokh-ra/Ember/actions/workflows/ci.yml/badge.svg?branch=main&amp;style=flat-square" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/status-Stage%2020%20in%20progress-D29922?style=flat-square" alt="Stage 20 in progress" />
+  <img src="https://img.shields.io/badge/status-launch%20readiness%20pending-D29922?style=flat-square" alt="Launch readiness pending" />
   <img src="https://img.shields.io/badge/license-proprietary-B91C1C?style=flat-square" alt="Proprietary license" />
   <img src="https://img.shields.io/badge/Android-28%2B-3DDC84?style=flat-square&amp;logo=android&amp;logoColor=white" alt="Android 28+" />
   <img src="https://img.shields.io/badge/Windows-10%2F11-0078D4?style=flat-square&amp;logo=windows11&amp;logoColor=white" alt="Windows 10 and 11" />
