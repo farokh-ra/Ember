@@ -13,6 +13,11 @@ This document describes how decisions are made today and how the project
 intends to make them as contributors and independent operators join. It is a
 draft, not a claim that a community governance structure already exists.
 
+The repository front door is [GOVERNANCE.md](../../GOVERNANCE.md). Participation
+is covered by the [Code of Conduct](../../CODE_OF_CONDUCT.md); support scope is
+in [SUPPORT.md](../../SUPPORT.md); security reports follow
+[SECURITY.md](../../SECURITY.md).
+
 ## 1. Scope
 
 Governance covers:

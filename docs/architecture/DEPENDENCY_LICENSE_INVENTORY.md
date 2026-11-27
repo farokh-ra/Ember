@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Document ID | NEXUS-ARCH-DEPS-001 |
-| Version | 1.9.0 |
-| Status | Stage 16 search reuses existing crates; later-stage direct dependencies remain planned |
-| Date | 2026-11-24 |
+| Version | 2.0.0 |
+| Status | Stage 20 supply-chain controls implemented; public-release evidence still pending |
+| Date | 2026-11-26 |
 | Policy source | [ADR-0009](../decisions/ADR-0009-build-packaging-dependency-policy.md) |
 | Architecture | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 
@@ -59,7 +59,7 @@ Build-only tools may use other licenses because they are not distributed with th
 | cargo-deny | 0.20.2 | MIT OR Apache-2.0 | License, advisory, and source gates | CI and release. |
 | cargo-audit | 0.23.0 | Apache-2.0 OR MIT | Advisory scan | CI and release. |
 | cargo-nextest | 0.9.151 | Apache-2.0 OR MIT | Rust test runner | CI. |
-| CycloneDX tooling | Version pinned before release | Apache-2.0 | SBOM generation | Required before the first public release; not yet active. |
+| CycloneDX generator | `scripts/generate_sbom.py` (CycloneDX 1.5 JSON) | Apache-2.0 | SBOM generation | Runs in CI and the release script; derives components from `Cargo.lock` and `gradle/verification-metadata.xml`. |
 
 ## 4. Rust direct dependencies
 
@@ -202,7 +202,7 @@ JNA is used under the Apache-2.0 option. The LGPL option is not selected. Test-o
 - GPLv2+CE JDK: include the license, notices, and source availability information for the bundled runtime.
 - EPL-2.0 JUnit: test-only; keep out of release artifacts.
 
-The release pipeline must generate a third-party notices file from the SBOM and license reports and package it with the Windows application and link it from the Android About screen and the project release notes. Stage 19 does not generate an SBOM or a notices file yet; this is a documented pre-release gap.
+The release pipeline generates a third-party notice bundle from the SBOM and local licence files with `scripts/generate_sbom.py`. It packages the stable summary `THIRD_PARTY_NOTICES.md` and `LICENSE.md` inside the Windows application, ships the full bundle next to the release artifacts, and records both digests in `release-manifest.json`. The full bundle is best-effort: some build-only archives ship no licence file, and the generator reports those components. A public release requires a reviewed bundle with no unexplained component. See [SBOM_AND_NOTICES.md](../release/SBOM_AND_NOTICES.md). Linking the bundle from an Android About screen remains UI work because the current screens are prototypes.
 
 ## 9. Verification and update process
 
@@ -210,9 +210,10 @@ The release pipeline must generate a third-party notices file from the SBOM and 
 |---|---|---|
 | Rust license, ban, source, advisory check | `cargo deny check` | 03 and every release |
 | Rust advisory scan | `cargo audit` | 03 and every release |
-| Gradle dependency locking and verification | Enable and commit lockfiles plus verification metadata; clean build with locks | Before first signed release |
-| Gradle license report | Dependency license report reviewed against section 2 | Before first signed release and every dependency change |
-| SBOM | CycloneDX for Android, Windows, and Rust | Required before the first public release; not yet implemented. |
+| Gradle dependency locking and verification | Committed `gradle.lockfile` files plus `gradle/verification-metadata.xml`; CI fails on drift | Implemented in the launch-readiness change; every dependency change |
+| Gradle license report | Dependency license report reviewed against section 2 | Every dependency change |
+| SBOM | CycloneDX 1.5 JSON for the Cargo and Maven build graph | Implemented; CI generates and uploads it |
+| Third-party notice bundle | Generated notice summary, unique licence texts, component mapping, and SBOM copy | Implemented in the release script; reviewed bundle still required before a public release |
 | Release artifact inspection | No test, debug, or build-only package in the app | 19 |
 | New dependency review | Reason, license, platform support, owner, fallback recorded here | Before merge |
 
@@ -255,7 +256,10 @@ evidence it does not have.
 | Confirm Android Rust cross-compilation and native library packaging. | 08 | Complete for arm64-v8a and x86_64. Both `libnexus_core.so` files build, package, and export-check; runtime execution is deferred. |
 | Confirm the C ABI compiles and runs through an independent C consumer. | 08 | Complete on Windows. The C harness compiles against `nexus_core.h` with `-Wall -Wextra -Werror`, passes 100 lifecycle cycles, and verifies events, errors, panic containment, cancellation, and streaming. |
 | Confirm WiX 3.14.1 produces a per-user MSI and upgrades in place. | 19 | Complete on Windows 10: install, 0.1.0 -> 0.1.1 upgrade, and uninstall were verified. The MSI does not yet prompt to keep user data on uninstall. |
-| Confirm the bundled JDK notices and source availability text are packaged. | 19 | Not yet complete; recorded as a release gap. |
+| Generate Gradle dependency locks and SHA-256 verification metadata. | 20 | Complete. One `gradle.lockfile` per project, `settings-gradle.lockfile`, and `gradle/verification-metadata.xml` are committed; CI rejects drift. Generated on Windows only. |
+| Generate a CycloneDX SBOM. | 20 | Complete. `scripts/generate_sbom.py` emits CycloneDX 1.5 JSON from `Cargo.lock` and the verification metadata; CI uploads it. |
+| Generate and package third-party notices. | 20 | Implemented. The stable summary and `LICENSE.md` ship in the Windows app; the full bundle is generated next to the release artifacts. Not yet legally reviewed. |
+| Confirm the bundled JDK notices and source availability text are packaged. | 19, 20 | Partial. The generator copies `JAVA_HOME/legal` into the notice bundle, but no lawyer or release reviewer has accepted the result. |
 
 ## 11. Dependency ownership
 

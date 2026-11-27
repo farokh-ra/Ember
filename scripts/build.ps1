@@ -91,6 +91,13 @@ try {
             Invoke-NativeStep "cargo audit" {
                 & cargo audit 2>&1
             }
+
+            Write-Host "== Supply chain: CycloneDX SBOM =="
+            Invoke-NativeStep "SBOM generation" {
+                & python (Join-Path $PSScriptRoot "generate_sbom.py") `
+                    --version "0.1.0" `
+                    --sbom (Join-Path $RepoRoot "dist\sbom\ember-0.1.0.cdx.json") 2>&1
+            }
         }
     }
 

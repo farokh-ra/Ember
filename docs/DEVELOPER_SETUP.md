@@ -182,11 +182,14 @@ Useful narrower commands:
 # Rust only
 .\scripts\build.ps1 -SkipGradle -SkipHygiene
 
-# Add dependency and advisory gates
+# Add dependency, advisory, and SBOM gates
 .\scripts\build.ps1 -WithDependencyScan
+
+# Regenerate Gradle locks and verification metadata after a dependency change
+.\scripts\update-dependency-locks.ps1
 ```
 
-`-WithDependencyScan` requires `cargo-deny` and `cargo-audit`:
+`-WithDependencyScan` requires `cargo-deny`, `cargo-audit`, and Python:
 
 ```powershell
 cargo install cargo-deny --version 0.20.2 --locked

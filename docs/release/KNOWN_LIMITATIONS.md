@@ -64,11 +64,15 @@ behavior, difficult NAT combinations, or mobile reliability.
 
 - Production Android keystore and Windows code-signing certificate are not
   available. Artifacts are test-signed only.
-- Gradle dependency locking and verification metadata are not part of the
-  release build.
-- A CycloneDX SBOM is not produced.
-- Third-party license notices for the bundled JDK and Compose runtime are not
-  packaged.
+- Gradle dependency locking and SHA-256 verification metadata are enabled and
+  committed, but the metadata was generated on Windows only. A Linux runner that
+  resolves a different artifact fails closed until the metadata is regenerated
+  there.
+- A CycloneDX SBOM and a generated third-party notice bundle are produced by the
+  release script, but no public release has exercised them and the notice bundle
+  still contains components whose archives ship no licence file.
+- The bundled JDK licence and source-availability files are collected from
+  `JAVA_HOME/legal`; this has not been reviewed by counsel.
 - Reproducibility is claimed for inputs and checksums, not bit-identical output.
 - No independent security review has been commissioned.
 - No closed alpha or beta with real users has run.
@@ -125,8 +129,8 @@ The public launch gate remains closed until:
 1. production release signing is configured and verified;
 2. Android runtime, device, and difficult-network evidence is collected;
 3. Windows 11 runtime evidence is collected;
-4. dependency locking, verification metadata, an SBOM, and third-party notices
-   are part of the release;
+4. the generated SBOM and notice bundle are reviewed, cross-platform
+   verification metadata is exercised, and no component is unexplained;
 5. the security release checklist has no open high-severity item;
 6. the UI is wired to the core for the flows a release claims;
 7. at least one independent client or operator interoperability result exists,

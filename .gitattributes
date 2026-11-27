@@ -14,4 +14,7 @@
 *.exe binary
 
 Cargo.lock text eol=lf linguist-generated=true
+gradle.lockfile text eol=lf linguist-generated=true
+settings-gradle.lockfile text eol=lf linguist-generated=true
+gradle/verification-metadata.xml text eol=lf linguist-generated=true
 gradle/wrapper/gradle-wrapper.jar binary

@@ -103,7 +103,8 @@ rewrites the original signed record.
 | **Security and abuse** | Local peer blocking, local abuse reports, blocked-peer enforcement across dial, connection, request, discovery, provider, and download sources, bounded moderation tables, and six `security.*` methods. |
 | **File safety** | Advisory type classification, visible warnings, `auto_execute: false`, and previews delegated to platform viewers or sandboxes. |
 | **Release engineering** | Per-user Windows MSI, portable ZIP, signed Android APK/AAB pipeline, SHA-256 checksums, release manifest, WiX bootstrap, and performance measurement. |
-| **Quality** | 380 Rust tests, shared Kotlin JVM tests, a C harness, Windows JNA and JNI proxy checks, six CI jobs, dependency review, and a release workflow. |
+| **Supply chain** | Committed Gradle locks and verification metadata, a deterministic CycloneDX SBOM, and a generated third-party notice bundle. |
+| **Quality** | 380 Rust tests, shared Kotlin JVM tests, a C harness, Windows JNA and JNI proxy checks, seven CI jobs, dependency review, and a release workflow. |
 
 ## Status
 
@@ -118,7 +119,8 @@ rewrites the original signed record.
 | Local and distributed search | Complete; provider role is opt-in |
 | Multi-peer transfer | Complete on `feat/17-multi-peer`; up to four sources per download |
 | Local blocking, abuse reports, and safe-file notices | Complete at the core and network layers; UI binding pending |
-| Windows installer and signed release pipeline | Per-user MSI, portable ZIP, APK/AAB, checksums, and manifest; test-signed only |
+| Windows installer and signed release pipeline | Per-user MSI, portable ZIP, APK/AAB, checksums, manifest, SBOM, and notices; test-signed only |
+| Launch-readiness supply chain | Gradle locks and verification metadata committed; SBOM and notices generated; public-release review pending |
 
 ### Honest limits
 
@@ -165,11 +167,16 @@ rewrites the original signed record.
   so the artifacts are verifiable but not publicly trusted.
 - Android runtime, low-memory device, battery, poor-network, mobile, and IPv6
   evidence is still missing.
-- Gradle dependency locking, verification metadata, and a CycloneDX SBOM are not
-  yet part of the release build. Reproducibility is therefore claimed for inputs
-  and checksums, not bit-identical output.
-- Third-party license notices for the bundled JDK and Compose runtime are not
-  packaged yet; publishing them is a pre-release legal gate.
+- Gradle dependency locking and SHA-256 verification metadata are committed, and
+  the release script emits a CycloneDX SBOM and a third-party notice bundle.
+  Verification metadata was generated on Windows and has not been exercised on
+  every CI platform. Reproducibility is claimed for inputs and checksums, not
+  bit-identical output.
+- The notice bundle is generated best-effort from local archives. Some build-only
+  components ship no licence file; a public release still needs a reviewed bundle
+  with no unexplained component.
+- No public release has exercised the supply-chain artifacts, and no lawyer has
+  reviewed the notice bundle.
 
 ## Architecture
 
@@ -288,6 +295,14 @@ maintenance plan. The stage does not publish a release or create public
 infrastructure. Production signing, Android runtime evidence, independent
 interoperability, and owner approval remain launch blockers.
 
+**Launch-readiness follow-up:** Gradle dependency locking, SHA-256 verification
+metadata, a CycloneDX SBOM, a third-party notice bundle, and the repository
+community files (code of conduct, support, governance front door, code owners,
+and a release-readiness issue form) are now in place. This closes the
+repository-side supply-chain gap only. It does not create a release, and it does
+not satisfy the signing, device, independent-interoperability, or owner-approval
+gates.
+
 **Stage 18 scope:** local blocking and abuse reports with bounded storage,
 enforcement at dial, connection, request, discovery, provider, and download
 source layers, advisory safe-file warnings, delegated previews, malformed-input
@@ -344,6 +359,14 @@ cargo test --workspace
 cargo deny check
 cargo audit
 
+# Regenerate Gradle locks and verification metadata after a dependency change
+.\scripts\update-dependency-locks.ps1
+
+# Generate the CycloneDX SBOM and the third-party notice bundle
+python .\scripts\generate_sbom.py --version 0.1.0 `
+    --sbom .\dist\sbom\ember-0.1.0.cdx.json `
+    --notices-dir .\dist\notices
+
 # Release packaging, verification, and performance
 .\scripts\fetch-wix.ps1
 .\scripts\package-release.ps1 -Version 0.1.0 -AllowDirty -AllowUnsigned
@@ -362,7 +385,8 @@ Signing is required for a real release. See
 | Android release APK/AAB | `apps/androidApp/build/outputs/apk/release/` and `.../bundle/release/` |
 | Windows application image | `apps/desktopApp/build/compose/binaries/main/app/Ember` |
 | Windows per-user MSI | `apps/desktopApp/build/compose/binaries/main/msi/Ember-<version>.msi` |
-| Release directory | `dist/<version>/` with APK, AAB, MSI, portable ZIP, `SHA256SUMS`, and `release-manifest.json` |
+| Release directory | `dist/<version>/` with APK, AAB, MSI, portable ZIP, CycloneDX SBOM, third-party notices, `SHA256SUMS`, and `release-manifest.json` |
+| Generated SBOM | `dist/sbom/ember-<version>.cdx.json` |
 | Windows native core | `build/native/windows-x64/nexus_core.dll` |
 | Android native cores | `build/native/android-arm64-v8a/libnexus_core.so` and `build/native/android-x86_64/libnexus_core.so` |
 
@@ -402,7 +426,8 @@ Every change must pass the same gates locally and in CI:
 | Repository hygiene | Secret scan and forbidden-path check. |
 | Kotlin | Spotless, detekt, shared JVM tests, and adapter contract tests. |
 | Rust | Formatting, Clippy with warnings denied, and the full workspace test suite. |
-| Dependency policy | `cargo deny check` and `cargo audit`. |
+| Dependency policy | `cargo deny check`, `cargo audit`, committed Gradle locks, and SHA-256 verification metadata. |
+| Supply chain | CycloneDX SBOM generation and validation; generated notice bundle at release time. |
 | Packaging | Android debug assembly, Windows application image, and the signed release pipeline. |
 | Pull request | Conventional Commit title and dependency review. |
 
@@ -431,7 +456,12 @@ commits, reviews, and releases.
 | [docs/governance/GOVERNANCE.md](docs/governance/GOVERNANCE.md) | Decision classes, maintainer roles, release authority, and conflicts of interest. |
 | [docs/governance/MODERATION_PRINCIPLES.md](docs/governance/MODERATION_PRINCIPLES.md) | Local-first safety, operator autonomy, abuse handling, and transparency. |
 | [docs/operations](docs/operations/INFRASTRUCTURE_DIRECTORY.md) | Bootstrap, relay, directory, and network-health operations policy. |
-| [docs/release](docs/release/README.md) | Performance, compatibility, signing, reproducibility, update/rollback, release notes, accessibility, known limitations, and maintenance. |
+| [docs/release](docs/release/README.md) | Performance, compatibility, signing, reproducibility, update/rollback, release notes, accessibility, known limitations, SBOM, notices, and maintenance. |
+| [docs/release/SBOM_AND_NOTICES.md](docs/release/SBOM_AND_NOTICES.md) | Gradle locks, verification metadata, CycloneDX SBOM, notice bundle, and remaining limits. |
+| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Committed third-party notice summary packaged with the Windows application. |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Contributor Covenant standards and the private enforcement contact. |
+| [SUPPORT.md](SUPPORT.md) | Supported builds, issue channels, response expectations, and unsupported areas. |
+| [GOVERNANCE.md](GOVERNANCE.md) | Current owner-led decision model and the path to the proposed process. |
 | [docs/security/THREAT_MODEL.md](docs/security/THREAT_MODEL.md) | Assets, boundaries, threats, controls, residual risks, and non-goals. |
 | [docs/security/PRIVACY_REVIEW.md](docs/security/PRIVACY_REVIEW.md) | Data inventory, public and local data, telemetry, retention, and findings. |
 | [docs/security/SECURITY_RELEASE_CHECKLIST.md](docs/security/SECURITY_RELEASE_CHECKLIST.md) | Release gate for versions, analysis, keys, protocol, abuse, files, privacy, storage, and supply chain. |

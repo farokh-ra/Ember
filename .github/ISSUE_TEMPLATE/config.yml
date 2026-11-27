@@ -1,1 +1,11 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/farokh-ra/Ember/security/policy
+    about: Report vulnerabilities privately. Do not open a public issue.
+  - name: Support and known limitations
+    url: https://github.com/farokh-ra/Ember/blob/main/SUPPORT.md
+    about: Check what is supported before filing a bug.
+  - name: Code of Conduct
+    url: https://github.com/farokh-ra/Ember/blob/main/CODE_OF_CONDUCT.md
+    about: Community standards and the private enforcement contact.

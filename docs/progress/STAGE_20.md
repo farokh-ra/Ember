@@ -114,13 +114,25 @@ security team, or a public infrastructure directory.
 | `cargo test --workspace` | 380 passed, 0 failed, 52 suites |
 | `cargo deny check` | Passed; advisories, bans, licenses, and sources clean |
 | `cargo audit` | No vulnerability; one allowed `paste` unmaintained warning |
-| `.\scripts\build.ps1 -WithDependencyScan` | Passed; native Windows/Android artifacts, C harness, Gradle checks, Rust gates, dependency scan, and hygiene |
-| Repository hygiene | Passed; 357 files scanned |
+| `.\scripts\build.ps1 -WithDependencyScan` | Passed; native Windows/Android artifacts, C harness, Gradle checks with committed locks, Rust gates, dependency scan, SBOM, and hygiene |
+| Repository hygiene | Passed; 377 files scanned |
 
-The full build finished in 6 minutes 12 seconds with `BUILD SUCCESSFUL`. The
+The full build finished in 8 minutes 10 seconds with `BUILD SUCCESSFUL`. The
 Rust test count is 380: the previous 372 plus 8 conformance tests. A
 documentation stage still had to pass every code gate because it adds an
 executable test.
+
+Launch-readiness follow-up:
+
+| Check | Result |
+|---|---|
+| CycloneDX SBOM | 1,130 components (399 Cargo, 731 Maven), schema 1.5, self-validated |
+| Notice bundle | 333 unique licence texts; 46 Cargo and 503 Maven components had no local licence file and remain listed |
+| `package-release.ps1 -AllowUnsigned -AllowDirty` | Passed; six artifacts including the SBOM and notice bundle; `verify-release.ps1` passed |
+| Release dry run | APK 64,270,553 bytes, AAB 23,276,608 bytes, MSI 74,473,564 bytes, portable ZIP 73,074,450 bytes, SBOM 765,881 bytes, notices 623,568 bytes |
+
+The dry run is unsigned and local. It is not a published release and does not
+satisfy the signing or device gates.
 
 ## 6. Launch gate
 
@@ -130,8 +142,8 @@ The public launch gate remains closed. The following are not satisfied:
 2. Android runtime, device, low-memory, battery, Doze, and poor-network
    evidence.
 3. Windows 11 runtime evidence.
-4. Gradle dependency locking, verification metadata, CycloneDX SBOM, and
-   packaged third-party notices.
+4. A reviewed SBOM and notice bundle, plus verification metadata exercised on
+   every CI platform.
 5. An independent client or operator interoperability result.
 6. A public infrastructure directory with independent operators.
 7. UI wiring from the Kotlin screens to the Rust core for the flows a release
@@ -170,15 +182,35 @@ instead of presenting documentation as launch evidence.
 - The project remains owner-controlled and has a bus-factor risk.
 - Android and global-network behavior remain unmeasured.
 
-## 9. Next stage
+## 9. Launch-readiness follow-up
+
+A follow-up change on top of Stage 20 closes the repository-side supply-chain
+gap without publishing anything:
+
+| Item | Result |
+|---|---|
+| Gradle dependency locking | Enabled for every project; lockfiles committed. |
+| Gradle verification metadata | SHA-256 metadata committed; CI rejects drift. |
+| CycloneDX SBOM | Deterministic generator; CI job uploads the SBOM. |
+| Third-party notices | Generated bundle with unique licence texts and a component mapping; stable summary packaged in the Windows app. |
+| Community files | Code of conduct, support policy, governance front door, code owners, and release-readiness issue form. |
+| Release script | Emits and verifies the SBOM and notice bundle; records supply-chain flags in the manifest. |
+
+This is still not a release. Production signing, device evidence, independent
+interoperability, a reviewed notice bundle, cross-platform verification, and
+owner approval remain open. See
+[KNOWN_LIMITATIONS.md](../release/KNOWN_LIMITATIONS.md) and
+[SBOM_AND_NOTICES.md](../release/SBOM_AND_NOTICES.md).
+
+## 10. Next stage
 
 There is no Stage 21 in the roadmap. The next work is maintenance and launch
 readiness, not a new stage:
 
 1. Obtain production signing material and collect Android and Windows 11
    evidence.
-2. Complete dependency locking, verification metadata, SBOM, and third-party
-   notices.
+2. Review the generated notice bundle, exercise verification metadata on every
+   CI platform, and add provenance attestation.
 3. Run a closed alpha or beta and record failures.
 4. Recruit an independent client implementer or operator for interoperability
    testing, or explicitly scope a limited preview without that claim.

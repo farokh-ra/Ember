@@ -95,5 +95,7 @@ The current threat model, privacy review, and release gate are documented in:
 A known high-severity issue blocks release until it is fixed or explicitly
 accepted in writing by the project owner.
 
-See [docs/LOGGING_POLICY.md](docs/LOGGING_POLICY.md) for the logging rules and
-[CONTRIBUTING.md](CONTRIBUTING.md) for the contribution process.
+See [docs/LOGGING_POLICY.md](docs/LOGGING_POLICY.md) for the logging rules,
+[CONTRIBUTING.md](CONTRIBUTING.md) for the contribution process,
+[SUPPORT.md](SUPPORT.md) for non-security support, and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards.

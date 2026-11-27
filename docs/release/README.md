@@ -13,6 +13,7 @@ Ember 0.1.0.
 | [ACCESSIBILITY_AND_LOCALIZATION.md](ACCESSIBILITY_AND_LOCALIZATION.md) | What is tested, what is missing, and the review plan. |
 | [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) | Product limits, platform evidence gaps, and public-launch blockers. |
 | [POST_LAUNCH_MAINTENANCE.md](POST_LAUNCH_MAINTENANCE.md) | Channels, cadence, security response, rollback, and post-launch review. |
+| [SBOM_AND_NOTICES.md](SBOM_AND_NOTICES.md) | Gradle locks, verification metadata, CycloneDX SBOM, and third-party notice bundle. |
 
 ## Scripts
 

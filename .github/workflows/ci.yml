@@ -89,6 +89,42 @@ jobs:
       - name: Scan Rust dependencies for advisories
         run: cargo audit
 
+  supply-chain:
+    name: SBOM and dependency locks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust 1.99.1
+        uses: dtolnay/rust-toolchain@1.99.1
+
+      - name: Check committed dependency state
+        run: |
+          test -f gradle/verification-metadata.xml
+          test -f settings-gradle.lockfile
+          count="$(find . -name gradle.lockfile -not -path './.gradle/*' | wc -l)"
+          echo "gradle.lockfile files: $count"
+          test "$count" -ge 8
+
+      - name: Generate CycloneDX SBOM
+        run: >-
+          python3 scripts/generate_sbom.py
+          --version 0.1.0
+          --sbom dist/sbom/ember-0.1.0.cdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: ember-sbom
+          path: dist/sbom/ember-0.1.0.cdx.json
+          if-no-files-found: error
+
   rust-windows:
     name: Rust Windows MSVC build and tests
     runs-on: windows-latest
@@ -146,6 +182,9 @@ jobs:
           :shared:core-client:jvmTest
           :shared:presentation:jvmTest
           :shared:ui:jvmTest
+
+      - name: Verify dependency locks are current
+        run: git diff --exit-code -- '*gradle.lockfile' 'gradle/verification-metadata.xml'
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
