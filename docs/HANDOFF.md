@@ -4,8 +4,9 @@
 **Stage status:** Repository deliverables complete; public launch blocked
 **Last updated:** 2026-11-26
 **Branch:** `feat/20-launch`, stacked on Stage 19 `feat/19-release`
-**Pull requests:** #27 (`feat/20-launch` -> `feat/19-release`) is open; #26
-(`feat/19-release` -> `main`) is also open
+**Pull requests:** #28 (`chore/20-launch-readiness` -> `feat/20-launch`), #27
+(`feat/20-launch` -> `feat/19-release`), and #26 (`feat/19-release` -> `main`)
+are open and unmerged
 **Next stage:** none in the roadmap; launch readiness and maintenance remain
 
 ## What Stage 20 adds
@@ -34,9 +35,9 @@ satisfy the production launch gate.
 
 ## Launch-readiness follow-up
 
-A stacked change on `chore/20-launch-readiness` closes the repository-side
-supply-chain gap and fills the community files. It still does not publish a
-release.
+A stacked change on `chore/20-launch-readiness`, open as PR #28, closes the
+repository-side supply-chain gap and fills the community files. It still does
+not publish a release.
 
 - Gradle dependency locking is enabled for every project; one `gradle.lockfile`
   per project and `settings-gradle.lockfile` are committed.
@@ -201,13 +202,13 @@ trusted. See [STAGE_19.md](progress/STAGE_19.md) for the full record.
 1. Keep PR #26 open; do not merge without project-owner approval.
 2. Keep PR #27 open against `feat/19-release`; do not merge it without
    approval.
-3. Obtain production signing material and collect Android and Windows 11
+3. Keep PR #28 open against `feat/20-launch`; do not merge it without approval.
+4. Obtain production signing material and collect Android and Windows 11
    evidence before any public release.
-4. Complete dependency locking, verification metadata, SBOM, and third-party
-   notices.
 5. Run a closed alpha or beta and record failures.
 6. Recruit an independent client implementer or operator, or explicitly scope a
    limited preview without an interoperability claim.
 7. Obtain owner approval for governance, disclosure, directory, and launch
    policy.
-8. Re-run the full release gate before publishing any artifact.
+8. Review and approve the generated third-party notice bundle.
+9. Re-run the full release gate before publishing any artifact.

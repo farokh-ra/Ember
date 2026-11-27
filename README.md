@@ -34,7 +34,8 @@
 > or reuse the source. See [LICENSE.md](LICENSE.md).
 >
 > **Stage 20 repository deliverables are complete on `feat/20-launch`** and are
-> awaiting review as PR #27 against `feat/19-release`. **Stage 19 is PR #26**
+> awaiting review as PR #27 against `feat/19-release`. The launch-readiness
+> follow-up is PR #28, stacked on `feat/20-launch`. **Stage 19 is PR #26**
 > against `main`. **Stage 18 is merged into `main`** as `8876350`, and **Stages
 > 16 and 17 are merged** through PR #24.
 >
@@ -253,7 +254,8 @@ flowchart LR
 ## Roadmap
 
 Stage 20 repository deliverables are complete on `feat/20-launch` as PR #27,
-stacked on `feat/19-release`. Stage 19 is PR #26 against `main`. Stage 18 is merged into
+stacked on `feat/19-release`. The launch-readiness follow-up is PR #28 against
+`feat/20-launch`. Stage 19 is PR #26 against `main`. Stage 18 is merged into
 `main` as `8876350`. Stages 16 and 17 are merged through PR #24, and Stage 15 is
 merged into `main`.
 
@@ -295,13 +297,13 @@ maintenance plan. The stage does not publish a release or create public
 infrastructure. Production signing, Android runtime evidence, independent
 interoperability, and owner approval remain launch blockers.
 
-**Launch-readiness follow-up:** Gradle dependency locking, SHA-256 verification
-metadata, a CycloneDX SBOM, a third-party notice bundle, and the repository
-community files (code of conduct, support, governance front door, code owners,
-and a release-readiness issue form) are now in place. This closes the
-repository-side supply-chain gap only. It does not create a release, and it does
-not satisfy the signing, device, independent-interoperability, or owner-approval
-gates.
+**Launch-readiness follow-up (PR #28):** Gradle dependency locking, SHA-256
+verification metadata, a CycloneDX SBOM, a third-party notice bundle, and the
+repository community files (code of conduct, support, governance front door,
+code owners, and a release-readiness issue form) are now in place. This closes
+the repository-side supply-chain gap only. It does not create a release, and it
+does not satisfy the signing, device, independent-interoperability, or
+owner-approval gates.
 
 **Stage 18 scope:** local blocking and abuse reports with bounded storage,
 enforcement at dial, connection, request, discovery, provider, and download

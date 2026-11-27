@@ -2,8 +2,10 @@
 
 **Status:** Repository deliverables complete; public launch blocked
 **Branch:** `feat/20-launch`, stacked on Stage 19 `feat/19-release`
-**Pull request:** #27 (`feat/20-launch` -> `feat/19-release`)
-**Last updated:** 2026-11-26
+**Pull requests:** #27 (`feat/20-launch` -> `feat/19-release`); #28
+(`chore/20-launch-readiness` -> `feat/20-launch`) adds the launch-readiness
+follow-up
+**Last updated:** 2026-11-27
 
 Stage 20 is the final roadmap stage. It covers public protocol documentation,
 community infrastructure operations, governance, security disclosure,
@@ -184,8 +186,8 @@ instead of presenting documentation as launch evidence.
 
 ## 9. Launch-readiness follow-up
 
-A follow-up change on top of Stage 20 closes the repository-side supply-chain
-gap without publishing anything:
+A follow-up change on top of Stage 20, open as PR #28, closes the
+repository-side supply-chain gap without publishing anything:
 
 | Item | Result |
 |---|---|
