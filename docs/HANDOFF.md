@@ -2,7 +2,7 @@
 
 **Current stage:** 20 - global launch and ongoing network governance
 **Stage status:** Repository deliverables complete; public launch blocked
-**Last updated:** 2026-11-26
+**Last updated:** 2026-11-27
 **Branch:** `feat/20-launch`, stacked on Stage 19 `feat/19-release`
 **Pull requests:** #28 (`chore/20-launch-readiness` -> `feat/20-launch`), #27
 (`feat/20-launch` -> `feat/19-release`), and #26 (`feat/19-release` -> `main`)
@@ -125,6 +125,7 @@ Supply chain and community files:
 | `.\scripts\build.ps1 -WithDependencyScan` | Passed; native Windows/Android artifacts, C harness, Gradle checks with committed locks, Rust gates, dependency scan, SBOM, and hygiene |
 | CycloneDX SBOM | 1,130 components (399 Cargo, 731 Maven) |
 | `package-release.ps1 -AllowUnsigned -AllowDirty` | Passed; SBOM and notice bundle emitted and verified |
+| CI on PR #28 | All seven jobs passed on `4c04d33`, including the Linux Android job and the Windows desktop job |
 | Repository hygiene | Passed; 377 files scanned |
 
 The full build finished in 8 minutes 10 seconds with `BUILD SUCCESSFUL`. The
@@ -137,8 +138,8 @@ The public launch gate remains closed on:
 1. production Android keystore and Windows code-signing certificate;
 2. Android runtime, device, low-memory, battery, Doze, and poor-network evidence;
 3. Windows 11 runtime evidence;
-4. a reviewed SBOM and notice bundle, plus verification metadata exercised on
-   every CI platform;
+4. a reviewed SBOM and notice bundle, and verification metadata exercised on the
+   Linux Android release variants as well as the CI task set;
 5. independent client or operator interoperability evidence;
 6. a public infrastructure directory with independent operators;
 7. UI wiring from the Kotlin screens to the Rust core for the flows a release

@@ -170,9 +170,9 @@ rewrites the original signed record.
   evidence is still missing.
 - Gradle dependency locking and SHA-256 verification metadata are committed, and
   the release script emits a CycloneDX SBOM and a third-party notice bundle.
-  Verification metadata was generated on Windows and has not been exercised on
-  every CI platform. Reproducibility is claimed for inputs and checksums, not
-  bit-identical output.
+  CI verifies the metadata on Windows and Linux for its task set; the Linux
+  Android release variants remain unexercised. Reproducibility is claimed for
+  inputs and checksums, not bit-identical output.
 - The notice bundle is generated best-effort from local archives. Some build-only
   components ship no licence file; a public release still needs a reviewed bundle
   with no unexplained component.

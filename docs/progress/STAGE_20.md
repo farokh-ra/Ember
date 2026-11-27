@@ -132,6 +132,7 @@ Launch-readiness follow-up:
 | Notice bundle | 333 unique licence texts; 46 Cargo and 503 Maven components had no local licence file and remain listed |
 | `package-release.ps1 -AllowUnsigned -AllowDirty` | Passed; six artifacts including the SBOM and notice bundle; `verify-release.ps1` passed |
 | Release dry run | APK 64,270,553 bytes, AAB 23,276,608 bytes, MSI 74,473,564 bytes, portable ZIP 73,074,450 bytes, SBOM 765,881 bytes, notices 623,568 bytes |
+| CI on PR #28 | All seven jobs passed on `4c04d33`: hygiene, title, Rust Linux, Rust Windows, SBOM and locks, Android, and Windows desktop |
 
 The dry run is unsigned and local. It is not a published release and does not
 satisfy the signing or device gates.
@@ -144,8 +145,8 @@ The public launch gate remains closed. The following are not satisfied:
 2. Android runtime, device, low-memory, battery, Doze, and poor-network
    evidence.
 3. Windows 11 runtime evidence.
-4. A reviewed SBOM and notice bundle, plus verification metadata exercised on
-   every CI platform.
+4. A reviewed SBOM and notice bundle, and verification metadata exercised on
+   the Linux Android release variants as well as the CI task set.
 5. An independent client or operator interoperability result.
 6. A public infrastructure directory with independent operators.
 7. UI wiring from the Kotlin screens to the Rust core for the flows a release
@@ -199,8 +200,8 @@ repository-side supply-chain gap without publishing anything:
 | Release script | Emits and verifies the SBOM and notice bundle; records supply-chain flags in the manifest. |
 
 This is still not a release. Production signing, device evidence, independent
-interoperability, a reviewed notice bundle, cross-platform verification, and
-owner approval remain open. See
+interoperability, a reviewed notice bundle, Linux Android release-variant
+verification, and owner approval remain open. See
 [KNOWN_LIMITATIONS.md](../release/KNOWN_LIMITATIONS.md) and
 [SBOM_AND_NOTICES.md](../release/SBOM_AND_NOTICES.md).
 
@@ -211,8 +212,8 @@ readiness, not a new stage:
 
 1. Obtain production signing material and collect Android and Windows 11
    evidence.
-2. Review the generated notice bundle, exercise verification metadata on every
-   CI platform, and add provenance attestation.
+2. Review the generated notice bundle, exercise verification metadata on the
+   Linux Android release variants, and add provenance attestation.
 3. Run a closed alpha or beta and record failures.
 4. Recruit an independent client implementer or operator for interoperability
    testing, or explicitly scope a limited preview without that claim.

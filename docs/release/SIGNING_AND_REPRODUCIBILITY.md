@@ -149,9 +149,11 @@ What is fixed:
 
 Known limits:
 
-- Verification metadata was generated on Windows. A Linux runner that resolves a
-  different artifact fails closed instead of silently accepting it; regenerate
-  the metadata on that platform when the artifact set changes.
+- Verification metadata was first generated on Windows; CI later resolved
+  Linux-only artifacts and those checksums were added. CI now verifies the
+  metadata on Windows and Linux for its own task set. A runner that resolves a
+  different artifact still fails closed instead of silently accepting it;
+  regenerate the metadata on that platform when the artifact set changes.
 - Gradle locking pins module versions, not every artifact byte. Verification
   metadata supplies artifact checksums, but it is not a hermetic build.
 - jpackage output can vary with the build JDK patch, locale, and runner image.
