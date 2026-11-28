@@ -7,6 +7,11 @@ Bootstrap nodes help new peers find the network. They are ordinary
 authenticated peers running in DHT server mode. They do not own identities,
 approve accounts, store user files, or decide who may join.
 
+> **Public directory status:** Ember does not publish a community bootstrap
+> directory yet. This document covers operating and testing a node. Listing
+> criteria, independence requirements, and the current "no public list" status
+> are in [INFRASTRUCTURE_DIRECTORY.md](INFRASTRUCTURE_DIRECTORY.md).
+
 ## 1. What a bootstrap node does
 
 - Accepts libp2p connections over QUIC v1 and TCP + Noise + Yamux.

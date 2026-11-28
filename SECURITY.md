@@ -33,6 +33,11 @@ repository profile and include:
 You will receive an acknowledgement when the report is reviewed. Please allow
 time for a fix and coordinated disclosure before publishing details.
 
+The detailed intake, severity, embargo, advisory, and safe-harbor process is in
+[docs/security/DISCLOSURE_AND_ADVISORIES.md](docs/security/DISCLOSURE_AND_ADVISORIES.md).
+That document is a Stage 20 proposal and does not create a bug bounty or a
+service-level guarantee.
+
 ## Scope
 
 Examples of in-scope issues:
@@ -90,5 +95,7 @@ The current threat model, privacy review, and release gate are documented in:
 A known high-severity issue blocks release until it is fixed or explicitly
 accepted in writing by the project owner.
 
-See [docs/LOGGING_POLICY.md](docs/LOGGING_POLICY.md) for the logging rules and
-[CONTRIBUTING.md](CONTRIBUTING.md) for the contribution process.
+See [docs/LOGGING_POLICY.md](docs/LOGGING_POLICY.md) for the logging rules,
+[CONTRIBUTING.md](CONTRIBUTING.md) for the contribution process,
+[SUPPORT.md](SUPPORT.md) for non-security support, and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards.

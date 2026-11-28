@@ -4,7 +4,7 @@
 production-signing evidence unavailable
 **Completed:** 2026-11-26
 **Branch:** `feat/19-release`, based on Stage 18 commit `4932c69`
-**Pull request:** #26 (`feat/19-release` -> `main`), open and awaiting review
+**Pull request:** #26 (`feat/19-release` -> `main`), merged as `2c2b7cf`
 **Progress guide:** 90-95%
 **Next stage:** 20 - global launch and ongoing network governance (requires
 explicit project-owner approval)
@@ -188,5 +188,7 @@ not collected.
 ## 10. Next stage
 
 Stage 20 covers public protocol publication, bootstrap and relay operator
-instructions, independent infrastructure, and ongoing network governance. It
-requires explicit project-owner approval.
+instructions, independent infrastructure, and ongoing network governance. Its
+repository deliverables are on `feat/20-launch`; see
+[STAGE_20.md](STAGE_20.md). Public launch still requires explicit project-owner
+approval and the missing production evidence.

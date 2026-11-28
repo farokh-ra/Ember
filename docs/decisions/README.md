@@ -22,6 +22,7 @@ Architecture Decision Records (ADRs) capture decisions that are expensive to rev
 | [ADR-0008](ADR-0008-lifecycle-background-execution.md) | Process, lifecycle, and background execution model | Accepted | Runtime |
 | [ADR-0009](ADR-0009-build-packaging-dependency-policy.md) | Build, packaging, and dependency/license policy | Accepted | Build/release |
 | [ADR-0010](ADR-0010-search-index-boundary.md) | Search and Explore use a verified local index, never a central service | Accepted | Discovery/search |
+| [ADR-0011](ADR-0011-public-protocol-and-launch-governance.md) | Public protocol publication, self-conformance, and launch governance | Proposed | Protocol/governance |
 
 ## ADR rules
 

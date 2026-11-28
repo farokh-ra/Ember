@@ -98,7 +98,7 @@ exercised on a device in Stage 19.
 
 | Item | Rule |
 |---|---|
-| Protocol | `0.1.0-stage-18`; a future incompatible change requires a new version and a migration note. |
+| Protocol | v1, identify `0.1.0-stage-12`; a future incompatible change requires a new version and a migration note. |
 | Database schema | Version 11. Opening a newer schema fails rather than guessing. |
 | Archive import | Older archives restore; new required tables would break that promise and need a migration. |
 | ABI | C ABI 1. Additive methods are allowed within the ABI. |

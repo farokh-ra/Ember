@@ -91,7 +91,9 @@ include security rows by default.
 Any future telemetry or crash reporting must be opt-in, minimised, documented,
 separable from core functionality, and must exclude keys, passphrases, backup
 contents, local paths, file names, and unnecessary peer identifiers. There is no
-mechanism today, and adding one requires a new privacy review.
+mechanism today, and adding one requires a new privacy review. The unimplemented
+opt-in network-health design is in
+[NETWORK_HEALTH.md](../operations/NETWORK_HEALTH.md).
 
 ## 6. Logging and diagnostics
 

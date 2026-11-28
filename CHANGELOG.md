@@ -380,9 +380,50 @@ All notable changes to Ember are recorded here. The format follows
 - A JVM adapter check that loads the native core from the packaged Compose
   resources directory.
 - Stage 19 evidence record.
+- Public protocol v1 specification covering identity, canonical CBOR, signed
+  records, DHT keys, file and index wire messages, limits, errors, and security
+  properties.
+- Protocol versioning and deprecation policy with change classes, support
+  windows, migration rules, and a review checklist.
+- Interoperability and conformance documentation plus an eight-test public
+  conformance suite for the v1 identity, record, manifest, and rejection
+  vectors. Rust tests are now 380.
+- Community infrastructure directory policy for independent bootstrap, relay,
+  and index operators, explicitly marked as unpublished.
+- Privacy-preserving network-health design with local-only diagnostics and a
+  not-yet-implemented opt-in aggregate tier.
+- Governance, moderation, and security disclosure policy drafts, including
+  decision classes, local-first abuse handling, severity targets, embargo, and
+  advisory format.
+- ADR-0011 records the public-protocol, self-conformance, and launch-gate
+  decision as proposed.
+- Public known-limitations and post-launch maintenance documents with an
+  explicit launch gate.
+- Stage 20 evidence record.
+- Gradle dependency locking for every project, with committed `gradle.lockfile`
+  files and `settings-gradle.lockfile`.
+- Committed Gradle SHA-256 verification metadata for the resolved plugin and
+  Maven graph.
+- A deterministic CycloneDX 1.5 SBOM generator that reads `Cargo.lock` and the
+  Gradle verification metadata and validates its own output.
+- A generated third-party notice bundle with unique licence texts, a
+  component-to-text mapping, and an SBOM copy.
+- A release-readiness issue form, code owners, code of conduct, support policy,
+  and governance front door.
+- A helper that regenerates dependency locks and verification metadata after an
+  intentional dependency change.
 
 ### Changed
 
+- Release builds now fail on unlocked or unverified Gradle dependencies. The
+  lock and verification state is committed and checked by CI.
+- `package-release.ps1` now emits a CycloneDX SBOM and a third-party notice
+  bundle, records both in `release-manifest.json`, and fails release verification
+  if they are missing or malformed.
+- The Windows application image now includes `LICENSE.md` and
+  `THIRD_PARTY_NOTICES.md`.
+- CI adds a supply-chain job for the SBOM and a lock-drift check to the Android
+  job.
 - The product and user-facing application surfaces are named Ember. Internal
   `io.nexus` packages, `nexus-*` crates, native symbols, storage names, and
   signed record tags are unchanged for compatibility.

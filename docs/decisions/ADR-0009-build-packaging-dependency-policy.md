@@ -128,15 +128,15 @@ Build-only tools may carry other licenses because they are not distributed: Git 
 
 - `cargo-deny` checks licenses, banned crates, duplicate versions, and advisory sources on every CI run.
 - `cargo-audit` and the GitHub Advisory Database feed are checked before release.
-- Gradle resolves only locked versions and produces a dependency license report; the report is reviewed when dependencies change. Gradle dependency locking and verification metadata are required before a public release and are **not yet enabled**; see the Stage 19 amendment.
-- A CycloneDX SBOM is required for each release artifact. It is **not yet generated**; the dependency inventory, `cargo-deny` output, and artifact manifest are the current evidence.
-- The release includes third-party notices and the exact protocol/app versions.
+- Gradle resolves only locked versions and produces a dependency license report; the report is reviewed when dependencies change. Dependency locking and SHA-256 verification metadata are enabled and committed as of the Stage 20 launch-readiness follow-up; CI rejects drift.
+- A CycloneDX SBOM is required for each release artifact. `scripts/generate_sbom.py` generates it from `Cargo.lock` and the Gradle verification metadata, and CI uploads it.
+- The release includes a generated third-party notice bundle and the exact protocol/app versions. The bundle still needs a reviewed pass before a public release.
 - New dependencies require a reason, a license check, a platform check, and an owner in the dependency inventory.
 - No analytics, crash-reporting, advertising, or account SDK is included by default.
 
 ### Reproducibility and release evidence
 
-- Release builds use `--locked` Cargo builds and checksum verification. Gradle dependency locking is required before a public release and remains pending.
+- Release builds use `--locked` Cargo builds and checksum verification. Gradle dependency locking and verification metadata are committed; a clean build fails when either is stale.
 - Build metadata records the toolchain versions, source commit, and artifact SHA-256.
 - Android and Windows artifacts are signed; SHA-256 checksums and release notes are published.
 - A clean checkout must build with the documented commands. The build must not depend on a developer's global Gradle, Cargo, or JDK configuration beyond the documented toolchain.
@@ -150,7 +150,7 @@ Build-only tools may carry other licenses because they are not distributed: Git 
 - Per-user Windows installation avoids administrator rights; the uninstall data choice is deferred until the packaged application stores core user data.
 - License and vulnerability gates are defined before code lands.
 - The JDK and core runtime are bundled, so users do not install Java or Rust.
-- SBOM and checksums support release review. Checksums and the release manifest exist; SBOM generation remains pending.
+- SBOM and checksums support release review. Checksums, the release manifest, the SBOM, and the notice bundle now exist; the bundle still needs legal and release review.
 
 **Negative / trade-offs**
 

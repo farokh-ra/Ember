@@ -18,11 +18,22 @@ val stageNativeCore =
         from(nativeCoreDll)
         into(layout.buildDirectory.dir("app-resources/windows-x64"))
     }
+
+// The installed application carries the project licence and the third-party
+// notice summary. The full generated notice bundle is shipped next to the
+// release artifacts; see docs/release/SBOM_AND_NOTICES.md.
+val stageAppNotices =
+    tasks.register<Copy>("stageAppNotices") {
+        from(rootProject.file("LICENSE.md"))
+        from(rootProject.file("THIRD_PARTY_NOTICES.md"))
+        into(layout.buildDirectory.dir("app-resources/windows-x64"))
+    }
+
 tasks
     .matching {
         it.name == "prepareAppResources" || it.name == "createDistributable" || it.name == "packageMsi"
     }.configureEach {
-        dependsOn(stageNativeCore)
+        dependsOn(stageNativeCore, stageAppNotices)
     }
 
 kotlin {

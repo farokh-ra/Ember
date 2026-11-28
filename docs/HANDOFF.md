@@ -1,176 +1,214 @@
 # Ember Project Handoff
 
-**Current stage:** 19 - performance, compatibility, and release engineering
-**Stage status:** Release pipeline complete and test-signed; Android runtime and
-production signing evidence unavailable
-**Last updated:** 2026-11-26
-**Branch:** `feat/19-release`, based on Stage 18 commit `4932c69`
-**Pull requests:** #25 (`feat/18-security` -> `main`) merged as `8876350`;
-Stage 19 is #26 (`feat/19-release` -> `main`), open and awaiting review
-**Next stage:** 20 - global launch and ongoing network governance (requires
-explicit project-owner approval)
+**Current stage:** 20 - global launch and ongoing network governance
+**Stage status:** Repository deliverables complete; public launch blocked
+**Last updated:** 2026-11-27
+**Branch:** `chore/20-launch-readiness`, based on Stage 20 `feat/20-launch`
+**Pull requests:** #28 (`chore/20-launch-readiness` -> `feat/19-release`) is
+open; #27 (`feat/20-launch` -> `feat/19-release`) is merged as `4f38a8a`; #26
+(`feat/19-release` -> `main`) is merged as `2c2b7cf`
+**Next stage:** none in the roadmap; launch readiness and maintenance remain
 
-## What was implemented
+## What Stage 20 adds
 
-Stage 19 turns the build into a release pipeline:
+Stage 20 publishes the protocol and the operating policy that a decentralized
+network needs, without pretending that a public launch has happened:
 
-- Per-user Windows MSI produced by jpackage with WiX 3.14.1. It installs under
-  `%LOCALAPPDATA%\Ember` without elevation, uses the stable upgrade UUID
-  `c7c225ee-ae2c-4c58-822d-ea7bda7ac48c`, and supports in-place upgrades.
-- Portable Windows ZIP containing the same app image.
-- Android release APK and AAB with an environment-driven signing config. The
-  native core is packaged for arm64-v8a and x86_64 and debug sections are
-  stripped.
-- `INTERNET`, `ACCESS_NETWORK_STATE`, and `CHANGE_WIFI_MULTICAST_STATE` Android
-  permissions.
-- `emberVersion` and `emberVersionCode` Gradle properties for release overrides,
-  with `0.1.0` defaults and MSI segment validation.
-- Native Windows core staged through `appResourcesRootDir` and loaded by JNA from
-  `compose.application.resources.dir`.
-- `scripts/fetch-wix.ps1`: pinned WiX download with SHA-256 verification.
-- `scripts/package-release.ps1`: builds, signs, checksums, manifests, and
-  verifies APK, AAB, MSI, and portable ZIP.
-- `scripts/verify-release.ps1`: independent digest, signature, and payload
-  verification.
-- `scripts/measure-performance.ps1`: startup, working set, idle CPU, soak growth,
-  and package sizes.
-- `.github/workflows/release.yml`: tag or manual signed release with secrets.
-- Release documentation set under `docs/release/`: performance report,
-  compatibility matrix, signing and reproducibility, update/rollback, release
-  notes, and accessibility/localization review.
-- One new JVM adapter test for loading the core from packaged resources. Rust
-  tests remain 372.
+- A public protocol v1 specification covering identity, canonical CBOR, the
+  signed envelope, profile, publication, tombstone, and manifest records, DHT
+  keys, `/nexus/file/1`, `/nexus/index/1`, transport expectations, limits,
+  error codes, and security properties.
+- A versioning and deprecation policy with version vectors, change classes,
+  support windows, migration rules, and a review checklist.
+- An interoperability document and an eight-test public conformance suite that
+  pins the same vectors as the specification. This is self-conformance, not
+  independent-client evidence.
+- A community infrastructure directory policy for independent bootstrap, relay,
+  and index operators. No directory is published.
+- A privacy-preserving network-health design. Local diagnostics exist; remote
+  opt-in reporting is not implemented.
+- Governance, moderation, security disclosure, known-limitations, and
+  post-launch maintenance documents. They are drafts for owner approval.
+
+The stage does **not** publish a release, create public infrastructure, or
+satisfy the production launch gate.
+
+## Launch-readiness follow-up
+
+A change on `chore/20-launch-readiness`, open as PR #28 against
+`feat/19-release`, closes the repository-side supply-chain gap and fills the
+community files. It still does not publish a release.
+
+- Gradle dependency locking is enabled for every project; one `gradle.lockfile`
+  per project and `settings-gradle.lockfile` are committed.
+- `gradle/verification-metadata.xml` records SHA-256 checksums for the resolved
+  plugin and Maven graph.
+- `scripts/generate_sbom.py` emits a deterministic CycloneDX 1.5 SBOM and an
+  optional third-party notice bundle.
+- `scripts/update-dependency-locks.ps1` regenerates the lock and verification
+  state after an intentional dependency change.
+- `package-release.ps1` emits the SBOM and notice bundle, records both in the
+  manifest, and `verify-release.ps1` rejects a missing or malformed bundle.
+- The Windows app image includes `LICENSE.md` and `THIRD_PARTY_NOTICES.md`.
+- `CODE_OF_CONDUCT.md`, `SUPPORT.md`, `GOVERNANCE.md`, `.github/CODEOWNERS`, and a
+  release-readiness issue form are added.
+- CI gains a supply-chain job and a lock-drift check.
+
+See [SBOM_AND_NOTICES.md](release/SBOM_AND_NOTICES.md) and
+[STAGE_20.md](progress/STAGE_20.md). The launch gate remains closed on signing,
+device evidence, independent interoperability, a reviewed notice bundle, and
+owner approval.
 
 ## Files changed
 
-Build:
+Protocol and conformance:
 
-- `build.gradle.kts`
-- `apps/androidApp/build.gradle.kts`
-- `apps/androidApp/src/main/AndroidManifest.xml`
-- `apps/desktopApp/build.gradle.kts`
-- `shared/core-client/src/jvmMain/kotlin/io/nexus/core/client/JnaNativeBridge.kt`
-- `shared/core-client/src/jvmTest/kotlin/io/nexus/core/client/NativeContractTest.kt`
+- `docs/protocol/PROTOCOL_SPEC.md` (new)
+- `docs/protocol/VERSIONING_AND_DEPRECATION.md` (new)
+- `docs/protocol/INTEROPERABILITY.md` (new)
+- `crates/nexus-protocol/tests/conformance.rs` (new, 8 tests)
 
-Scripts:
+Operations:
 
-- `scripts/dev-env.ps1`
-- `scripts/build-native.ps1`
-- `scripts/fetch-wix.ps1` (new)
-- `scripts/package-release.ps1` (new)
-- `scripts/verify-release.ps1` (new)
-- `scripts/measure-performance.ps1` (new)
+- `docs/operations/INFRASTRUCTURE_DIRECTORY.md` (new)
+- `docs/operations/NETWORK_HEALTH.md` (new)
+- `docs/operations/BOOTSTRAP_NODES.md`
+- `docs/operations/RELAY_NODES.md`
 
-CI and docs:
+Governance and security:
 
-- `.github/workflows/release.yml` (new)
-- `docs/release/README.md` (new)
-- `docs/release/PERFORMANCE_REPORT.md` (new)
-- `docs/release/COMPATIBILITY_MATRIX.md` (new)
-- `docs/release/SIGNING_AND_REPRODUCIBILITY.md` (new)
-- `docs/release/UPDATE_AND_ROLLBACK.md` (new)
-- `docs/release/RELEASE_NOTES_0.1.0.md` (new)
-- `docs/release/ACCESSIBILITY_AND_LOCALIZATION.md` (new)
-- `docs/progress/STAGE_19.md` (new)
-- `docs/decisions/ADR-0009-build-packaging-dependency-policy.md`
-- `docs/DEVELOPMENT_WORKFLOW.md`
+- `docs/governance/GOVERNANCE.md` (new)
+- `docs/governance/MODERATION_PRINCIPLES.md` (new)
+- `docs/security/DISCLOSURE_AND_ADVISORIES.md` (new)
+- `docs/decisions/ADR-0011-public-protocol-and-launch-governance.md` (new)
+- `SECURITY.md`
+
+Release and project state:
+
+- `docs/release/KNOWN_LIMITATIONS.md` (new)
+- `docs/release/POST_LAUNCH_MAINTENANCE.md` (new)
+- `docs/release/SBOM_AND_NOTICES.md` (new)
+- `docs/release/README.md`
+- `docs/architecture/SIGNED_RECORD_FORMATS.md`
+- `docs/security/PRIVACY_REVIEW.md`
+- `docs/progress/STAGE_20.md` (new)
+- `docs/HANDOFF.md`
 - `README.md`
 - `CHANGELOG.md`
-- `docs/HANDOFF.md`
+
+Supply chain and community files:
+
+- `gradle/verification-metadata.xml` (new)
+- `gradle.lockfile`, `settings-gradle.lockfile`, and one `gradle.lockfile` per
+  project (new)
+- `scripts/generate_sbom.py` (new)
+- `scripts/update-dependency-locks.ps1` (new)
+- `THIRD_PARTY_NOTICES.md` (new)
+- `CODE_OF_CONDUCT.md`, `SUPPORT.md`, `GOVERNANCE.md` (new)
+- `.github/CODEOWNERS` and `.github/ISSUE_TEMPLATE/release_readiness.yml` (new)
+- `.github/workflows/ci.yml`, `.github/pull_request_template.md`,
+  `.github/ISSUE_TEMPLATE/config.yml`
+- `scripts/package-release.ps1`, `scripts/verify-release.ps1`,
+  `scripts/build.ps1`, `build.gradle.kts`, `apps/desktopApp/build.gradle.kts`
+- `CONTRIBUTING.md`, `SECURITY.md`
 
 ## Commands and results
 
-Local gates (Windows, GNU fallback for native tests):
-
 | Command | Result |
 |---|---|
+| `cargo test -p nexus-protocol --test conformance` | 8 passed |
 | `cargo fmt --all -- --check` | Passed |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
-| `cargo test --workspace` | 372 Rust tests passed |
+| `cargo test --workspace` | 380 passed, 0 failed, 52 suites |
 | `cargo deny check` | Passed |
-| `cargo audit` | No vulnerability reported |
-| `.\gradlew.bat spotlessCheck detekt` | Passed |
-| Shared JVM tests | Passed, including the new packaged-resource load test |
-| `.\scripts\check_repo_hygiene.py` | Passed |
+| `cargo audit` | No vulnerability; one allowed `paste` unmaintained warning |
+| `.\scripts\build.ps1 -WithDependencyScan` | Passed; native Windows/Android artifacts, C harness, Gradle checks with committed locks, Rust gates, dependency scan, SBOM, and hygiene |
+| CycloneDX SBOM | 1,130 components (399 Cargo, 731 Maven) |
+| `package-release.ps1 -AllowUnsigned -AllowDirty` | Passed; SBOM and notice bundle emitted and verified |
+| CI on PR #28 | All seven jobs passed on `4c04d33`, including the Linux Android job and the Windows desktop job |
+| Repository hygiene | Passed; 377 files scanned |
 
-Release packaging:
+The full build finished in 8 minutes 10 seconds with `BUILD SUCCESSFUL`. The
+unsigned dry run is local evidence, not a published release.
 
-| Command | Result |
+## Launch blockers
+
+The public launch gate remains closed on:
+
+1. production Android keystore and Windows code-signing certificate;
+2. Android runtime, device, low-memory, battery, Doze, and poor-network evidence;
+3. Windows 11 runtime evidence;
+4. a reviewed SBOM and notice bundle, and verification metadata exercised on the
+   Linux Android release variants as well as the CI task set;
+5. independent client or operator interoperability evidence;
+6. a public infrastructure directory with independent operators;
+7. UI wiring from the Kotlin screens to the Rust core for the flows a release
+   would claim;
+8. closed alpha or beta feedback;
+9. project-owner approval of launch, support, governance, and infrastructure
+   policy.
+
+A coding agent cannot close items 1, 5, 6, 8, or 9.
+
+## Stage 19 summary
+
+Stage 19 built the release pipeline and produced test-signed artifacts:
+
+- per-user Windows MSI with a stable upgrade UUID and no elevation;
+- portable Windows ZIP;
+- signed Android APK and AAB with environment-driven signing;
+- checksums, release manifest, packaging, verification, and performance
+  scripts;
+- a tag/manual release workflow;
+- release, performance, compatibility, signing, reproducibility,
+  update/rollback, and accessibility documents.
+
+Verified evidence:
+
+| Item | Result |
 |---|---|
-| `.\scripts\package-release.ps1 -Version 0.1.0 -AllowDirty` with test signing | Passed; APK, AAB, MSI, ZIP, checksums, manifest |
-| `.\scripts\verify-release.ps1 -Directory .\dist\0.1.0 -RequireSigned` | Passed |
-| `:apps:androidApp:assembleRelease` / `bundleRelease` | Passed |
-| `:apps:desktopApp:createDistributable` / `packageMsi` | Passed |
-| MSI install | Exit 0, installed 0.1.0 |
-| Installed launch | 2,887 ms to main window |
-| MSI upgrade 0.1.0 -> 0.1.1 | Exit 0, product version 0.1.1 |
-| MSI uninstall | Exit 0, install directory and uninstall entry removed |
-| Portable ZIP launch | 2,890 ms to main window |
-| APK signature | `apksigner` v2 verified, 1 signer |
-| AAB signature | `jarsigner` `jar verified` with self-signed warnings |
-
-Performance (3 runs, 180-second soak, Windows 10 19045, i5-10300H, 16 GB):
-
-| Metric | Result |
-|---|---|
+| APK | 64,282,841 bytes, SHA-256 `fb020582...df86c` |
+| AAB | 23,285,459 bytes, SHA-256 `15b21e02...5c91` |
+| MSI | 74,465,280 bytes, SHA-256 `2669b08b...256e63` |
+| Portable ZIP | 73,063,852 bytes, SHA-256 `1f52e12a...30655f` |
+| MSI install / upgrade / uninstall | Passed |
+| Installed launch | 2,887 ms |
+| Portable launch | 2,890 ms |
 | Median startup | 2,805 ms |
-| Median working set | 207.1 MiB |
-| Idle CPU | 0.021% of the machine |
-| 180-second idle growth | 0.9 MiB |
-| App image | 154.3 MiB |
-| MSI | 71.0 MiB |
-| APK / AAB | 61.3 MiB / 22.2 MiB |
+| Working set | 207.1 MiB |
+| Idle CPU | 0.021% |
+| 180-second growth | 0.9 MiB |
 
-## Errors and failed attempts
+The artifacts are test-signed. The self-signed Windows certificate reports
+`UnknownError` trust, and the Android signature is valid but not publicly
+trusted. See [STAGE_19.md](progress/STAGE_19.md) for the full record.
 
-- Unquoted `-PemberVersion=1.2.3` reached Gradle as `1`. The packaging script
-  now passes the argument as a quoted string.
-- The MSI needs an explicit package version and Windows segment limits. Both are
-  enforced in the script.
-- Windows PowerShell 5.1 mishandled `@lockArgs` for native commands; cargo
-  received a bare `-`. The script now builds an explicit argument array.
-- jpackage marks `Ember.exe` read-only; signing now clears and restores the
-  attribute.
-- `apksigner.bat` returns -1 to PowerShell on success. Verification calls it
-  through `cmd.exe` and checks the `Verifies` line.
-- `Compress-Archive` writes backslash ZIP entries. Verification accepts both
-  separators.
-- Reinstalling the same MSI from a different path failed with 1603 while a stale
-  0.1.0 product was registered. Uninstalling first produced clean evidence.
-- `--strip-unneeded` removed symbols read by verification; `--strip-debug` keeps
-  exported symbols and removes debug sections.
-- An early app image contained duplicate native DLLs from manual staging. Gradle
-  now owns the staged copy.
+## Decisions
 
-## Decisions and unresolved questions
-
-Decisions:
-
-- The Windows package is a per-user MSI. ADR-0009 is amended from Inno Setup.
-- Release signing is entirely environment-driven; builds fail closed without it.
-- The portable ZIP is described as an unsigned container with a signed
-  executable, not as a signed artifact.
-- Test signing used an ephemeral Android key and a self-signed Windows
-  certificate, both deleted after the run.
-- No telemetry or crash reporting was added. A future reporter needs explicit
-  opt-in, local preview, and redaction.
-- No chunk, hash, or index tuning was made without a realistic workload.
-- Production versions remain `0.1.0`; release overrides use Gradle properties.
-
-Unresolved:
-
-- Android runtime, low-memory device, battery, Doze, and network evidence.
-- Poor Wi-Fi, mobile, IPv6, and network-change testing.
-- Production Android keystore and Windows code-signing certificate.
-- Windows 11 runtime testing.
-- Uninstall keep/remove prompt for future user data.
-- Gradle dependency locking, verification metadata, and CycloneDX SBOM.
-- Localization and screen-reader testing.
-- Closed alpha and beta with real users.
+- Protocol v1 is documented publicly; the Rust implementation is the reference
+  implementation, not the specification by itself.
+- The conformance suite is self-conformance and is not described as independent
+  interoperability.
+- Governance and moderation are local-first. The project claims no global
+  content authority and no network-wide ban.
+- The infrastructure directory is a reviewed hint list, not an authority. It is
+  not published while no independent operator exists.
+- Network health remains local-only. Any future reporting needs explicit
+  opt-in, preview, aggregation, suppression, and a privacy review.
+- Test-signed artifacts are never described as a public release.
+- No launch date is promised.
 
 ## Exact next action
 
-1. Stage 19 is committed, pushed, and verified in PR #26 against `main`.
-2. Keep PR #26 open for review; do not merge it without project-owner approval.
-3. Do not start Stage 20. It requires explicit approval and a decision on how to
-   collect the missing Android and network evidence.
+1. Keep PR #28 open against `feat/19-release`; do not merge it without approval.
+2. Obtain project-owner approval to open `feat/19-release` -> `main` so Stage 20
+   and the launch-readiness follow-up reach `main`.
+3. Obtain production signing material and collect Android and Windows 11
+   evidence before any public release.
+4. Run a closed alpha or beta and record failures.
+5. Recruit an independent client implementer or operator, or explicitly scope a
+   limited preview without an interoperability claim.
+6. Obtain owner approval for governance, disclosure, directory, and launch
+   policy.
+7. Review and approve the generated third-party notice bundle.
+8. Re-run the full release gate before publishing any artifact.

@@ -23,6 +23,14 @@ buildscript {
 allprojects {
     group = "io.nexus"
     version = providers.gradleProperty("emberVersion").getOrElse("0.1.0")
+
+    // Every resolvable configuration is locked. Lockfiles are committed and
+    // Gradle fails a build when a resolved module is absent from them. Run
+    // .\gradlew.bat --write-locks with the full task set after an intentional
+    // dependency change, then commit the updated gradle.lockfile files.
+    dependencyLocking {
+        lockAllConfigurations()
+    }
 }
 
 subprojects {

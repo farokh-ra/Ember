@@ -37,6 +37,11 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 

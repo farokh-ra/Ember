@@ -12,6 +12,8 @@ Read these first:
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [docs/LOGGING_POLICY.md](docs/LOGGING_POLICY.md)
 - [docs/decisions](docs/decisions/README.md)
+- [GOVERNANCE.md](GOVERNANCE.md), [SUPPORT.md](SUPPORT.md), and
+  [SECURITY.md](SECURITY.md)
 
 ## Before you start
 
@@ -125,6 +127,14 @@ Use the repository pull request template. Reviewers check architecture
 boundaries, error handling, accessibility, privacy, license compatibility, and
 the definition of done below.
 
+## Community standards
+
+Participation is covered by the [Code of Conduct](CODE_OF_CONDUCT.md). Be
+respectful, assume good faith, and keep disputes about code and behavior rather
+than people. Report conduct concerns privately to the project owner through the
+channel on the repository profile. [SUPPORT.md](SUPPORT.md) explains what is
+supported and what is not; there is no service-level agreement.
+
 ## Issues
 
 Use the provided bug report or feature request form. Include the commit or
@@ -183,9 +193,13 @@ reproduction, and any known mitigation.
 - No dynamic versions, version ranges, snapshots, or unapproved Git sources.
 - Do not add analytics, crash reporting, advertising, or account SDKs.
 - Run `cargo deny check` and `cargo audit` when Rust dependencies change.
-- Gradle dependency verification metadata is introduced before signed releases;
-  until then, review changes to `gradle/libs.versions.toml` and lockfiles
-  explicitly.
+- Gradle dependency locking and SHA-256 verification metadata are enabled and
+  committed. After an intentional dependency change, run
+  `.\scripts\update-dependency-locks.ps1`, review the generated lockfiles and
+  `gradle/verification-metadata.xml`, and commit them with the source change.
+- The CycloneDX SBOM and third-party notice bundle are generated from the locks by
+  `scripts/generate_sbom.py`. See
+  [docs/release/SBOM_AND_NOTICES.md](docs/release/SBOM_AND_NOTICES.md).
 
 ## Release conventions
 
@@ -195,7 +209,8 @@ reproduction, and any known mitigation.
 - `CHANGELOG.md` is updated before tagging.
 - Release notes are generated from `.github/release.yml` and reviewed manually.
 - Android APK/AAB and Windows installer artifacts are built by CI, signed with
-  release-environment keys, and published with SHA-256 checksums and an SBOM.
+  release-environment keys, and published with SHA-256 checksums, a CycloneDX
+  SBOM, and a third-party notice bundle.
 - Private signing keys, keystores, certificates, and passwords are never
   committed. They are supplied only through the release environment.
 - A release requires a clean checkout, all CI gates green, a completed
@@ -211,5 +226,7 @@ A change is done when:
 - Formatting, linting, static analysis, and repository hygiene pass.
 - Documentation, changelog, and architecture records are updated as needed.
 - No secrets or local machine paths are present.
+- Dependency changes include regenerated Gradle locks and verification metadata,
+  and the SBOM still generates.
 - The pull request title follows Conventional Commits and links the issue.
 - The change is reviewed and merged to `main`.

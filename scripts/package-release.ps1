@@ -299,6 +299,24 @@ try {
         Add-Artifact -List $artifacts -Path $zipTarget -Kind "windows-portable-zip" -Signed $false
     }
 
+    Write-Host "== Supply chain: CycloneDX SBOM and third-party notices =="
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -eq $python) {
+        throw "python is required to generate the SBOM and third-party notices."
+    }
+    $sbomTarget = Join-Path $releaseDir "Ember-$Version-sbom.cdx.json"
+    $noticesDir = Join-Path $releaseDir "notices"
+    $noticesTarget = Join-Path $releaseDir "Ember-$Version-third-party-notices.zip"
+    Invoke-NativeStep "SBOM and third-party notices" {
+        & $python.Source (Join-Path $PSScriptRoot "generate_sbom.py") `
+            --version $Version `
+            --sbom $sbomTarget `
+            --notices-dir $noticesDir 2>&1
+    }
+    Compress-Archive -LiteralPath $noticesDir -DestinationPath $noticesTarget -CompressionLevel Optimal -Force
+    Add-Artifact -List $artifacts -Path $sbomTarget -Kind "cyclonedx-sbom" -Signed $false
+    Add-Artifact -List $artifacts -Path $noticesTarget -Kind "third-party-notices" -Signed $false
+
     $checksumLines = @()
     foreach ($artifact in $artifacts) {
         $checksumLines += "$($artifact.sha256)  $($artifact.name)"
@@ -340,8 +358,14 @@ try {
             android = $androidSigned
             windows = $windowsSigned
         }
+        supplyChain = [ordered]@{
+            gradleDependencyLocking = $true
+            gradleVerificationMetadata = $true
+            sbom = "Ember-$Version-sbom.cdx.json"
+            thirdPartyNotices = "Ember-$Version-third-party-notices.zip"
+        }
         artifacts = $artifacts
-        notes = "Checksums describe the exact artifact bytes. See docs/release/ for verification and signing policy."
+        notes = "Checksums describe the exact artifact bytes. See docs/release/ for verification, supply-chain, and signing policy."
     }
 
     $manifestJson = $manifest | ConvertTo-Json -Depth 6

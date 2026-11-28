@@ -30,6 +30,10 @@ target/
 **/*.rs.bk
 *.pdb
 
+# Python helpers
+__pycache__/
+*.py[cod]
+
 # IDE and editor state
 .idea/
 *.iml

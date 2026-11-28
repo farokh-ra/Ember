@@ -1,0 +1,51 @@
+name: Release readiness
+description: Track the evidence required before a public release.
+title: "release: "
+labels:
+  - release
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue tracks the launch gate in `docs/release/KNOWN_LIMITATIONS.md`.
+        A checked box needs an artifact, a command output, or a signed review note.
+        Do not publish artifacts from this issue.
+  - type: input
+    id: version
+    attributes:
+      label: Candidate version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence links
+      description: Link the Stage record, CI run, device report, SBOM, and review notes.
+    validations:
+      required: true
+  - type: checkboxes
+    id: gate
+    attributes:
+      label: Launch gate
+      options:
+        - label: Production Android keystore and Windows code-signing certificate are configured and verified.
+        - label: Android runtime, device, low-memory, battery, Doze, and poor-network evidence is recorded.
+        - label: Windows 11 runtime evidence is recorded.
+        - label: Gradle locks, verification metadata, CycloneDX SBOM, and the third-party notice bundle are attached to the candidate.
+        - label: The security release checklist has no open high-severity item.
+        - label: The UI is wired to the core for every flow the release claims.
+        - label: At least one independent client or operator result exists, or the release is scoped as a limited preview without that claim.
+        - label: The project owner approved the launch, support policy, infrastructure plan, and governance documents.
+  - type: textarea
+    id: exceptions
+    attributes:
+      label: Accepted risks
+      description: List each remaining risk with severity, rationale, owner, and review date.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: This issue contains no secrets, keys, signing material, or personal data.
+          required: true
