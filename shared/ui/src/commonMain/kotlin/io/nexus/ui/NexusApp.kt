@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -68,9 +71,12 @@ public fun NexusApp(
     modifier: Modifier = Modifier,
 ) {
     val darkTheme = controller.state.themeMode.isDark(isSystemInDarkTheme())
+    val coreStatus by controller.coreStatus.collectAsState()
 
     NexusTheme(darkTheme = darkTheme) {
-        NexusAppFrame(controller = controller, modifier = modifier)
+        CompositionLocalProvider(LocalCoreStatus provides coreStatus) {
+            NexusAppFrame(controller = controller, modifier = modifier)
+        }
     }
 }
 

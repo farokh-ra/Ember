@@ -80,6 +80,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -102,6 +103,7 @@ android {
 
 dependencies {
     implementation(project(":shared:ui"))
+    implementation(project(":shared:core-client"))
     implementation(libs.compose.foundation)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.core.ktx)

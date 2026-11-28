@@ -431,6 +431,14 @@ public interface NexusStrings {
     public val settingsDiagnostics: String
     public val settingsDiagnosticsExport: String
     public val settingsDiagnosticsBody: String
+    public val settingsCoreStatus: String
+    public val settingsCoreProtocol: String
+    public val settingsCoreDetail: String
+    public val coreStatusReady: String
+    public val coreStatusStarting: String
+    public val coreStatusDegraded: String
+    public val coreStatusStopped: String
+    public val coreStatusUnavailable: String
     public val settingsPrivacyTitle: String
     public val settingsPrivacyBody: String
     public val settingsAbout: String
@@ -511,12 +519,14 @@ public interface NexusStrings {
     public val networkPreviewBody: String
 }
 
+/** English catalogue. The flat list is intentionally one object so lookups stay cheap. */
+@Suppress("LargeClass")
 public object EnglishNexusStrings : NexusStrings {
     override val appName: String = "Ember"
     override val appTagline: String = "Local-first file sharing"
     override val previewLabel: String = "Stage 04 UI preview"
     override val demoBadge: String = "DEMO DATA"
-    override val demoBannerShort: String = "Preview build — network features are inactive"
+    override val demoBannerShort: String = "Preview build â€” network features are inactive"
     override val demoBannerBody: String =
         "Identity, publishing, downloads, hosting, and networking are not active in Stage 04. " +
             "Everything shown is sample data."
@@ -526,7 +536,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val sampleReplica: String = "Sample replica"
     override val avatarDescription: (String) -> String = { name -> "Profile for $name" }
     override val openRecord: (String) -> String = { title -> "Open $title" }
-    override val demoNoOp: String = "Demo only — nothing was changed."
+    override val demoNoOp: String = "Demo only â€” nothing was changed."
     override val notAvailable: String = "Not available in this preview"
     override val notAvailableYet: String = "Not available yet"
     override val retry: String = "Retry"
@@ -556,7 +566,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val settings: String = "Settings"
     override val networkStatus: String = "Network status"
     override val publish: String = "Publish"
-    override val versionLine: String = "Ember 0.1.0 · Stage 04"
+    override val versionLine: String = "Ember 0.1.0 آ· Stage 04"
     override val sourceCount: (Int) -> String = { count -> "Sources: $count" }
     override val recordsCount: (Int) -> String = { count -> "$count records" }
     override val lastSeen: (String) -> String = { value -> "Last seen: $value" }
@@ -593,9 +603,9 @@ public object EnglishNexusStrings : NexusStrings {
     override val errorLocalStoreTitle: String = "Could not read local metadata"
     override val errorLocalStoreBody: String =
         "The local data store is unavailable. Retry, or open Settings for diagnostics."
-    override val stateDemoNote: String = "Demo state — no real operation is running."
+    override val stateDemoNote: String = "Demo state â€” no real operation is running."
 
-    override val welcomeEyebrow: String = "STAGE 04 · UI PREVIEW"
+    override val welcomeEyebrow: String = "STAGE 04 آ· UI PREVIEW"
     override val welcomeTitle: String = "Find files. Keep the network human."
     override val welcomeBody: String =
         "Ember is a local-first way to publish and discover files. Your identity lives on your device, " +
@@ -632,7 +642,7 @@ public object EnglishNexusStrings : NexusStrings {
         "In a later stage, losing your key will mean losing your identity unless you backed it up. " +
             "Stage 04 does not create a key or backup."
     override val identityDemoNote: String =
-        "Demo only — continuing opens a sample profile. Nothing is saved, signed, or published."
+        "Demo only â€” continuing opens a sample profile. Nothing is saved, signed, or published."
     override val identityContinue: String = "Continue with demo profile"
     override val identityNameErrorEmpty: String = "Enter a display name."
     override val identityNameErrorTooShort: String = "Use at least 2 characters."
@@ -644,7 +654,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val exploreTitle: String = "Explore"
     override val exploreSubtitle: String =
         "Browse discovered records by category. Explore is not a popularity feed."
-    override val exploreCoverage: String = "Demo index · sample records · freshness: sample data"
+    override val exploreCoverage: String = "Demo index آ· sample records آ· freshness: sample data"
     override val exploreCategories: String = "Filter by category"
     override val explorePublishPreview: String = "Preview the publish screen"
     override val exploreAvailableSection: String = "Available now"
@@ -655,9 +665,9 @@ public object EnglishNexusStrings : NexusStrings {
     override val exploreDemoNotice: String =
         "All records are sample data. Availability is simulated and is not a live observation."
     override val exploreCoverageOffline: String =
-        "Offline · cached local sample data only · network records may be missing"
+        "Offline آ· cached local sample data only آ· network records may be missing"
     override val exploreCoveragePartial: String =
-        "Partial coverage · some index providers are unavailable · results may be incomplete"
+        "Partial coverage آ· some index providers are unavailable آ· results may be incomplete"
     override val exploreShowing: (Int, Int) -> String = { shown, total ->
         "Showing $shown of $total sample records"
     }
@@ -697,7 +707,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val searchAction: String = "Search"
     override val searchClear: String = "Clear search"
     override val searchCoverage: String =
-        "Demo index only · results are not complete · freshness: sample data"
+        "Demo index only آ· results are not complete آ· freshness: sample data"
     override val searchResultCount: (Int) -> String = { count -> "Results: $count" }
     override val searchBlankTitle: String = "Search the demo catalogue"
     override val searchBlankBody: String =
@@ -708,9 +718,9 @@ public object EnglishNexusStrings : NexusStrings {
     override val searchPartial: String =
         "Partial results: this preview searches sample metadata only."
     override val searchCoverageOffline: String =
-        "Offline · cached local sample data only · results may be incomplete"
+        "Offline آ· cached local sample data only آ· results may be incomplete"
     override val searchCoveragePartial: String =
-        "Partial coverage · some index providers are unavailable · results may be incomplete"
+        "Partial coverage آ· some index providers are unavailable آ· results may be incomplete"
     override val searchShowing: (Int, Int) -> String = { shown, total ->
         "Showing $shown of $total results"
     }
@@ -847,7 +857,7 @@ public object EnglishNexusStrings : NexusStrings {
             "In this preview, no network action is performed."
     override val fileUnpublishDialogConfirm: String = "Unpublish (demo)"
     override val fileUnpublishDone: String =
-        "Demo only — the publication was not changed."
+        "Demo only â€” the publication was not changed."
 
     override val publishTitle: String = "Publish a file"
     override val publishSubtitle: String =
@@ -856,7 +866,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val publishUnavailableBody: String =
         "The Rust core supports signed publications, but this form is sample data. " +
             "It does not import, sign, or announce a file."
-    override val publishDemoForm: String = "Demo form — nothing is uploaded."
+    override val publishDemoForm: String = "Demo form â€” nothing is uploaded."
     override val publishFileLabel: String = "File"
     override val publishFileValue: String = "Choose a file"
     override val publishFileUnavailable: String =
@@ -887,7 +897,7 @@ public object EnglishNexusStrings : NexusStrings {
         "The Rust core signs the publication with your local identity. " +
             "The private key never enters the record or the network."
     override val publishAfterTitle: String = "Publication states"
-    override val publishAfterDemo: String = "Sample states — no record exists."
+    override val publishAfterDemo: String = "Sample states â€” no record exists."
     override val publishAfterContentId: String = "Content ID"
     override val publishAfterSignature: String = "Signature"
     override val publishAfterServing: String = "Serving"
@@ -920,7 +930,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val downloadsStatusDownloading: String = "Downloading"
     override val downloadsStatusPaused: String = "Paused"
     override val downloadsStatusVerifying: String = "Verifying"
-    override val downloadsStatusComplete: String = "Complete — verified"
+    override val downloadsStatusComplete: String = "Complete â€” verified"
     override val downloadsStatusFailed: String = "Failed"
     override val downloadsProgressLabel: String = "Progress"
     override val downloadsVerified: String = "Content verified"
@@ -934,7 +944,7 @@ public object EnglishNexusStrings : NexusStrings {
         "Deleting a download removes the local copy only. It does not affect other peers' copies or the " +
             "publication record. In this preview, no file is deleted."
     override val downloadsDeleteDialogConfirm: String = "Delete (demo)"
-    override val downloadsDeletedDone: String = "Demo only — no file was deleted."
+    override val downloadsDeletedDone: String = "Demo only â€” no file was deleted."
     override val downloadsEmptyTitle: String = "No demo downloads"
     override val downloadsEmptyBody: String =
         "Delete actions are simulated. Restore the sample list to keep exploring."
@@ -942,7 +952,7 @@ public object EnglishNexusStrings : NexusStrings {
     override val downloadsCompleteNote: String =
         "Completed downloads remain in the library until you delete or export them."
     override val downloadsVerifyingNote: String =
-        "Verifying chunks — completion is not claimed until every chunk proof passes."
+        "Verifying chunks â€” completion is not claimed until every chunk proof passes."
     override val downloadsFailedNote: String =
         "The source disappeared. Retrying a transfer is not active in this preview."
 
@@ -972,15 +982,15 @@ public object EnglishNexusStrings : NexusStrings {
         "Verification failed. This replica is not advertised or served."
     override val hostedPause: String = "Pause hosting (demo)"
     override val hostedResume: String = "Resume hosting (demo)"
-    override val hostedPausedDone: String = "Demo only — hosting was paused in this preview."
-    override val hostedResumedDone: String = "Demo only — hosting was resumed in this preview."
+    override val hostedPausedDone: String = "Demo only â€” hosting was paused in this preview."
+    override val hostedResumedDone: String = "Demo only â€” hosting was resumed in this preview."
     override val hostedRemove: String = "Stop hosting"
     override val hostedRemoveDialogTitle: String = "Stop hosting this demo replica?"
     override val hostedRemoveDialogBody: String =
         "This removes your replica and stops serving it. It does not change the original uploader's record " +
             "or copies held by other peers. In this preview, nothing is changed."
     override val hostedRemoveDialogConfirm: String = "Stop hosting (demo)"
-    override val hostedRemovedDone: String = "Demo only — hosting was not changed."
+    override val hostedRemovedDone: String = "Demo only â€” hosting was not changed."
     override val hostedEmptyTitle: String = "No demo hosted files"
     override val hostedEmptyBody: String =
         "Hosting actions are simulated. Restore the sample list to keep exploring."
@@ -1023,12 +1033,20 @@ public object EnglishNexusStrings : NexusStrings {
     override val settingsDiagnosticsBody: String =
         "Diagnostics export arrives in a later stage. A redacted bundle will never include keys, " +
             "passphrases, or local paths."
+    override val settingsCoreStatus: String = "Core"
+    override val settingsCoreProtocol: String = "Protocol"
+    override val settingsCoreDetail: String = "Detail"
+    override val coreStatusReady: String = "Ready"
+    override val coreStatusStarting: String = "Starting"
+    override val coreStatusDegraded: String = "Degraded"
+    override val coreStatusStopped: String = "Stopped"
+    override val coreStatusUnavailable: String = "Unavailable"
     override val settingsPrivacyTitle: String = "Privacy"
     override val settingsPrivacyBody: String =
         "No telemetry is enabled by default. Demo settings and sample data stay on this device."
     override val settingsAbout: String = "About"
     override val settingsAboutVersion: String = "Ember 0.1.0"
-    override val settingsAboutBuild: String = "Stage 04 UI preview · no core connection"
+    override val settingsAboutBuild: String = "Prototype UI - demo content, native core status shown in Diagnostics"
     override val settingsLicenses: String = "Open-source licenses"
     override val settingsLicensesBody: String =
         "License inventory is documented in the repository."
