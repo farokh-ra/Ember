@@ -36,12 +36,40 @@ tasks
         dependsOn(stageNativeCore, stageAppNotices)
     }
 
+val generatedAppVersionDir = layout.buildDirectory.dir("generated/app-version")
+
+val generateAppVersion =
+    tasks.register("generateAppVersion") {
+        val version = emberVersion
+        val outputDir = generatedAppVersionDir
+        inputs.property("version", version)
+        outputs.dir(outputDir)
+        doLast {
+            val file = outputDir.get().file("io/nexus/desktop/AppVersion.kt").asFile
+            file.parentFile.mkdirs()
+            file.writeText(
+                """
+                |package io.nexus.desktop
+                |
+                |/** Version injected from the `emberVersion` Gradle property. */
+                |internal const val APP_VERSION: String = "$version"
+                |
+                """.trimMargin(),
+            )
+        }
+    }
+
 kotlin {
     jvmToolchain(21)
+
+    // The app reports the same version Gradle packages so diagnostics and the
+    // MSI cannot drift from the declared release version.
+    sourceSets["main"].kotlin.srcDir(generateAppVersion)
 }
 
 dependencies {
     implementation(project(":shared:ui"))
+    implementation(project(":shared:core-client"))
     implementation(compose.desktop.currentOs)
 }
 

@@ -1,11 +1,14 @@
 package io.nexus.ui
 
+import io.nexus.core.api.CoreAvailability
+import io.nexus.core.api.CoreStatus
 import io.nexus.presentation.NexusAppState
 import io.nexus.presentation.PreviewNetworkState
 import io.nexus.presentation.PreviewScenario
 import io.nexus.presentation.ThemeMode
 import io.nexus.presentation.navigation.AppDestination
 import io.nexus.ui.theme.InMemoryThemeStore
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -111,5 +114,18 @@ class NexusAppControllerTest {
 
         store.save(ThemeMode.SYSTEM)
         assertEquals(ThemeMode.SYSTEM, store.load())
+    }
+
+    @Test
+    fun coreStatusComesFromTheShellRatherThanUiState() {
+        val status = MutableStateFlow(CoreStatus.unavailable("native library is not available"))
+        val controller = NexusAppController(InMemoryThemeStore(), coreStatus = status)
+
+        assertEquals("native library is not available", controller.coreStatus.value.detail)
+        assertFalse(controller.coreStatus.value.isReady)
+
+        status.value = CoreStatus(CoreAvailability.READY, protocolVersion = "1.0")
+        assertTrue(controller.coreStatus.value.isReady)
+        assertEquals("1.0", controller.coreStatus.value.protocolVersion)
     }
 }

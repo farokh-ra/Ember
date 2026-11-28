@@ -21,6 +21,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val themeStore = AndroidThemeStore(applicationContext)
+        val coreHost = (application as EmberApplication).coreHost
 
         setContent {
             val controller =
@@ -32,11 +33,12 @@ class MainActivity : ComponentActivity() {
                                 NexusAppController(
                                     themeStore = themeStore,
                                     initialState = NexusAppState.fromPersistenceTokens(tokens),
+                                    coreStatus = coreHost.status,
                                 )
                             },
                         ),
                 ) {
-                    NexusAppController(themeStore = themeStore)
+                    NexusAppController(themeStore = themeStore, coreStatus = coreHost.status)
                 }
 
             BackHandler(enabled = controller.state.canGoBack) {

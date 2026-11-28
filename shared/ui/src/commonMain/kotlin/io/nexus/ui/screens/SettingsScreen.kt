@@ -15,7 +15,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import io.nexus.core.api.CoreAvailability
+import io.nexus.core.api.CoreStatus
 import io.nexus.presentation.ThemeMode
+import io.nexus.ui.LocalCoreStatus
 import io.nexus.ui.components.NexusActionRow
 import io.nexus.ui.components.NexusCard
 import io.nexus.ui.components.NexusChoiceChip
@@ -26,6 +29,7 @@ import io.nexus.ui.components.NexusSectionHeader
 import io.nexus.ui.components.StatusTone
 import io.nexus.ui.icons.NexusIcons
 import io.nexus.ui.resources.LocalNexusStrings
+import io.nexus.ui.resources.NexusStrings
 import io.nexus.ui.theme.NexusBreakpoints
 import io.nexus.ui.theme.NexusSpacing
 
@@ -228,7 +232,23 @@ private fun LanguageSection() {
 @Composable
 private fun DiagnosticsSection() {
     val strings = LocalNexusStrings.current
+    val coreStatus = LocalCoreStatus.current
     SettingsCard(title = strings.settingsDiagnostics) {
+        NexusKeyValue(
+            label = strings.settingsCoreStatus,
+            value = coreStatusLabel(coreStatus, strings),
+        )
+        NexusKeyValue(
+            label = strings.settingsCoreProtocol,
+            value = coreStatus.protocolVersion,
+            monospace = true,
+        )
+        coreStatus.detail?.let { detail ->
+            NexusKeyValue(
+                label = strings.settingsCoreDetail,
+                value = detail,
+            )
+        }
         NexusActionRow(
             title = strings.settingsDiagnosticsExport,
             subtitle = strings.settingsDiagnosticsBody,
@@ -243,6 +263,19 @@ private fun DiagnosticsSection() {
         )
     }
 }
+
+/** User-facing core availability label. Never claims more than the shell reports. */
+private fun coreStatusLabel(
+    status: CoreStatus,
+    strings: NexusStrings,
+): String =
+    when (status.availability) {
+        CoreAvailability.READY -> strings.coreStatusReady
+        CoreAvailability.STARTING -> strings.coreStatusStarting
+        CoreAvailability.DEGRADED -> strings.coreStatusDegraded
+        CoreAvailability.STOPPED -> strings.coreStatusStopped
+        CoreAvailability.UNAVAILABLE -> strings.coreStatusUnavailable
+    }
 
 @Composable
 private fun AboutSection() {
