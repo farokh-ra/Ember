@@ -138,6 +138,8 @@ Run the same gates locally that CI runs:
 | Rust tests | `cargo test --workspace` | `rust`, `rust-windows` |
 | Rust dependency policy | `cargo deny check` | `rust` |
 | Rust advisories | `cargo audit` | `rust` |
+| CycloneDX SBOM | `python scripts/generate_sbom.py --version 0.1.0 --sbom ...` | `supply-chain` |
+| Gradle lock drift | `git diff --exit-code -- '*gradle.lockfile' gradle/verification-metadata.xml` | `android` |
 | Dependency review | GitHub dependency review action | `dependency-review` |
 
 The aggregate local command is:
@@ -146,7 +148,9 @@ The aggregate local command is:
 .\scripts\build.ps1
 ```
 
-Add `-WithDependencyScan` to include `cargo deny check` and `cargo audit`.
+Add `-WithDependencyScan` to include `cargo deny check`, `cargo audit`, and SBOM
+generation. Gradle locking and verification metadata are enforced by the normal
+build.
 
 ### Proving that failures are detected
 
@@ -177,6 +181,7 @@ manual dispatch:
 |---|---|---|
 | `hygiene` | Ubuntu | No forbidden files or common credential patterns. |
 | `commit-convention` | Ubuntu | Pull request title follows Conventional Commits. |
+| `supply-chain` | Ubuntu | Committed Gradle locks and verification metadata, plus a valid CycloneDX SBOM. |
 | `rust` | Ubuntu | Formatting, Clippy, tests, documentation tests, license/advisory policy. |
 | `rust-windows` | Windows | Native MSVC workspace build and tests for the release target. |
 | `android` | Ubuntu | Formatting, detekt, debug APK, shared JVM tests, artifact upload. |
@@ -196,10 +201,13 @@ Dependabot pull requests are treated like any other change:
 
 1. Review the changelog and license of every updated package.
 2. Confirm the pin still matches `docs/architecture/DEPENDENCY_LICENSE_INVENTORY.md`.
-3. Run the full build, including `-WithDependencyScan`.
-4. Confirm no transitive license or advisory regression.
-5. Update the inventory and, if a major version changes, the relevant ADR.
-6. Merge only when all gates pass.
+3. Run `.\scripts\update-dependency-locks.ps1` and review the lockfile and
+   verification-metadata diff.
+4. Run the full build, including `-WithDependencyScan`.
+5. Confirm no transitive license or advisory regression, and confirm the SBOM
+   still generates.
+6. Update the inventory and, if a major version changes, the relevant ADR.
+7. Merge only when all gates pass.
 
 Do not accept a major Kotlin, Compose, AGP, Gradle, or Rust upgrade without
 checking the compatibility notes and rebuilding both applications. Toolchain
@@ -223,17 +231,19 @@ Releases are cut from `main` after the stage exit criteria are approved.
 6. Tag `main` with `v<version>`.
 7. The release environment supplies signing keys and runs
    `.\scripts\package-release.ps1 -Version <version>`. The script builds,
-   signs, writes `SHA256SUMS` and `release-manifest.json`, and runs
-   `verify-release.ps1`. Alternatively, push the tag and let
-   `.github/workflows/release.yml` run the same script with repository secrets.
-8. Verify the signatures, checksums, install, upgrade, and uninstall paths. The
-   Android APK/AAB, Windows MSI, portable ZIP, checksums, and manifest are the
-   published artifacts. See `docs/release/` for the evidence and policy.
+   signs, writes the CycloneDX SBOM and third-party notice bundle, writes
+   `SHA256SUMS` and `release-manifest.json`, and runs `verify-release.ps1`.
+   Alternatively, push the tag and let `.github/workflows/release.yml` run the
+   same script with repository secrets.
+8. Verify the signatures, checksums, SBOM, notice bundle, install, upgrade, and
+   uninstall paths. The Android APK/AAB, Windows MSI, portable ZIP, SBOM,
+   notices, checksums, and manifest are the published artifacts. See
+   `docs/release/` for the evidence and policy.
 
 No signing key, keystore, certificate, or password is committed or attached to a
 release note. Release artifacts are never built from an unlocked dependency
-graph. Gradle dependency locking is a known pre-release gap recorded in
-`docs/release/SIGNING_AND_REPRODUCIBILITY.md`.
+graph. Gradle locks and verification metadata are committed; see
+`docs/release/SBOM_AND_NOTICES.md`.
 
 ## 9. Hotfixes
 

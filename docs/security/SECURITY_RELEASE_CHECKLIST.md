@@ -129,13 +129,17 @@ document, or a signed review note. “Looks fine” is not evidence.
 - [ ] `Cargo.lock` is committed and matches the built artifacts.
 - [ ] The dependency and license inventory is current.
 - [ ] New dependencies were reviewed for license, maintenance, and known issues.
+- [ ] Gradle lockfiles and `gradle/verification-metadata.xml` are current and CI-verified.
+- [ ] The CycloneDX SBOM is attached, parses, and matches the release commit.
+- [ ] The third-party notice bundle is attached, contains the licence texts and mapping, and has no unexplained component.
 - [ ] No dependency phones home at runtime.
 - [ ] Native libraries and binaries ship from pinned, verified sources.
 
 ## 11. Release artifacts and signing
 
-- [ ] The release directory contains the APK, AAB, MSI, portable ZIP,
-      `SHA256SUMS`, and `release-manifest.json`.
+- [ ] The release directory contains the APK, AAB, MSI, portable ZIP, CycloneDX
+      SBOM, third-party notice bundle, `SHA256SUMS`, and
+      `release-manifest.json`.
 - [ ] `verify-release.ps1 -RequireSigned` passes on the exact published bytes.
 - [ ] Android artifacts carry the production signing identity, not the debug key
       or a test key.

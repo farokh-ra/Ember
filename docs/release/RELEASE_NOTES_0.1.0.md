@@ -90,8 +90,9 @@ upgrade UUID or the Android signing key. See
   Windows certificate. Verify signatures and checksums before distributing any
   build from this stage.
 - Windows 11 and Android devices were not available for runtime testing.
-- Third-party license notices for the bundled JDK and Compose runtime are not
-  packaged with the artifacts yet.
+- The release script produces a CycloneDX SBOM and a third-party notice bundle.
+  The bundle is generated best-effort and has not been reviewed by counsel. The
+  Windows application includes `LICENSE.md` and the notice summary.
 
 ## Verification
 
@@ -100,4 +101,5 @@ upgrade UUID or the Android signing key. See
 ```
 
 The script checks artifact sizes and digests, `SHA256SUMS`, APK and AAB
-signatures, MSI signer presence, and native-core payloads.
+signatures, MSI signer presence, native-core payloads, the CycloneDX SBOM, and
+the third-party notice bundle.

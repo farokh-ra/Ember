@@ -109,6 +109,50 @@ if ($extraChecksums.Count -gt 0) {
     Add-Failure "SHA256SUMS lists files that are not artifacts: $($extraChecksums -join ', ')."
 }
 
+$sbom = @($artifacts | Where-Object { $_.kind -eq "cyclonedx-sbom" }) | Select-Object -First 1
+if ($null -eq $sbom) {
+    if ($RequireSigned) {
+        Add-Failure "Manifest has no CycloneDX SBOM artifact."
+    }
+} else {
+    $sbomPath = Join-Path $Directory $sbom.name
+    try {
+        $sbomJson = Get-Content -LiteralPath $sbomPath -Raw | ConvertFrom-Json
+        if ($sbomJson.bomFormat -ne "CycloneDX" -or $sbomJson.specVersion -ne "1.5") {
+            Add-Failure "$($sbom.name) is not a CycloneDX 1.5 document."
+        } elseif (@($sbomJson.components).Count -lt 100) {
+            Add-Failure "$($sbom.name) has an implausibly small component list."
+        } else {
+            Write-Host "SBOM verified: $($sbom.name) ($(@($sbomJson.components).Count) components)"
+        }
+    } catch {
+        Add-Failure "$($sbom.name) is not valid JSON: $($_.Exception.Message)"
+    }
+}
+
+$noticeBundle = @($artifacts | Where-Object { $_.kind -eq "third-party-notices" }) | Select-Object -First 1
+if ($null -eq $noticeBundle) {
+    if ($RequireSigned) {
+        Add-Failure "Manifest has no third-party notice bundle."
+    }
+} else {
+    $noticePath = Join-Path $Directory $noticeBundle.name
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $noticeArchive = [System.IO.Compression.ZipFile]::OpenRead($noticePath)
+    try {
+        $noticeNames = @($noticeArchive.Entries | ForEach-Object { $_.FullName })
+    } finally {
+        $noticeArchive.Dispose()
+    }
+    if (-not ($noticeNames | Where-Object { $_ -match "THIRD_PARTY_NOTICES\.md$" })) {
+        Add-Failure "$($noticeBundle.name) does not contain THIRD_PARTY_NOTICES.md."
+    } elseif (-not ($noticeNames | Where-Object { $_ -match "license-files\.json$" })) {
+        Add-Failure "$($noticeBundle.name) does not contain license-files.json."
+    } else {
+        Write-Host "Third-party notice bundle verified: $($noticeBundle.name)"
+    }
+}
+
 $apk = @($artifacts | Where-Object { $_.kind -eq "android-apk" }) | Select-Object -First 1
 if ($null -ne $apk) {
     $apkPath = Join-Path $Directory $apk.name
@@ -238,6 +282,9 @@ if ($null -ne $zip) {
     }
     if (-not ($names | Where-Object { $_ -match "(^|[\\/])Ember\.exe$" })) {
         Add-Failure "$($zip.name) does not contain Ember.exe."
+    }
+    if (-not ($names | Where-Object { $_ -match "(^|[\\/])THIRD_PARTY_NOTICES\.md$" })) {
+        Add-Failure "$($zip.name) does not contain THIRD_PARTY_NOTICES.md."
     }
 }
 

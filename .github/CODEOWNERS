@@ -1,0 +1,14 @@
+# Ember code ownership
+#
+# The project is owner-led while the governance process is proposed. Review
+# routing is intentionally simple; add path owners only when a named maintainer
+# accepts the role in docs/governance/GOVERNANCE.md.
+
+* @farokh-ra
+
+/.github/ @farokh-ra
+/docs/ @farokh-ra
+/crates/ @farokh-ra
+/shared/ @farokh-ra
+/apps/ @farokh-ra
+/scripts/ @farokh-ra

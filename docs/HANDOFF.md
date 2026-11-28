@@ -2,10 +2,11 @@
 
 **Current stage:** 20 - global launch and ongoing network governance
 **Stage status:** Repository deliverables complete; public launch blocked
-**Last updated:** 2026-11-26
-**Branch:** `feat/20-launch`, stacked on Stage 19 `feat/19-release`
-**Pull requests:** #27 (`feat/20-launch` -> `feat/19-release`) is open; #26
-(`feat/19-release` -> `main`) is also open
+**Last updated:** 2026-11-27
+**Branch:** `chore/20-launch-readiness`, based on Stage 20 `feat/20-launch`
+**Pull requests:** #28 (`chore/20-launch-readiness` -> `feat/19-release`) is
+open; #27 (`feat/20-launch` -> `feat/19-release`) is merged as `4f38a8a`; #26
+(`feat/19-release` -> `main`) is merged as `2c2b7cf`
 **Next stage:** none in the roadmap; launch readiness and maintenance remain
 
 ## What Stage 20 adds
@@ -31,6 +32,32 @@ network needs, without pretending that a public launch has happened:
 
 The stage does **not** publish a release, create public infrastructure, or
 satisfy the production launch gate.
+
+## Launch-readiness follow-up
+
+A change on `chore/20-launch-readiness`, open as PR #28 against
+`feat/19-release`, closes the repository-side supply-chain gap and fills the
+community files. It still does not publish a release.
+
+- Gradle dependency locking is enabled for every project; one `gradle.lockfile`
+  per project and `settings-gradle.lockfile` are committed.
+- `gradle/verification-metadata.xml` records SHA-256 checksums for the resolved
+  plugin and Maven graph.
+- `scripts/generate_sbom.py` emits a deterministic CycloneDX 1.5 SBOM and an
+  optional third-party notice bundle.
+- `scripts/update-dependency-locks.ps1` regenerates the lock and verification
+  state after an intentional dependency change.
+- `package-release.ps1` emits the SBOM and notice bundle, records both in the
+  manifest, and `verify-release.ps1` rejects a missing or malformed bundle.
+- The Windows app image includes `LICENSE.md` and `THIRD_PARTY_NOTICES.md`.
+- `CODE_OF_CONDUCT.md`, `SUPPORT.md`, `GOVERNANCE.md`, `.github/CODEOWNERS`, and a
+  release-readiness issue form are added.
+- CI gains a supply-chain job and a lock-drift check.
+
+See [SBOM_AND_NOTICES.md](release/SBOM_AND_NOTICES.md) and
+[STAGE_20.md](progress/STAGE_20.md). The launch gate remains closed on signing,
+device evidence, independent interoperability, a reviewed notice bundle, and
+owner approval.
 
 ## Files changed
 
@@ -60,6 +87,7 @@ Release and project state:
 
 - `docs/release/KNOWN_LIMITATIONS.md` (new)
 - `docs/release/POST_LAUNCH_MAINTENANCE.md` (new)
+- `docs/release/SBOM_AND_NOTICES.md` (new)
 - `docs/release/README.md`
 - `docs/architecture/SIGNED_RECORD_FORMATS.md`
 - `docs/security/PRIVACY_REVIEW.md`
@@ -67,6 +95,22 @@ Release and project state:
 - `docs/HANDOFF.md`
 - `README.md`
 - `CHANGELOG.md`
+
+Supply chain and community files:
+
+- `gradle/verification-metadata.xml` (new)
+- `gradle.lockfile`, `settings-gradle.lockfile`, and one `gradle.lockfile` per
+  project (new)
+- `scripts/generate_sbom.py` (new)
+- `scripts/update-dependency-locks.ps1` (new)
+- `THIRD_PARTY_NOTICES.md` (new)
+- `CODE_OF_CONDUCT.md`, `SUPPORT.md`, `GOVERNANCE.md` (new)
+- `.github/CODEOWNERS` and `.github/ISSUE_TEMPLATE/release_readiness.yml` (new)
+- `.github/workflows/ci.yml`, `.github/pull_request_template.md`,
+  `.github/ISSUE_TEMPLATE/config.yml`
+- `scripts/package-release.ps1`, `scripts/verify-release.ps1`,
+  `scripts/build.ps1`, `build.gradle.kts`, `apps/desktopApp/build.gradle.kts`
+- `CONTRIBUTING.md`, `SECURITY.md`
 
 ## Commands and results
 
@@ -78,10 +122,14 @@ Release and project state:
 | `cargo test --workspace` | 380 passed, 0 failed, 52 suites |
 | `cargo deny check` | Passed |
 | `cargo audit` | No vulnerability; one allowed `paste` unmaintained warning |
-| `.\scripts\build.ps1 -WithDependencyScan` | Passed; native Windows/Android artifacts, C harness, Gradle checks, Rust gates, dependency scan, and hygiene |
-| Repository hygiene | Passed; 357 files scanned |
+| `.\scripts\build.ps1 -WithDependencyScan` | Passed; native Windows/Android artifacts, C harness, Gradle checks with committed locks, Rust gates, dependency scan, SBOM, and hygiene |
+| CycloneDX SBOM | 1,130 components (399 Cargo, 731 Maven) |
+| `package-release.ps1 -AllowUnsigned -AllowDirty` | Passed; SBOM and notice bundle emitted and verified |
+| CI on PR #28 | All seven jobs passed on `4c04d33`, including the Linux Android job and the Windows desktop job |
+| Repository hygiene | Passed; 377 files scanned |
 
-The full build finished in 6 minutes 12 seconds with `BUILD SUCCESSFUL`.
+The full build finished in 8 minutes 10 seconds with `BUILD SUCCESSFUL`. The
+unsigned dry run is local evidence, not a published release.
 
 ## Launch blockers
 
@@ -90,8 +138,8 @@ The public launch gate remains closed on:
 1. production Android keystore and Windows code-signing certificate;
 2. Android runtime, device, low-memory, battery, Doze, and poor-network evidence;
 3. Windows 11 runtime evidence;
-4. Gradle dependency locking, verification metadata, CycloneDX SBOM, and
-   packaged third-party notices;
+4. a reviewed SBOM and notice bundle, and verification metadata exercised on the
+   Linux Android release variants as well as the CI task set;
 5. independent client or operator interoperability evidence;
 6. a public infrastructure directory with independent operators;
 7. UI wiring from the Kotlin screens to the Rust core for the flows a release
@@ -152,16 +200,15 @@ trusted. See [STAGE_19.md](progress/STAGE_19.md) for the full record.
 
 ## Exact next action
 
-1. Keep PR #26 open; do not merge without project-owner approval.
-2. Keep PR #27 open against `feat/19-release`; do not merge it without
-   approval.
+1. Keep PR #28 open against `feat/19-release`; do not merge it without approval.
+2. Obtain project-owner approval to open `feat/19-release` -> `main` so Stage 20
+   and the launch-readiness follow-up reach `main`.
 3. Obtain production signing material and collect Android and Windows 11
    evidence before any public release.
-4. Complete dependency locking, verification metadata, SBOM, and third-party
-   notices.
-5. Run a closed alpha or beta and record failures.
-6. Recruit an independent client implementer or operator, or explicitly scope a
+4. Run a closed alpha or beta and record failures.
+5. Recruit an independent client implementer or operator, or explicitly scope a
    limited preview without an interoperability claim.
-7. Obtain owner approval for governance, disclosure, directory, and launch
+6. Obtain owner approval for governance, disclosure, directory, and launch
    policy.
+7. Review and approve the generated third-party notice bundle.
 8. Re-run the full release gate before publishing any artifact.
